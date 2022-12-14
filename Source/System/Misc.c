@@ -58,7 +58,7 @@ void DoAlert(const char* format, ...)
 	va_end(args);
 
 	printf("CMR Alert: %s\n", message);
-	SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Cro-Mag Rally", message, NULL);
+	SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Cro-Mag Rally", message, gSDLWindow);
 
 	Exit2D();
 }
@@ -77,7 +77,7 @@ void DoFatalAlert(const char* format, ...)
 	va_end(args);
 
 	printf("CMR Fatal Alert: %s\n", message);
-	SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Cro-Mag Rally", message, NULL);//gSDLWindow);
+	SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Cro-Mag Rally", message, gSDLWindow);
 
 	Exit2D();
 	CleanQuit();
@@ -99,6 +99,7 @@ static Boolean	beenHere = false;
 		SavePlayerFile();								// save player if any
 
 		EndNetworkGame();								// remove me from any active network game
+		ShutdownNetworkManager();
 
 		DisposeTerrain();								// dispose of any memory allocated by terrain manager
 		DisposeAllBG3DContainers();						// nuke all models
@@ -130,6 +131,11 @@ static Boolean	beenHere = false;
 
 #pragma mark -
 
+
+uint32_t GetRandomSeed(void)
+{
+	return seed0;
+}
 
 /******************** MY RANDOM LONG **********************/
 //
@@ -455,4 +461,15 @@ size_t snprintfcat(char* buf, size_t bufSize, char const* fmt, ...)
 	va_end(args);
 
 	return result;
+}
+
+
+
+void AdvanceTextCursor(int snprintfReturnCode, char** cursor, size_t* remainingSize)
+{
+	if (snprintfReturnCode > 0)
+	{
+		*cursor += snprintfReturnCode;
+		*remainingSize -= snprintfReturnCode;
+	}
 }

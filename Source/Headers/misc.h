@@ -10,6 +10,7 @@ void	DoAlert(const char* format, ...);
 POMME_NORETURN void DoFatalAlert(const char* format, ...);
 POMME_NORETURN void CleanQuit(void);
 extern	void SetMyRandomSeed(unsigned long seed);
+uint32_t GetRandomSeed(void);
 extern	unsigned long MyRandomLong(void);
 extern	Handle	AllocHandle(long size);
 extern	void *AllocPtr(long size);
@@ -26,6 +27,7 @@ float RandomFloat2(void);
 void SafeDisposePtr(Ptr ptr);
 void MyFlushEvents(void);
 size_t snprintfcat(char* buf, size_t bufSize, char const* fmt, ...);
+void AdvanceTextCursor(int snprintfReturnCode, char** cursor, size_t* remainingSize);
 
 #define ShowSystemErr(err) DoFatalAlert("Fatal system error: %d", err)
 #define ShowSystemErr_NonFatal(err) DoFatalAlert("System error: %d", err)

@@ -9,6 +9,7 @@ void DisplayPicture(const char* picturePath, float timeout);
 void DoPaused(void);
 void ShowAgePicture(int age);
 void ShowLoadingPicture(void);
+void SetupGenericMenuScreen(bool withEscPrompt);
 
 void DoMainMenuScreen(void);
 
@@ -28,7 +29,12 @@ Boolean DoVehicleSelectScreen(short whichPlayer, Boolean allowAborting);
 
 Boolean DoLocalGatherScreen(void);
 
+Boolean DoNetGatherScreen(void);
+void ShowPostGameNetErrorScreen(void);
+
 void DoPhysicsEditor(void);
 
 void RegisterSettingsMenu(const MenuItem* junk);
 
+void SetupNetPauseScreen(void);
+void RemoveNetPauseScreen(void);

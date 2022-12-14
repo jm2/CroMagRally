@@ -103,7 +103,7 @@ static const MenuItem gPauseMenuTree[] =
 /*    VARIABLES      */
 /*********************/
 
-Boolean gGamePaused = false;
+Boolean gSimulationPaused = false;
 
 
 /****************** TOGGLE SPLIT-SCREEN MODE ********************/
@@ -148,7 +148,20 @@ static void UpdatePausedMenuCallback(void)
 			/* IF DOING NET GAME, LET OTHER PLAYERS KNOW WE'RE STILL GOING SO THEY DONT TIME OUT */
 
 	if (gNetGameInProgress)
-		PlayerBroadcastNullPacket();
+	{
+		// Burn one net frame
+		if (gIsNetworkClient)
+		{
+			ClientReceive_ControlInfoFromHost();
+			// TODO: If net game died, bail here
+			ClientSend_ControlInfoToHost();
+		}
+		else
+		{
+			HostSend_ControlInfoToClients();
+			HostReceive_ControlInfoFromClients();
+		}
+	}
 }
 
 void DoPaused(void)
@@ -160,11 +173,12 @@ void DoPaused(void)
 	style.labelColor = (OGLColorRGBA){.7,.7,.7,1};
 	style.startButtonExits = true;
 
+	//TODO: PushKeys/PopKeys isn't implemented! Save analog?
 	PushKeys();										// save key state so things dont get de-synced during net games
 
 	PauseAllChannels(true);
 
-	gGamePaused = true;
+	gSimulationPaused = true;
 	gHideInfobar = true;
 
 				/*************/
@@ -176,10 +190,16 @@ void DoPaused(void)
 
 	int outcome = StartMenu(gPauseMenuTree, &style, UpdatePausedMenuCallback, DrawTerrain);
 
-	gGamePaused = false;
+	// In net games, we let PlayArea get us out of gSimulationPaused.
+	if (!gNetGameInProgress)
+	{
+		gSimulationPaused = false;
+	}
+
 	PauseAllChannels(false);
 	
 	PopKeys();										// restore key state
+
 
 	switch (outcome)
 	{
