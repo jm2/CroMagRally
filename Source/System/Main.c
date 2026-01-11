@@ -983,10 +983,33 @@ static void PlayArea(void)
 		/* MAIN GAME LOOP */
 		/******************/
 
+	//==========================================================================
+	// GAME LOOP
+	//==========================================================================
+
 	MakeFadeEvent(true);
+	
+	// Frame Skipping: Limit max skip to avoid infinite loop death spiral
+	const int kMaxFrameSkip = 5;
 
 	while(true)
 	{
+		int framesToSimulate = 1;
+		
+		// If we are a client, we might need to simulate multiple frames if we are behind
+		// (i.e. if multiple packets arrived at once)
+		bool doSkipRender = false;
+		
+		//
+		// SIMULATION LOOP
+		//
+		// We loop here to consume network packets. 
+		// If we process more than 1 packet, we skip rendering for the intermediate frames.
+		//
+		
+		for (int simLoop = 0; simLoop < framesToSimulate; simLoop++)
+		{
+
 				/******************************************/
 				/* GET CONTROL INFORMATION FOR THIS FRAME */
 				/******************************************/
@@ -1008,7 +1031,13 @@ static void PlayArea(void)
 
 		else if (gIsNetworkClient)
 		{
-			ClientReceive_ControlInfoFromHost();			// read all player's control info back from the Host once he's gathered it all
+			// If this is the first iteration, block until we get a packet (sync with host)
+			// If this is a catch-up iteration (simLoop > 0), we already have the packet from the peek
+			if (simLoop == 0)
+			{
+				ClientReceive_ControlInfoFromHost();			// read all player's control info back from the Host once he's gathered it all
+			}
+			// (else: we already consumed the packet in the check below)
 		}
 
 				/* NETWORK HOST */
@@ -1073,14 +1102,47 @@ static void PlayArea(void)
 				ClientSend_ControlInfoToHost();				// send this info to the host to be used the next frame
 		}
 
+		
+			/*******************************************/
+			/* CHECK FOR MORE PACKETS (FRAME SKIPPING) */
+			/*******************************************/
+			
+			if (gIsNetworkClient && gNetGameInProgress)
+			{
+				if (simLoop < kMaxFrameSkip)
+				{
+					// If there are more packets waiting, we should process them immediately
+					// instead of rendering. This allows us to catch up visually without "fast forwarding".
+                    // Client_CheckIfMorePacketsWaiting() consumes the packet if found.
+					if (Client_CheckIfMorePacketsWaiting())
+					{
+						framesToSimulate++; // Run the loop again!
+						doSkipRender = true;
+					}
+					else
+					{
+						doSkipRender = false;
+					}
+				}
+				else
+				{
+					// Hit limit, force render
+					doSkipRender = false;
+				}
+			}
+
+		} // END SIMULATION LOOP
+
 
 
 			/***************/
 			/* DRAW IT ALL */
 			/***************/
 
-		OGL_DrawScene(DrawTerrain);
-
+		if (!doSkipRender)
+		{
+			OGL_DrawScene(DrawTerrain);
+		}
 
 
 

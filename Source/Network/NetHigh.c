@@ -920,6 +920,54 @@ Boolean								gotIt = false;
 }
 
 
+/**************** CLIENT CHECK IF MORE PACKETS WAITING *****************/
+//
+// Returns true if there is another Host Control Info packet waiting in the buffer.
+//
+Boolean Client_CheckIfMorePacketsWaiting(void)
+{
+	if (!gNetGame)
+		return false;
+		
+	// Peek at the socket to see if there is data
+	// Note: NSpMessage_Get does a recv(), so we just try to get a message.
+	// Since we are non-blocking, this is effectively a peek if we don't break the message handling.
+	// However, NSpMessage_Get consumes the message.
+	// So we need to handle it OR peek.
+	
+	// Actually, looking at NSpMessage_GetAsClient loop in Main.c:
+	// The game loop calls ClientReceive_ControlInfoFromHost blocking.
+	// We want to know if we should loop *again*.
+	// BUT ClientReceive_ControlInfoFromHost *consumes* the message.
+	
+	// The plan says: "Refactor the game loop... if (morePackets) ClientReceive_PollControlInfo()"
+	// But ClientReceive_ControlInfoFromHost handles the message internally.
+	
+	// Let's implement this by peeking NSpMessage_Get and if it returns a specific message type, we handle it and return true.
+	
+	NSpMessageHeader* message = NSpMessage_Get(gNetGame);
+	if (message)
+	{
+		if (message->what == kNetHostControlInfoMessage)
+		{
+			// We got another frame! Handle it immediately.
+			Client_InGame_HandleHostControlInfoMessage((NetHostControlInfoMessageType*) message);
+			NSpMessage_Release(gNetGame, message);
+			return true;
+		}
+		else
+		{
+			// Some other message, handle it standard way
+			HandleOtherNetMessage(message);
+			NSpMessage_Release(gNetGame, message);
+			return false; // Not a control info packet, so don't skip frame for this
+		}
+	}
+	
+	return false;
+}
+
+
 
 /************** CLIENT SEND CONTROL INFO TO HOST *********************/
 //
