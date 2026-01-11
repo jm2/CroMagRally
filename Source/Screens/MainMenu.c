@@ -68,7 +68,7 @@ static const MenuItem gMainMenuTree[] =
 	{kMIPick, STR_2PLAYER,	.id=2, .callback=OnConfirmPlayMenu, .next='mpgm' },
 	{kMIPick, STR_3PLAYER,	.id=3, .callback=OnConfirmPlayMenu, .next='mpgm' },
 	{kMIPick, STR_4PLAYER,	.id=4, .callback=OnConfirmPlayMenu, .next='mpgm' },
-//	{kMIPick, STR_NET_GAME,	.id=0, .callback=OnConfirmPlayMenu, .next='netg' },
+	{kMIPick, STR_NET_GAME,	.id=0, .callback=OnConfirmPlayMenu, .next='netg' },
 
 	{ .id='optn' },
 	{
@@ -113,7 +113,7 @@ static const MenuItem gMainMenuTree[] =
 
 	{ .id='netg' },
 	{kMIPick, STR_HOST_NET_GAME, .callback=OnPickHostOrJoin, .id=0, .next='mpgm' }, // host gets to select game type
-	{kMIPick, STR_JOIN_NET_GAME, .callback=OnPickHostOrJoin, .id=1 },
+	{kMIPick, STR_JOIN_NET_GAME, .callback=OnPickHostOrJoin, .id=1, .next='EXIT' },
 
 	{ .id='clrs' },
 	{kMILabel, .text=STR_CLEAR_SAVED_GAME_TEXT_1 },
@@ -454,7 +454,7 @@ static void OnPickClearSavedGame(const MenuItem* mi)
 
 static void OnPickTagDuration(const MenuItem* mi)
 {
-	gGamePrefs.tagDuration = mi->id;
+	gTagDuration = mi->id;
 }
 
 #pragma mark -
@@ -479,7 +479,7 @@ static int IsTournamentAgeAvailable(const MenuItem* mi)
 
 static int GetLayoutFlagsForTournamentObjective(const MenuItem* mi)
 {
-	bool isEasy = gGamePrefs.difficulty <= DIFFICULTY_EASY;
+	bool isEasy = gDifficulty <= DIFFICULTY_EASY;
 
 	if (mi->text == STR_TOURNAMENT_OBJECTIVE_EASY)
 		return isEasy? 0: kMILayoutFlagHidden;

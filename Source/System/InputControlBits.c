@@ -48,13 +48,6 @@ void ReadKeyboard(void)
 	DoSDLMaintenance();
 
 
-			/* EMULATE THE ANALOG INPUT FOR STEERING */
-
-	for (int i = 0; i < gNumLocalPlayers; i++)
-	{
-		gPlayerInfo[i].analogSteering = GetAnalogSteering(i);
-	}
-
 #if _DEBUG
 	if (GetNewKeyState(SDL_SCANCODE_KP_1))		gPlayerInfo[0].superSuspensionTimer	+= 3;
 	if (GetNewKeyState(SDL_SCANCODE_KP_2))		gPlayerInfo[0].stickyTiresTimer		+= 3;
@@ -147,6 +140,11 @@ short	i;
 			/* BUILD "NEW" BITFIELD */
 
 	gPlayerInfo[playerNum].controlBits_New = (gPlayerInfo[playerNum].controlBits ^ old) & gPlayerInfo[playerNum].controlBits;
+
+
+			/* COPY ANALOG STEERING */
+
+	gPlayerInfo[playerNum].analogSteering = GetAnalogSteering(playerNum);
 }
 
 

@@ -48,7 +48,12 @@ void InitPlayerInfo_Game(void)
 {
 short	i;
 
-	SDL_memset(gPlayerInfo, 0, sizeof(gPlayerInfo));		// init everything to 0
+	// Back up gPlayerInfo before zeroing out the structs.
+	// HostSendGameConfigInfo is called prior to this function and it sets some network info we'll need.
+	PlayerInfoType* backup = (PlayerInfoType*) AllocPtr(sizeof(gPlayerInfo));
+	memcpy(backup, gPlayerInfo, sizeof(gPlayerInfo));
+
+	memset(gPlayerInfo, 0, sizeof(gPlayerInfo));		// init everything to 0
 
 	for (i = 0; i < MAX_PLAYERS; i++)
 	{
@@ -99,6 +104,9 @@ short	i;
 		gPlayerInfo[i].isComputer 	    = true;
 
 
+			/* NET */
+
+		gPlayerInfo[i].net = backup[i].net;
 	}
 
 			/* NETWORK GAME */
@@ -141,9 +149,11 @@ short	i;
 		default:
 				gNumTotalPlayers = gNumRealPlayers;				// no CPU players in battle modes
 				break;
-
-
 	}
+
+
+	SafeDisposePtr((Ptr) backup);
+	backup = NULL;
 }
 
 
@@ -186,7 +196,7 @@ Boolean	taken[NUM_LAND_CAR_TYPES];
 	{
 		if (gPlayerInfo[i].isComputer)									// set CPU vehicle type
 		{
-			if (gGamePrefs.difficulty == DIFFICULTY_HARD)				// in hard mode, the CPU can have duplicate cars
+			if (gDifficulty == DIFFICULTY_HARD)					// in hard mode, the CPU can have duplicate cars
 				gPlayerInfo[i].vehicleType = RandomRange(0, type);
 			else														// in other difficulty modes, only choose unique cars
 			{

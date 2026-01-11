@@ -214,6 +214,10 @@ endif()
 # Link core dependencies
 target_link_libraries(${GAME_TARGET} PRIVATE Pomme OpenGL::GL)
 
+if(WIN32)
+	target_link_libraries(${GAME_TARGET} PRIVATE ws2_32)
+endif()
+
 # Add required frameworks for KillMacMouseAcceleration
 if(APPLE)
 	target_link_libraries(${GAME_TARGET} PRIVATE "-framework Foundation" "-framework IOKit")

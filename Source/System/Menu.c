@@ -2161,9 +2161,6 @@ int StartMenu(
 		}
 	}
 
-	DoSDLMaintenance();
-	MyFlushEvents();
-
 	SetStandardMouseCursor();
 //	SDL_ShowCursor(cursorStateBeforeMenu);
 

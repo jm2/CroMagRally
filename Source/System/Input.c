@@ -329,7 +329,7 @@ void DoSDLMaintenance(void)
 			/*******************/
 			// When in-game, take a different path (see PlayArea)
 
-	if ((!gIsInGame || gGamePaused) && IsCmdQPressed())
+	if ((!gIsInGame || gSimulationPaused) && IsCmdQPressed())
 	{
 		CleanQuit();
 	}

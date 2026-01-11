@@ -13,6 +13,7 @@
 #include "miscscreens.h"
 #include "network.h"
 #include <SDL3/SDL.h>
+#include <stdio.h>
 
 
 /****************************/
@@ -62,14 +63,18 @@ OGLVector3D			gWorldSunDirection = { 1, -.2, 1};		// also serves as lense flare 
 OGLColorRGBA		gFillColor1 = { 1.0, 1.0, 1.0, 1.0 };
 OGLColorRGBA		gFillColor2 = { .5, .5, .5, 1.0 };
 
-uint32_t				gGameFrameNum = 0;
+uint32_t				gSimulationFrame = 0;
 
 Boolean				gNoCarControls = false;						// set if player has no control (for starting light et al)
 Boolean				gGameOver = false;
 Boolean				gTrackCompleted = false;
 float				gTrackCompletedCoolDownTimer = 0;
 
-int					gGameMode,gTheAge,gTrackNum;
+int					gGameMode;
+int					gTheAge;
+int					gTrackNum;
+int					gDifficulty = DIFFICULTY_MEDIUM;
+int					gTagDuration = 3;
 
 
 			/* BATTLE MODE VARS */
@@ -156,7 +161,6 @@ void InitDefaultPrefs(void)
 	gGamePrefs.splitScreenMode3P	= SPLITSCREEN_MODE_3P_TALL;
 	gGamePrefs.displayNumMinus1		= 0;			// main monitor by default
 	gGamePrefs.fullscreen			= true;
-	gGamePrefs.tagDuration 			= 3;
 	gGamePrefs.musicVolumePercent	= 60;			// careful to set these two volumes to one of the
 	gGamePrefs.sfxVolumePercent		= 60;			// the predefined values allowed in the settings menu
 
@@ -183,6 +187,9 @@ static Boolean PlayGame(void)
 
 	if (gNetGameInProgress)
 		SetDefaultPhysics();								// set all physics to defaults for net game
+
+	if (!gNetGameInProgress || gIsNetworkHost)
+		gDifficulty = gGamePrefs.difficulty;				// set transient difficulty for this game
 
 	if (!gIsSelfRunningDemo && gNumLocalPlayers > 1)
 	{
@@ -230,6 +237,9 @@ static Boolean PlayGame(void)
 
 	if (bailed)
 		return true;
+
+
+	ShowPostGameNetErrorScreen();
 
 
 		/* UPDATE ANY SAVED PLAYER FILE THAT'S ACTIVE */
@@ -365,7 +375,7 @@ static Boolean PlayGame_Tournament(void)
 Boolean	canAbort = true;									// player can abort only at beginning
 short	placeToWin,startStage;
 
-	if (gGamePrefs.difficulty <= DIFFICULTY_EASY)			// in easy mode, 3rd place will do
+	if (gDifficulty <= DIFFICULTY_EASY)						// in easy mode, 3rd place will do
 		placeToWin = 2;
 	else
 		placeToWin = 0;
@@ -393,7 +403,7 @@ short	placeToWin,startStage;
 		ShowAgePicture(gTheAge);
 
 		if (GetNumAgesCompleted() >= NUM_AGES					// if won game, then start stage @ 0
-			|| gGamePrefs.difficulty >= DIFFICULTY_HARD			// always start @ stage 0 in hard modes
+			|| gDifficulty >= DIFFICULTY_HARD					// always start @ stage 0 in hard modes
 			|| gTheAge < GetNumAgesCompleted())					// picked an age we've already completed, start @ stage 0
 		{
 			startStage = 0;
@@ -464,6 +474,10 @@ short	placeToWin,startStage;
 				&& !gGameOver														// dont do anything if we failed or bailed
 				&& gTrackNum+1 > GetNumTracksCompletedTotal())						// only if it's better than current progress
 			{
+				// We shouldn't save the player's progression during a net game.
+				// This shouldn't happen because tournament mode isn't available as a net game.
+				GAME_ASSERT(!gNetGameInProgress);
+
 				SDL_memcpy(gGamePrefs.tournamentProgression.tournamentLapTimes[gTrackNum],
 					   gPlayerInfo->lapTimes,
 					   sizeof(gPlayerInfo->lapTimes));
@@ -882,22 +896,78 @@ ObjNode* bigArrowhead = NULL;
 
 #pragma mark -
 
+
+/**************** CHECK FOR IN-GAME CHEAT INPUTS ************************/
+// Call this after ReadKeyboard
+
+static void CheckCheats(void)
+{
+	if (GetNewKeyState(SDL_SCANCODE_SCROLLLOCK))		// hide/show infobar
+	{
+		gHideInfobar = !gHideInfobar;
+	}
+
+			/* CHEATS BELOW AFFECT GAMEPLAY */
+
+	if (gNetGameInProgress)							// no cheating in net games
+	{
+		return;
+	}
+
+	if (IsCheatKeyComboDown())						// win race cheat
+	{
+		if (!gPlayerInfo[0].raceComplete)
+		{
+			gPlayerInfo[0].cheated = true;
+			PlayerCompletedRace(0);
+			gPlayerInfo[0].place = 0;
+			gPlayerInfo[0].raceComplete = true;
+			gPlayerInfo[0].numTokens = gTotalTokens = MAX_TOKENS;
+		}
+	}
+
+	if (GetKeyState(SDL_SCANCODE_L) &&
+		GetKeyState(SDL_SCANCODE_A) &&
+		GetNewKeyState(SDL_SCANCODE_P))
+	{
+		gPlayerInfo[0].cheated = true;
+		NextLap(0);
+	}
+}
+
+
+#pragma mark -
+
+
+
 /**************** PLAY AREA ************************/
 
 static void PlayArea(void)
 {
+	Boolean schedulePause = false;
+
+
 	/* IF DOING NET GAME THEN WAIT FOR SYNC */
 	//
 	// Need to wait for other players to finish loading art and when
 	// everyone is ready, then we can start all at once.
 	//
 
+	if (gNetGameInProgress)
+	{
+		if (gIsNetworkHost)
+			HostWaitForPlayersToPrepareLevel();
+		else if (gIsNetworkClient)
+			ClientTellHostLevelIsPrepared();
 
-	if (gIsNetworkHost)
-		HostWaitForPlayersToPrepareLevel();
-	else
-	if (gIsNetworkClient)
-		ClientTellHostLevelIsPrepared();
+		if (gNetSequenceState != kNetSequence_GameLoop)
+		{
+			// something went wrong
+			puts("Net sequence failed to enter game loop!");
+			EndNetworkGame();
+			return;
+		}
+	}
 
 
 			/* PREP STUFF */
@@ -924,49 +994,62 @@ static void PlayArea(void)
 				// Also gathers frame rate info for the net clients.
 				//
 
-				/* NETWORK CLIENT */
+				/* NON-NET */
 
-		if (gIsNetworkClient)
-		{
-			ClientReceive_ControlInfoFromHost();			// read all player's control info back from the Host once he's gathered it all
-		}
-
-				/* HOST OR NON-NET */
-		else
+		if (!gNetGameInProgress)
 		{
 			ReadKeyboard();									// read local keys
 			GetLocalKeyState();								// build a control state bitfield
 
-				/* NETWORK HOST*/
+			schedulePause = GetNewNeedStateAnyP(kNeed_UIPause);
+		}
 
-			if (gIsNetworkHost)
-			{
-				HostSend_ControlInfoToClients();			// now send everyone's key states to all clients
-			}
+				/* NETWORK CLIENT */
+
+		else if (gIsNetworkClient)
+		{
+			ClientReceive_ControlInfoFromHost();			// read all player's control info back from the Host once he's gathered it all
+		}
+
+				/* NETWORK HOST */
+		else
+		{
+			HostSend_ControlInfoToClients();			// now send everyone's key states to all clients
 		}
 
 
-				/****************/
-				/* MOVE OBJECTS */
-				/****************/
+				/**********************/
+				/* SIMULATE THE WORLD */
+				/**********************/
 
-		MoveEverything();
+		if (IsNetGamePaused())
+		{
+			gSimulationPaused = true;
+			SetupNetPauseScreen();
 
-				/* DO GAME MODE SPECIFICS */
+			MoveObjects();								// DON'T MoveEverything!!
+			DoPlayerTerrainUpdate();					// required to keep terrain meshes alive
+		}
+		else
+		{
+//			printf("Running simulation frame %u\n", gSimulationFrame);
 
-		UpdateGameModeSpecifics();
+			gSimulationPaused = false;
+			RemoveNetPauseScreen();
+
+			MoveEverything();
+			UpdateGameModeSpecifics();
+			DoPlayerTerrainUpdate();
+
+			gSimulationFrame++;
+		}
 
 
-			/* UPDATE THE TERRAIN */
 
-		DoPlayerTerrainUpdate();
-
-
-
-
-			/****************************/
-			/* SEND NET CLIENT KEY INFO */
-			/****************************/
+			/******************************************/
+			/* UPDATE LOCAL INPUTS FOR NEXT NET FRAME */
+			/* AND SEND CLIENT INPUTS                 */
+			/******************************************/
 			//
 			// We can do this anytime AFTER this frame's key control info is no longer needed.
 			// Since this will change the control bits, we MUST BE SURE that the bits are not
@@ -977,11 +1060,17 @@ static void PlayArea(void)
 			// complete - we essentially get this send for free!
 			//
 
-		if (gIsNetworkClient)
+		if (gNetGameInProgress)
 		{
 			ReadKeyboard();									// read local client keys
+
 			GetLocalKeyState();								// build a control state bitfield
-			ClientSend_ControlInfoToHost();					// send this info to the host to be used the next frame
+
+			schedulePause = GetNewNeedStateAnyP(kNeed_UIPause);
+			gPlayerInfo[gMyNetworkPlayerNum].net.pauseState = schedulePause;
+
+			if (gIsNetworkClient)
+				ClientSend_ControlInfoToHost();				// send this info to the host to be used the next frame
 		}
 
 
@@ -1022,44 +1111,28 @@ static void PlayArea(void)
 
 			/* CHECK CHEATS */
 
-		if (IsCheatKeyComboDown())						// win race cheat
+		if (!gNetGameInProgress)
 		{
-			if (!gPlayerInfo[0].raceComplete)
-			{
-				gPlayerInfo[0].cheated = true;
-				PlayerCompletedRace(0);
-				gPlayerInfo[0].place = 0;
-				gPlayerInfo[0].raceComplete = true;
-				gPlayerInfo[0].numTokens = gTotalTokens = MAX_TOKENS;
-			}
+			CheckCheats();
 		}
-
-		if (GetKeyState(SDL_SCANCODE_L) &&
-			GetKeyState(SDL_SCANCODE_A) &&
-			GetNewKeyState(SDL_SCANCODE_P))
-		{
-			gPlayerInfo[0].cheated = true;
-			NextLap(0);
-		}
-
-		if (GetNewKeyState(SDL_SCANCODE_SCROLLLOCK))		// hide/show infobar
-		{
-			gHideInfobar = !gHideInfobar;
-		}
-
 
 			/* SEE IF PAUSED */
 
-		if (!gIsSelfRunningDemo)
+		if (!gIsSelfRunningDemo && schedulePause)
 		{
-			if (GetNewNeedStateAnyP(kNeed_UIPause))
-				DoPaused();
+			RemoveNetPauseScreen();					// don't show pause menu on top of net pause message
+
+			DoPaused();
+			schedulePause = false;
+
+			gPlayerInfo[gMyNetworkPlayerNum].net.pauseState = 0;
 		}
+
+			/* UPDATE FRAMERATE AND SIM FRAME */
 
 		if (!gIsNetworkClient)						// clients dont need to calc frame rate since its passed to them from host.
 			CalcFramesPerSecond();
 
-		gGameFrameNum++;
 
 
 				/* SEE IF TRACK IS COMPLETED */
@@ -1195,7 +1268,7 @@ short				numPanes;
 		InitMyRandomSeed();
 	InitControlBits();
 
-	gGameFrameNum 		= 0;
+	gSimulationFrame 		= 0;
 	gGameOver 			= false;
 	gTrackCompleted 	= false;
 	gTotalTokens 		= 0;
@@ -1427,6 +1500,7 @@ short				numPanes;
 
 static void CleanupLevel(void)
 {
+	RemoveNetPauseScreen();		// free netpause objects if game ended during netpause
 	EndNetworkGame();
 	StopAllEffectChannels();
  	EmptySplineObjectList();
@@ -1654,7 +1728,27 @@ void GameMain(void)
 
 //	HideCursor();
 
-
+	if (gCommandLine.netHost)
+	{
+		gNetGameInProgress = true;
+		gIsNetworkHost = true;
+		gIsNetworkClient = false;
+		gGameMode = GAME_MODE_MULTIPLAYERRACE;
+		if (gCommandLine.bootToTrack != 0)
+			gTrackNum = gCommandLine.bootToTrack - 1;
+		if (!SetupNetworkHosting())
+			PlayGame();
+	}
+	else
+	if (gCommandLine.netJoin)
+	{
+		gNetGameInProgress = true;
+		gIsNetworkHost = false;
+		gIsNetworkClient = true;
+		if (!SetupNetworkJoin())
+			PlayGame();
+	}
+	else
 	if (gCommandLine.bootToTrack != 0)
 	{
 		gGameMode = GAME_MODE_PRACTICE;
@@ -1669,6 +1763,7 @@ void GameMain(void)
 		InitArea();
 		PlayArea();
 		CleanupLevel();
+		ShowPostGameNetErrorScreen();
 		gCommandLine.bootToTrack = 0;
 	}
 
