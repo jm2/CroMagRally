@@ -15,6 +15,7 @@ typedef int socklen_t;
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <netinet/tcp.h>
 #endif
 
 #include <errno.h>
@@ -328,6 +329,10 @@ NSpPlayerID NSpGame_AcceptNewClient(NSpGameReference gameRef)
 		goto fail;
 	}
 
+	// Disable Nagle's algorithm
+	int flag = 1;
+	setsockopt(newSocket, IPPROTO_TCP, TCP_NODELAY, (void *)&flag, sizeof(int));
+
 	// Find vacant player slot
 	for (int i = 0; i < MAX_PLAYERS; i++)
 	{
@@ -425,6 +430,14 @@ static sockfd_t CreateTCPSocket(bool bindIt)
 	if (bindIt && !MakeSocketNonBlocking(sockfd))
 	{
 		goto fail;
+	}
+
+	int flag = 1;
+	// Disable Nagle's algorithm. We want to send small packets immediately.
+	// This makes a huge difference in avoiding "rubber banding" lag!
+	if (-1 == setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, (void *)&flag, sizeof(int)))
+	{
+		printf("Warning: failed to set TCP_NODELAY: %d\n", GetSocketError());
 	}
 
 //	int set = 1;
