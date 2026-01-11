@@ -77,6 +77,8 @@ typedef struct NSpGame
 	float						timeToReadvertise;
 
 	uint32_t					cookie;
+	
+	int							nextPollIndex;
 } NSpGame;
 
 typedef struct
@@ -589,10 +591,11 @@ static NSpMessageHeader* NSpMessage_GetAsHost(NSpGame* game)
 	NSpMessageHeader* message = NULL;
 	bool brokenPipe = false;
 
-	for (int i = 0;
-		 i < MAX_CLIENTS && message == NULL;		// iterate over clients until we get a message from ONE of them
-		 i++)
+	int count = 0;
+	while (count < MAX_CLIENTS && message == NULL)
 	{
+		int i = (game->nextPollIndex + count) % MAX_CLIENTS;
+		count++;
 		NSpPlayer* player = &game->players[i];
 
 		if (!IsSocketValid(player->sockfd))
@@ -623,6 +626,9 @@ static NSpMessageHeader* NSpMessage_GetAsHost(NSpGame* game)
 		}
 		else if (message)
 		{
+			// Round-Robin: Start next search after this player
+			game->nextPollIndex = (i + 1) % MAX_CLIENTS;
+
 			// Force client ID. The client may not know their ID yet,
 			// and we don't want them to forge a bogus ID anyway.
 			message->from = player->id;
