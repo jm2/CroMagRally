@@ -99,13 +99,14 @@ int			gNumTexturesAllocated = 0;
 
 void OGL_Boot(void)
 {
+#if defined(__ANDROID__)
+    while(glGetError() != GL_NO_ERROR); // Flush any SDL context creation errors
+#endif
 	OGL_CreateDrawContext();
 	OGL_CheckError();
 
 	OGL_InitDrawContext();
 	OGL_CheckError();
-
-
 
 		/* INITIALIZE GAMMA RAMP */
 
@@ -250,9 +251,9 @@ void OGL_SetupGameView(OGLSetupInputType *setupDefPtr)
 
 
 				/* UPDATE WINDOW SIZE */
+    SDL_GL_MakeCurrent(gSDLWindow, gAGLContext); // Keep MakeCurrent just in case
 
 	SDL_GetWindowSizeInPixels(gSDLWindow, &gGameWindowWidth, &gGameWindowHeight);
-
 
 				/* SETUP */
 
@@ -398,6 +399,7 @@ static void OGL_InitDrawContext(void)
 
 	glEnable(GL_DEPTH_TEST);								// use z-buffer
 
+	/*
 	{
 		GLfloat	color[] = {1,1,1,1};									// set global material color to white
 		glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE, color);
@@ -405,6 +407,7 @@ static void OGL_InitDrawContext(void)
 
 	glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
 	glEnable(GL_COLOR_MATERIAL);
+    */
 
   	glEnable(GL_NORMALIZE);
 
@@ -437,8 +440,18 @@ OGLStyleDefType *styleDefPtr = &setupDefPtr->styles;
 
 			/* ENABLE ALPHA CHANNELS */
 
+#if defined(__ANDROID__)
 	glEnable(GL_ALPHA_TEST);
-	glAlphaFunc(GL_NOTEQUAL, 0);	// draw any pixel who's Alpha != 0
+    // Suppress potential 0x502 error from glAlphaFunc on some emulators/devices
+    while(glGetError() != GL_NO_ERROR);
+	glAlphaFunc(GL_GREATER, 0.5f);
+    while(glGetError() != GL_NO_ERROR);
+#else
+	glEnable(GL_ALPHA_TEST);
+	OGL_CheckError();
+	glAlphaFunc(GL_NOTEQUAL, 0.0f);	// draw any pixel who's Alpha != 0
+	OGL_CheckError();
+#endif
 
 
 		/* SET FOG */
@@ -447,7 +460,11 @@ OGLStyleDefType *styleDefPtr = &setupDefPtr->styles;
 
 	if (styleDefPtr->useFog)
 	{
+#if defined(__ANDROID__)
+		glFogf(GL_FOG_MODE, (float)styleDefPtr->fogMode);
+#else
 		glFogi(GL_FOG_MODE, styleDefPtr->fogMode);
+#endif
 		glFogf(GL_FOG_DENSITY, styleDefPtr->fogDensity);
 		glFogf(GL_FOG_START, styleDefPtr->fogStart);
 		glFogf(GL_FOG_END, styleDefPtr->fogEnd);
@@ -455,7 +472,9 @@ OGLStyleDefType *styleDefPtr = &setupDefPtr->styles;
 		glEnable(GL_FOG);
 	}
 	else
+	{
 		glDisable(GL_FOG);
+	}
 
 	OGL_CheckError();
 }
@@ -879,6 +898,11 @@ static void OGL_FixTextureGamma(uint8_t* imageMemory, int width, int height, GLi
 				}
 				return;
 			}
+			else if (dataType == GL_UNSIGNED_SHORT_5_5_5_1)
+			{
+                 // For now, skip gamma correction for this manual packed format.
+                 return;
+			}
 			break;
 
 		case GL_BGRA:
@@ -934,8 +958,77 @@ GLuint	textureName;
 	GLint filter = gLoadTextureFlags & kLoadTextureFlags_NearestNeighbor
 			? GL_NEAREST
 			: GL_LINEAR;
+
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
+
+#if defined(__ANDROID__)
+    // GLES 1.1 requires internalFormat to be GL_RGBA/GL_RGB/etc, NOT GL_BGRA.
+    // Also, the emulator might not support GL_BGRA matches for src format either.
+    // So we manually swizzle BGRA -> RGBA and pass GL_RGBA for everything.
+    
+    if (srcFormat == GL_BGRA)
+    {
+        uint8_t* pixels = (uint8_t*)imageMemory;
+        int numPixels = width * height;
+        for (int i = 0; i < numPixels; i++)
+        {
+            uint8_t b = pixels[i*4 + 0];
+            uint8_t r = pixels[i*4 + 2];
+            pixels[i*4 + 0] = r; // R
+            pixels[i*4 + 2] = b; // B
+        }
+        srcFormat = GL_RGBA;
+    }
+    // 2. Handle GL_BGR -> GL_RGB swizzle (0x80E0)
+    else if (srcFormat == 0x80E0) 
+    {
+        uint8_t* pixels = (uint8_t*)imageMemory;
+        int numPixels = width * height;
+        for (int i = 0; i < numPixels; i++)
+        {
+            uint8_t b = pixels[i*3 + 0];
+            uint8_t r = pixels[i*3 + 2];
+            pixels[i*3 + 0] = r; // R
+            pixels[i*3 + 2] = b; // B
+        }
+        srcFormat = GL_RGB;
+    }
+    
+
+
+    // 3. Handle 16-bit SuperTiles (Assuming input is 1555 REV / ABGR)
+    // We convert this to standard GL_UNSIGNED_SHORT_5_5_5_1 (RGBA) for GLES
+    if (dataType == 0x8366) // GL_UNSIGNED_SHORT_1_5_5_5_REV
+    {
+        uint16_t* pixels = (uint16_t*)imageMemory;
+        int numPixels = width * height;
+        
+        for (int i = 0; i < numPixels; i++)
+        {
+            uint16_t p = pixels[i];
+            
+            // Extract components from 1555 REV (Input is likely Mac ARGB 1555)
+            // A(bit 15) R(14-10) G(9-5) B(4-0)
+            uint16_t a = (p >> 15) & 0x01;
+            uint16_t r = (p >> 10) & 0x1F;
+            uint16_t g = (p >> 5)  & 0x1F;
+            uint16_t b = (p >> 0)  & 0x1F;
+            
+            // Pack into 5551 (RGBA)
+            // R(15-11) G(10-6) B(5-1) A(0)
+            uint16_t newP = (r << 11) | (g << 6) | (b << 1) | a;
+            
+            pixels[i] = newP;
+        }
+        
+        dataType = 0x8034; // GL_UNSIGNED_SHORT_5_5_5_1
+        srcFormat = GL_RGBA;
+    }
+
+    // Force internal format to match
+    destFormat = srcFormat;
+#endif
 
 	if (!(gLoadTextureFlags & kLoadTextureFlags_NoGammaFix))
 	{

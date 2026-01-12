@@ -8,3 +8,7 @@ dist/
 .vs/
 .DS_Store
 *.user
+
+.vscode/
+log.txt
+Data/files.txt

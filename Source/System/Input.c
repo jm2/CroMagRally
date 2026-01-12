@@ -58,8 +58,66 @@ static SDL_Gamepad* TryOpenGamepadFromJoystick(SDL_JoystickID joystickID);
 static SDL_Gamepad* TryOpenAnyUnusedGamepad(bool showMessage);
 static int GetGamepadSlotFromJoystick(SDL_JoystickID joystickID);
 
-#pragma mark -
-/**********************/
+#if defined(__ANDROID__)
+static SDL_Sensor* gAccelerometer = NULL;
+static float gAndroidSteer = 0.0f;
+static float gAndroidGas = 0.0f;
+static float gAndroidBrake = 0.0f;
+
+static void InitAndroidInput(void)
+{
+	if (!gAccelerometer)
+	{
+        // Ensure touch events generate mouse events for menus
+        SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "1");
+
+		int num_sensors = 0;
+		SDL_SensorID* sensorIDs = SDL_GetSensors(&num_sensors);
+		if (sensorIDs)
+		{
+			for (int i = 0; i < num_sensors; ++i)
+			{
+				if (SDL_GetSensorTypeForID(sensorIDs[i]) == SDL_SENSOR_ACCEL)
+				{
+					gAccelerometer = SDL_OpenSensor(sensorIDs[i]);
+					if (gAccelerometer) break;
+				}
+			}
+			SDL_free(sensorIDs);
+		}
+	}
+}
+
+static void UpdateAndroidInput(void)
+{
+	if (gAccelerometer)
+	{
+		float data[3];
+		if (SDL_GetSensorData(gAccelerometer, data, 3) == 0)
+		{
+			// data[0] is X (left/right tilt in landscape usually? depends on device orientation)
+			// Assuming landscape: Y axis might be the roll.
+			// Let's try Y axis first for steering in landscape.
+			// Actually standard Android accelerometer:
+			// Landscape Left: +Y is Up.
+			// heavy tilt: Y goes to +/- 9.8.
+			
+			// Normalize Y / 4.0 to get some sensitivity range.
+			// Clamp to -1..1
+			float val = data[1] / 5.0f;
+			if (val < -1.0f) val = -1.0f;
+			if (val > 1.0f) val = 1.0f;
+			gAndroidSteer = val; 
+		}
+	}
+
+	// Touch for Gas/Brake
+	// SDL_StartTextInput() might interfere?
+	
+	// We'll use event loop for touch instead of polling states if possible,
+	// but polling touch devices is also possible.
+}
+#endif
 
 static inline void UpdateKeyState(KeyState* state, bool downNow)
 {
@@ -164,6 +222,14 @@ static void UpdateInputNeeds(void)
 
 //		downNow |= gMouseButtonStates[kb->mouseButton] & KEYSTATE_ACTIVE_BIT;
 
+#if defined(__ANDROID__)
+		if (i == kNeed_Forward && gAndroidGas > 0.5f) downNow = true;
+		if (i == kNeed_Backward && gAndroidBrake > 0.5f) downNow = true;
+		// Polarity check: -1 is Left, +1 is Right (Tentative)
+		if (i == kNeed_Left && gAndroidSteer < -0.3f) downNow = true;
+		if (i == kNeed_Right && gAndroidSteer > 0.3f) downNow = true;
+#endif
+
 		UpdateKeyState(&gNeedStates[i], downNow);
 	}
 }
@@ -234,6 +300,26 @@ static void UpdateGamepadSpecificInputNeeds(int gamepadNum)
 
 #pragma mark -
 
+#if defined(__ANDROID__)
+static void SimulateKey(SDL_Scancode key, bool down)
+{
+    SDL_Event event;
+    SDL_memset(&event, 0, sizeof(event));
+    event.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+    event.key.scancode = key;
+    event.key.down = down; // SDL3 uses 'bool down'
+    SDL_PushEvent(&event);
+}
+
+static SDL_Scancode GetMenuKeyFromTouch(float x, float y)
+{
+    if (y < 0.25f) return SDL_SCANCODE_UP;
+    if (y > 0.75f) return SDL_SCANCODE_DOWN;
+    if (x < 0.2f) return SDL_SCANCODE_ESCAPE;
+    return SDL_SCANCODE_RETURN;
+}
+#endif
+
 /**********************/
 /* PUBLIC FUNCTIONS   */
 /**********************/
@@ -272,7 +358,15 @@ void DoSDLMaintenance(void)
 
 			case SDL_EVENT_MOUSE_MOTION:
 				gMouseMotionNow = true;
+                SDL_Log("Mouse Motion: %f %f", event.motion.x, event.motion.y);
 				break;
+
+			case SDL_EVENT_MOUSE_BUTTON_DOWN:
+                SDL_Log("Mouse Button Down: %d", event.button.button);
+                break;
+            case SDL_EVENT_MOUSE_BUTTON_UP:
+                SDL_Log("Mouse Button Up: %d", event.button.button);
+                break;
 
 			case SDL_EVENT_MOUSE_WHEEL:
 				mouseWheelDelta += event.wheel.y;
@@ -299,6 +393,71 @@ void DoSDLMaintenance(void)
 			case SDL_EVENT_GAMEPAD_BUTTON_UP:
 				gUserPrefersGamepad = true;
 				break;
+
+#if defined(__ANDROID__)
+			case SDL_EVENT_FINGER_DOWN:
+			case SDL_EVENT_FINGER_MOTION:
+			{
+                // Only process gas/brake if in-game
+                if (gIsInGame) 
+                {
+                    // Simple scheme: Right half = Gas, Left half = Brake.
+                    // x is 0..1 normalized.
+                    if (event.tfinger.x > 0.5f)
+                    {
+                        gAndroidGas = 1.0f;
+                        gAndroidBrake = 0.0f;
+                    }
+                    else
+                    {
+                        gAndroidBrake = 1.0f;
+                        gAndroidGas = 0.0f;
+                    }
+                }
+                else if (event.type == SDL_EVENT_FINGER_DOWN)
+                {
+                    SDL_Log("Menu Touch! x: %f y: %f InGame: %d", event.tfinger.x, event.tfinger.y, gIsInGame);
+                    // Menu navigation
+                    SimulateKey(GetMenuKeyFromTouch(event.tfinger.x, event.tfinger.y), true);
+                }
+                else
+                {
+                    SDL_Log("Touch event ignored. Type: %d InGame: %d", event.type, gIsInGame);
+                }
+				break;
+			}
+
+			case SDL_EVENT_FINGER_UP:
+			{
+                if (gIsInGame)
+                {
+				    // Reset both? Or check if other fingers are down?
+				    // Simple stateless reset for now. Ideally track fingers.
+				    // If X > 0.5, gas off.
+				    if (event.tfinger.x > 0.5f) gAndroidGas = 0.0f;
+				    else gAndroidBrake = 0.0f;
+                }
+                else
+                {
+                    // Menu navigation release
+                    SimulateKey(GetMenuKeyFromTouch(event.tfinger.x, event.tfinger.y), false);
+                }
+				break;
+			}
+			case SDL_EVENT_SENSOR_UPDATE:
+			{
+				if (event.sensor.which == SDL_GetSensorID(gAccelerometer))
+				{
+					// event.sensor.data[0..2]
+					// Assuming landscape, Y is roll.
+					float val = event.sensor.data[1] / 5.0f; 
+					if (val < -1.0f) val = -1.0f;
+					if (val > 1.0f) val = 1.0f;
+					gAndroidSteer = val;
+				}
+				break;
+			}
+#endif
 		}
 	}
 
@@ -323,6 +482,13 @@ void DoSDLMaintenance(void)
 	{
 		UpdateGamepadSpecificInputNeeds(gamepadNum);
 	}
+
+#if defined(__ANDROID__)
+	InitAndroidInput();
+	UpdateAndroidInput();
+	// Events handled below, but maybe some polling needed?
+#endif
+
 
 			/*******************/
 			/* CHECK FOR CMD+Q */
@@ -459,6 +625,24 @@ static float GetAnalogValue(int needID, int playerID)
 	{
 		return 1.0f;
 	}
+
+#if defined(__ANDROID__)
+	if (playerID == 0) // Only player 0 gets Android controls
+	{
+		if (needID == kNeed_Forward) return gAndroidGas;
+		if (needID == kNeed_Backward) return gAndroidBrake;
+		// Steering map: AndroidSteer is -1 (Right) to +1 (Left) or similar.
+		// If steer > 0 (Left), return it for kNeed_Left.
+		if (needID == kNeed_Right && gAndroidSteer > 0) return gAndroidSteer;
+		if (needID == kNeed_Left && gAndroidSteer < 0) return -gAndroidSteer; 
+		// Actually let's check polarity during testing. 
+		// Usually tilt right -> Y positive? No, fast check:
+		// Phone flat. Tilt right (monitor clockwise). Left side goes up. Y axis points which way?
+		// Standard: Y points out top of phone.
+		// Tilt right: Y component of gravity becomes positive?
+		// Let's assume standard behavior and fix if inverted.
+	}
+#endif
 
 	if (gamepad->open)
 	{

@@ -8,6 +8,7 @@
 #include "Pomme.h"
 #include "PommeInit.h"
 #include "PommeFiles.h"
+#include <sstream>
 
 extern "C"
 {
@@ -32,6 +33,16 @@ static fs::path FindGameData(const char* executablePath)
 	if (!executablePath)
 		attemptNum = 2;
 
+#if defined(__ANDROID__)
+    char* prefPath = SDL_GetPrefPath("Pangea Software", "CroMagRally");
+    if (prefPath)
+    {
+        dataPath = fs::path(prefPath) / "Data";
+        SDL_free(prefPath);
+        goto verify;
+    }
+#endif
+
 tryAgain:
 	switch (attemptNum)
 	{
@@ -53,8 +64,9 @@ tryAgain:
 			throw std::runtime_error("Couldn't find the Data folder.");
 	}
 
-	attemptNum++;
+    attemptNum++;
 
+verify:
 	dataPath = dataPath.lexically_normal();
 
 	// Set data spec -- Lets the game know where to find its asset files
@@ -133,10 +145,91 @@ static void Boot(int argc, char** argv)
 
 	// Find path to game data folder
 	const char* executablePath = argc > 0 ? argv[0] : NULL;
+
+#if defined(__ANDROID__)
+    // On Android, extract assets to internal storage because the game expects a real filesystem
+    const char* prefPath = SDL_GetPrefPath("Pangea Software", "CroMagRally");
+    if (prefPath)
+    {
+        fs::path destDir = fs::path(prefPath) / "Data";
+        
+        // Simple check: if Data/System/gamecontrollerdb.txt exists, assume we extracted already.
+        // A more robust check would use a version file.
+        if (!fs::exists(destDir / "System" / "gamecontrollerdb.txt"))
+        {
+            SDL_Log("Extracting assets to %s...", destDir.c_str());
+            fs::create_directories(destDir);
+
+            // Read file list
+            size_t fileSize;
+            void* fileData = SDL_LoadFile("Data/files.txt", &fileSize);
+            if (fileData)
+            {
+                std::string fileList((char*)fileData, fileSize);
+                SDL_free(fileData);
+
+                std::stringstream ss(fileList);
+                std::string line;
+                while (std::getline(ss, line))
+                {
+                    if (line.empty()) continue;
+                    
+                    // Remove \r if present
+                    if (line.back() == '\r') line.pop_back();
+
+                    // line is like "Data/System/foo.dat"
+                    // We want to read "line" from assets, and write to prefPath/line
+
+                    // Create parent directories
+                    fs::path filePath = fs::path(prefPath) / line;
+                    fs::create_directories(filePath.parent_path());
+
+                    // Copy
+                    size_t dataSize;
+                    void* data = SDL_LoadFile(line.c_str(), &dataSize);
+                    if (data)
+                    {
+                        SDL_SaveFile(reinterpret_cast<const char*>(filePath.u8string().c_str()), data, dataSize);
+                        SDL_free(data);
+                        SDL_Log("Extracted: %s", line.c_str());
+                    }
+                    else
+                    {
+                        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to load asset: %s", line.c_str());
+                    }
+                }
+            }
+            else
+            {
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Could not find Data/files.txt in assets!");
+            }
+        }
+        else
+        {
+            SDL_Log("Assets already extracted to %s", destDir.c_str());
+        }
+        
+        // Point FindGameData logic to this new path
+        // We trick FindGameData by passing the executable path as if it was in the dir
+        // Actually FindGameData (case 2) just checks "Data". 
+        // We should just return the path directly here or modify FindGameData.
+        // Let's modify FindGameData to accept an override or just handle it here.
+    }
+#endif
+
 	fs::path dataPath = FindGameData(executablePath);
+#if defined(__ANDROID__)
+    if (prefPath)
+    {
+        dataPath = fs::path(prefPath) / "Data";
+    }
+#endif
 
 	// Load game prefs before starting
 	LoadPrefs();
+    
+    // Ensure touch events emulate mouse for menus
+    SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "1");
 
 retryVideo:
 	// Initialize SDL video subsystem
@@ -144,11 +237,22 @@ retryVideo:
 	{
 		throw std::runtime_error("Couldn't initialize SDL video subsystem.");
 	}
+    
+#if defined(__ANDROID__)
+    SDL_Log("Requesting ES 1.1 Context...");
+#endif
 
 	// Create window
+#if defined(__ANDROID__)
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 1);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
+    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24); // Critical for avoiding Z-fighting on Android
+#else
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+#endif
 
 	gCurrentAntialiasingLevel = gGamePrefs.antialiasingLevel;
 	if (gCurrentAntialiasingLevel != 0)
@@ -160,6 +264,13 @@ retryVideo:
 	gSDLWindow = SDL_CreateWindow(
 		GAME_FULL_NAME " " GAME_VERSION, 640, 480,
 		SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+
+    if (gSDLWindow)
+    {
+        SDL_GL_MakeCurrent(gSDLWindow, SDL_GL_CreateContext(gSDLWindow));
+        SDL_Log("GL_VERSION: %s", glGetString(GL_VERSION));
+        SDL_Log("GL_RENDERER: %s", glGetString(GL_RENDERER));
+    }
 
 	if (!gSDLWindow)
 	{

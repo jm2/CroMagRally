@@ -1,0 +1,31 @@
+plugins {
+     id 'com.android.application'
+}
+
+def buildWithCMake = project.hasProperty('BUILD_WITH_CMAKE');
+
+android {
+    namespace "io.jor.cromagrally"
+    compileSdkVersion 35
+    defaultConfig {
+        applicationId "io.jor.cromagrally"
+        minSdkVersion 21
+        targetSdkVersion 35
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+    lint {
+        abortOnError false
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+}

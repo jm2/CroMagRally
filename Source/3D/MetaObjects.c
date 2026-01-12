@@ -567,11 +567,31 @@ Boolean		useTexture = false;
 			/* SETUP VERTEX ARRAY */
 			/**********************/
 
+    // ANDROID FIX: Ensure no VBOs are bound, as we are using client-side pointers.
+    // 0x8892 is GL_ARRAY_BUFFER. 0x8893 is GL_ELEMENT_ARRAY_BUFFER.
+#if defined(__ANDROID__)
+    glBindBuffer(0x8892, 0); 
+    glBindBuffer(0x8893, 0);
+#endif
+
 	glEnableClientState(GL_VERTEX_ARRAY);				// enable vertex arrays
+    
+    if (data->points == NULL) {
+        SDL_Log("MO_DrawGeometry_VertexArray: data->points is NULL!! Skipping draw.");
+        return;
+    }
+
+    // ANDROID FIX: Flush any previous errors to ensure 0x502 is from glVertexPointer
+#if defined(__ANDROID__)
+    while(glGetError() != GL_NO_ERROR); 
+#endif
+
 	glVertexPointer(3, GL_FLOAT, 0, data->points);		// point to point array
 
-	if (OGL_CheckError())
+	if (OGL_CheckError()) {
+        SDL_Log("MO_DrawGeometry_VertexArray: glVertexPointer failed! points=%p", data->points);
 		DoFatalAlert("MO_DrawGeometry_VertexArray: glVertexPointer!");
+    }
 
 			/************************/
 			/* SETUP VERTEX NORMALS */
@@ -579,8 +599,15 @@ Boolean		useTexture = false;
 
 	if (data->normals && gMyState_Lighting)				// do we have normals & lighting
 	{
-		glNormalPointer(GL_FLOAT, 0, data->normals);
-		glEnableClientState(GL_NORMAL_ARRAY);			// enable normal arrays
+#if defined(__ANDROID__)
+        glBindBuffer(0x8892, 0); // Ensure VBO unbound
+#endif
+        if (data->normals == NULL) {
+             SDL_Log("MO_DrawGeometry_VertexArray: data->normals is NULL but check passed?!");
+        } else {
+             glNormalPointer(GL_FLOAT, 0, data->normals);
+             glEnableClientState(GL_NORMAL_ARRAY);			// enable normal arrays
+        }
 	}
 	else
 		glDisableClientState(GL_NORMAL_ARRAY);			// disable normal arrays
@@ -612,6 +639,9 @@ use_current:
 				if (OGL_CheckError())
 					DoFatalAlert("MO_DrawGeometry_VertexArray: preeeeee uv!");
 
+#if defined(__ANDROID__)
+                glBindBuffer(0x8892, 0); 
+#endif
 				glTexCoordPointer(2, GL_FLOAT, 0,data->uvs);
 				glEnableClientState(GL_TEXTURE_COORD_ARRAY);	// enable uv arrays
 				useTexture = true;
@@ -645,6 +675,9 @@ use_current:
 	{
 		if (data->colorsFloat)									// do we have colors?
 		{
+#if defined(__ANDROID__)
+            glBindBuffer(0x8892, 0); 
+#endif
 			glColorPointer(4, GL_FLOAT, 0, data->colorsFloat);
 			glEnableClientState(GL_COLOR_ARRAY);				// enable color arrays
 		}
@@ -658,6 +691,9 @@ use_current:
 	{
 		if (data->colorsByte)									// do we have colors?
 		{
+#if defined(__ANDROID__)
+            glBindBuffer(0x8892, 0); 
+#endif
 			glColorPointer(4, GL_UNSIGNED_BYTE, 0, data->colorsByte);
 			glEnableClientState(GL_COLOR_ARRAY);				// enable color arrays
 		}

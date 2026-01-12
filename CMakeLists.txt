@@ -95,7 +95,9 @@ endif()
 
 add_subdirectory(extern/Pomme)
 
-find_package(OpenGL REQUIRED)
+if(NOT ANDROID)
+	find_package(OpenGL REQUIRED)
+endif()
 
 #------------------------------------------------------------------------------
 # EXECUTABLE TARGET
@@ -110,6 +112,10 @@ file(GLOB_RECURSE GAME_SOURCES CONFIGURE_DEPENDS ${GAME_SRCDIR}/*.c ${GAME_SRCDI
 # Make source groups match file tree
 source_group(TREE ${GAME_SRCDIR} PREFIX "" FILES ${GAME_SOURCES})
 
+if(ANDROID)
+	list(APPEND GAME_SOURCES ${GAME_SRCDIR}/System/Android_GLES_Compatibility.c)
+endif()
+
 if(WIN32)
 	# Windows resource file
 	configure_file(${CMAKE_SOURCE_DIR}/packaging/win32.rc.in ${CMAKE_SOURCE_DIR}/packaging/${GAME_TARGET}.exe.rc)
@@ -119,7 +125,11 @@ elseif(APPLE)
 	set_source_files_properties(${CMAKE_SOURCE_DIR}/packaging/${GAME_TARGET}.icns PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
 endif()
 
-add_executable(${GAME_TARGET} ${GAME_SOURCES})
+if(ANDROID)
+	add_library(${GAME_TARGET} SHARED ${GAME_SOURCES})
+else()
+	add_executable(${GAME_TARGET} ${GAME_SOURCES})
+endif()
 
 target_include_directories(${GAME_TARGET} PRIVATE ${GAME_SRCDIR}/Headers)
 
@@ -212,7 +222,10 @@ else()
 endif()
 
 # Link core dependencies
-target_link_libraries(${GAME_TARGET} PRIVATE Pomme OpenGL::GL)
+target_link_libraries(${GAME_TARGET} PRIVATE Pomme)
+if(NOT ANDROID)
+	target_link_libraries(${GAME_TARGET} PRIVATE OpenGL::GL)
+endif()
 
 if(WIN32)
 	target_link_libraries(${GAME_TARGET} PRIVATE ws2_32)
@@ -314,6 +327,10 @@ if(WIN32)
 
 	# When installing (cmake --install), copy Visual Studio redistributable DLLs to install location
 	include(InstallRequiredSystemLibraries)
+endif()
+
+if(ANDROID)
+	target_link_libraries(${GAME_TARGET} PRIVATE log android EGL GLESv1_CM OpenSLES)
 endif()
 
 # Copy documentation to output folder
