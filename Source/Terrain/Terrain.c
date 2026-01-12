@@ -766,8 +766,12 @@ uint32_t			pictRowBytes;
 
 
 		/* GET CURRENT CAMERA COORD */
-
-	cameraCoord = gGameView->cameraPlacement[gCurrentSplitScreenPane].cameraLocation;
+	// Fix: Overlay pane (gNumSplitScreenPanes) uses an uninitialized camera
+	// Clamp to valid player camera index for terrain culling
+	int validCamPane = gCurrentSplitScreenPane;
+	if (validCamPane >= gNumSplitScreenPanes)
+		validCamPane = 0;  // Fall back to first player's camera
+	cameraCoord = gGameView->cameraPlacement[validCamPane].cameraLocation;
 
 
 		/* UPDATE CYCLORAMA COORD INFO */
@@ -791,11 +795,70 @@ uint32_t			pictRowBytes;
   	glDisable(GL_NORMALIZE);											// turn off vector normalization since scale == 1
     glDisable(GL_BLEND);												// no blending for terrain - its always opaque
 
+    // Debug: Log the current ModelView matrix (ALL platforms for Linux vs Android comparison)
+    {
+        static int matLogCounter = 0;
+        if (matLogCounter++ % 60 == 0) {
+            GLint matrixMode;
+            glGetIntegerv(GL_MATRIX_MODE, &matrixMode);
+            SDL_Log("TERRAIN: MatrixMode=0x%x (MODELVIEW=0x%x, PROJECTION=0x%x)", matrixMode, GL_MODELVIEW, GL_PROJECTION);
+            
+            GLfloat mv[16];
+            glGetFloatv(GL_MODELVIEW_MATRIX, mv);
+            SDL_Log("TERRAIN: ModelView[12-15]=(%.1f,%.1f,%.1f,%.1f)", mv[12], mv[13], mv[14], mv[15]);
+            
+            GLfloat proj[16];
+            glGetFloatv(GL_PROJECTION_MATRIX, proj);
+            SDL_Log("TERRAIN: Projection[10-15]=(%.1f,%.1f,%.1f,%.1f,%.1f,%.1f)", proj[10], proj[11], proj[12], proj[13], proj[14], proj[15]);
+        }
+    }
+
+#if defined(__ANDROID__)
+    // Minimal logging only - removed debug drawing code
+    static int matLogCounter = 0;
+    if (matLogCounter++ % 120 == 0) {
+        GLfloat mv[16];
+        glGetFloatv(GL_MODELVIEW_MATRIX, mv);
+        SDL_Log("TERRAIN: ModelView[12-15]=(%.1f,%.1f,%.1f,%.1f)", mv[12], mv[13], mv[14], mv[15]);
+    }
+    
+    // PRECISION TEST: Draw triangles at different coordinate scales to find where gl4es fails
+    {
+        // Get actual camera position to draw near it
+        OGLPoint3D camPos = gGameView->cameraPlacement[0].cameraLocation;
+        
+        glDisable(GL_TEXTURE_2D);
+        glDisable(GL_LIGHTING);
+        glColor4f(1.0f, 1.0f, 0.0f, 1.0f);  // YELLOW
+        
+        // Draw triangle 100 units in front of camera (should work)
+        glBegin(GL_TRIANGLES);
+        glVertex3f(camPos.x - 50.0f, camPos.y - 500.0f, camPos.z - 100.0f);
+        glVertex3f(camPos.x + 50.0f, camPos.y - 500.0f, camPos.z - 100.0f);
+        glVertex3f(camPos.x,        camPos.y - 400.0f, camPos.z - 100.0f);
+        glEnd();
+        
+        // Log camera position
+        if ((matLogCounter-1) % 120 == 0) {
+            SDL_Log("PRECISION TEST: camPos=(%.1f,%.1f,%.1f)", camPos.x, camPos.y, camPos.z);
+        }
+        
+        glColor4f(1.0f, 1.0f, 1.0f, 1.0f);  // Reset color
+        glEnable(GL_TEXTURE_2D);
+        glEnable(GL_LIGHTING);
+    }
+#endif
+
 	gNumSuperTilesDrawn	= 0;
 
 	/******************************************************************/
 	/* SCAN THE SUPERTILE GRID AND LOOK FOR USED & VISIBLE SUPERTILES */
 	/******************************************************************/
+
+	static int frameCounter = 0;
+	frameCounter++;
+	int usedCount = 0;
+	int visibleCount = 0;
 
 	for (r = 0; r < gNumSuperTilesDeep; r++)
 	{
@@ -812,8 +875,14 @@ uint32_t			pictRowBytes;
 			}
 #endif
 
+			if (r == 17 && c == 8) {
+				SDL_Log("Render RC(17,8) Flags=%d", gSuperTileStatusGrid[r][c].statusFlags);
+			}
+
 			if (gSuperTileStatusGrid[r][c].statusFlags & SUPERTILE_IS_USED_THIS_FRAME)			// see if used
 			{
+				usedCount++;
+
 #if TERRAIN_DEBUG_GWORLD
 				if (gDebugMode == 2)
 				{
@@ -844,10 +913,41 @@ uint32_t			pictRowBytes;
 
 					/* SEE IF IS CULLED */
 
+#if defined(__ANDROID__)
+                // DEBUG: Skip ALL frustum culling to force terrain visible
+                // (leave cull check logic but just goto skip)
+                goto skip_cull_check;
+#endif
+
+#if defined(__ANDROID__)
+                // Debug: Log why tiles are being culled
+                if (r == 17 && c == 8 && (frameCounter % 60 == 0)) {
+                    SDL_Log("CullCheck RC(17,8): bbox min=(%.1f,%.1f,%.1f) max=(%.1f,%.1f,%.1f)",
+                        gSuperTileMemoryList[i].bBox.min.x,
+                        gSuperTileMemoryList[i].bBox.min.y,
+                        gSuperTileMemoryList[i].bBox.min.z,
+                        gSuperTileMemoryList[i].bBox.max.x,
+                        gSuperTileMemoryList[i].bBox.max.y,
+                        gSuperTileMemoryList[i].bBox.max.z);
+                    SDL_Log("CullCheck: Pane=%d Camera at (%.1f,%.1f,%.1f)",
+                        gCurrentSplitScreenPane, cameraCoord.x, cameraCoord.y, cameraCoord.z);
+                    Boolean isVis = OGL_IsBBoxVisible(&gSuperTileMemoryList[i].bBox);
+                    SDL_Log("CullCheck RC(17,8): OGL_IsBBoxVisible returned %d", isVis);
+                    // Force bypass culling for this tile for debugging
+                    if (!isVis) {
+                        goto skip_cull_check;
+                    }
+                }
+#endif
+
 				if (!OGL_IsBBoxVisible(&gSuperTileMemoryList[i].bBox))
 				{
 					continue;
 				}
+#if defined(__ANDROID__)
+skip_cull_check:
+#endif
+				visibleCount++;
 
 #if TERRAIN_DEBUG_GWORLD
 				if (gDebugMode == 2)
@@ -874,10 +974,93 @@ uint32_t			pictRowBytes;
 
 					/* SUBMIT THE GEOMETRY */
 
+#if defined(__ANDROID__)
+                // gl4es workaround: Camera Relative Rendering
+                // Textures Enabled, Lighting/Culling Disabled for safety visibility
+                {
+                    MOVertexArrayData *data = gSuperTileMemoryList[i].meshData;
+                    
+                    // 1. Get Camera Position
+                    OGLPoint3D camPos = gGameView->cameraPlacement[gCurrentSplitScreenPane].cameraLocation;
+                    
+                    // 2. Tile Origin
+                    float originX = data->points[0].x;
+                    float originY = data->points[0].y;
+                    float originZ = data->points[0].z;
+                    
+                    // 3. Relative Pos
+                    float relX = originX - camPos.x;
+                    float relY = originY - camPos.y;
+                    float relZ = originZ - camPos.z;
+
+                    // 4. Matrix Setup
+                    extern OGLMatrix4x4 gLocalToViewMatrix;
+                    GLfloat viewRot[16];
+                    for(int k=0; k<16; k++) viewRot[k] = gLocalToViewMatrix.value[k];
+                    viewRot[12] = 0.0f; viewRot[13] = 0.0f; viewRot[14] = 0.0f;
+                    
+                    glPushMatrix();
+                    glLoadMatrixf(viewRot);
+                    glTranslatef(relX, relY, relZ);
+                    
+                    // 5. STATE: Unlit White Textured (DIAGNOSTIC MODE)
+                    
+                    // Texture Setup
+                    glMatrixMode(GL_TEXTURE);
+                    glLoadIdentity();
+                    glMatrixMode(GL_MODELVIEW);
+                    glBindTexture(GL_TEXTURE_2D, textureName);
+                    glEnable(GL_TEXTURE_2D);
+                    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+                    
+                    // FORCE VISIBILITY: Disable everything that hides pixels
+                    glDisable(GL_CULL_FACE);
+                    glDisable(GL_LIGHTING);
+                    glDisable(GL_ALPHA_TEST);     
+                    glDisable(GL_BLEND);          
+                    
+                    // Force White (Textured) - Ignoring vertex colors for now as they might be dark
+                    glColor4f(1.0f, 1.0f, 1.0f, 1.0f); 
+                    
+                    // 6. Draw
+                    glBegin(GL_TRIANGLES);
+                    for (int t = 0; t < data->numTriangles; t++) {
+                        GLuint i0 = data->triangles[t].vertexIndices[0];
+                        GLuint i1 = data->triangles[t].vertexIndices[1];
+                        GLuint i2 = data->triangles[t].vertexIndices[2];
+                        
+                        // Vertex 0
+                        if (data->uvs) glTexCoord2f(data->uvs[i0].u, data->uvs[i0].v);
+                         // if (data->normals) glNormal3f(data->normals[i0].x, data->normals[i0].y, data->normals[i0].z); 
+                        glVertex3f(data->points[i0].x - originX, data->points[i0].y - originY, data->points[i0].z - originZ);
+                        
+                        // Vertex 1
+                        if (data->uvs) glTexCoord2f(data->uvs[i1].u, data->uvs[i1].v);
+                        glVertex3f(data->points[i1].x - originX, data->points[i1].y - originY, data->points[i1].z - originZ);
+
+                        // Vertex 2
+                        if (data->uvs) glTexCoord2f(data->uvs[i2].u, data->uvs[i2].v);
+                        glVertex3f(data->points[i2].x - originX, data->points[i2].y - originY, data->points[i2].z - originZ);
+                    }
+                    glEnd();
+                    
+                    // Restore States to prevent regression on other objects
+                    glEnable(GL_CULL_FACE);
+                    glEnable(GL_LIGHTING);
+                    glEnable(GL_ALPHA_TEST);
+                    
+                    glPopMatrix();
+                }
+#else
 				MO_DrawGeometry_VertexArray(gSuperTileMemoryList[i].meshData);
+#endif
 				gNumSuperTilesDrawn++;
 			}
 		}
+	}
+	
+	if (frameCounter % 60 == 0) {
+		SDL_Log("Terrain Frame %d: Used=%d, Visible=%d, Drawn=%d", frameCounter, usedCount, visibleCount, gNumSuperTilesDrawn);
 	}
 
 	OGL_PopState();
@@ -888,12 +1071,15 @@ uint32_t			pictRowBytes;
 	DrawSkidMarks();
 	DrawObjects();														// draw objNodes & fences
 
-		/*********************************************/
-		/* PREPARE SUPERTILE GRID FOR THE NEXT FRAME */
-		/*********************************************/
+						/*******************************************/
+						/* PREPARE SUPERTILE GRID FOR THE NEXT FRAME */
+						/*******************************************/
 
-	if (gCurrentSplitScreenPane != gNumSplitScreenPanes-1)				// if splitscreen, then don't do this until done with last player
+	// Fix: OGL_DrawScene runs gNumSplitScreenPanes+1 passes (Main + Overlay)
+	// Only clear flags after the FINAL pass to ensure all passes can see the USED bit
+	if (gCurrentSplitScreenPane < gNumSplitScreenPanes)				// defer clear until overlay pass
 		goto dont_prep_grid;
+
 
 	for (r = 0; r < gNumSuperTilesDeep; r++)
 	{
@@ -1239,9 +1425,14 @@ static const Byte gridMask[(SUPERTILE_ACTIVE_RANGE+SUPERTILE_ITEMRING_MARGIN)*2]
 	gHiccupTimer = 0;
 
 
+	static int updateLogTimer = 0;
+	updateLogTimer++;
+	bool doLog = (updateLogTimer % 60 == 0);
+
+	if (doLog) SDL_Log("TerrainUpdate: NumPlayers=%d", gNumTotalPlayers);
+
 	for (playerNum = 0; playerNum < gNumTotalPlayers; playerNum++)
 	{
-
 				/* CALC PIXEL COORDS OF FAR LEFT SUPER TILE */
 
 		x = gPlayerInfo[playerNum].camera.cameraLocation.x;
@@ -1252,6 +1443,12 @@ static const Byte gridMask[(SUPERTILE_ACTIVE_RANGE+SUPERTILE_ITEMRING_MARGIN)*2]
 
 		gCurrentSuperTileCol[playerNum] = x * TERRAIN_SUPERTILE_UNIT_SIZE_Frac;		// top/left row,col
 		gCurrentSuperTileRow[playerNum] = y * TERRAIN_SUPERTILE_UNIT_SIZE_Frac;
+
+		if (doLog) {
+			SDL_Log("TerrainUpdate P%d: Cam(%.2f, %.2f) ST_RC(%d, %d) Machine=%d Comp=%d", 
+				playerNum, x, y, gCurrentSuperTileRow[playerNum], gCurrentSuperTileCol[playerNum],
+				gPlayerInfo[playerNum].onThisMachine, gPlayerInfo[playerNum].isComputer);
+		}
 
 
 					/* SEE IF ROW/COLUMN HAVE CHANGED */
@@ -1303,6 +1500,12 @@ static const Byte gridMask[(SUPERTILE_ACTIVE_RANGE+SUPERTILE_ITEMRING_MARGIN)*2]
 					continue;
 				else
 				{
+					if (doLog && mask != 0) {
+						SDL_Log("TerrainUpdate P%d: Mask=%d at RC(%d,%d) ID=%d Flags=%d", 
+							playerNum, mask, row, col, 
+							gSuperTileTextureGrid[row][col].superTileID,
+							gSuperTileStatusGrid[row][col].statusFlags);
+					}
 					gSuperTileStatusGrid[row][col].playerHereFlags |= (1 << playerNum);						// remember which players are using this supertile
 
 								/*****************************************************/
@@ -1323,6 +1526,10 @@ static const Byte gridMask[(SUPERTILE_ACTIVE_RANGE+SUPERTILE_ITEMRING_MARGIN)*2]
     					}
     					else
 	    					gSuperTileStatusGrid[row][col].statusFlags |= SUPERTILE_IS_USED_THIS_FRAME;		// mark this as used
+
+                        if (row == 17 && col == 8) {
+                            SDL_Log("Update P%d RC(17,8) PostSet Flags=%d", playerNum, gSuperTileStatusGrid[row][col].statusFlags);
+                        }
     				}
 				}
 

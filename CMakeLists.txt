@@ -95,6 +95,20 @@ endif()
 
 add_subdirectory(extern/Pomme)
 
+if(ANDROID)
+	# Configure gl4es
+	set(ANDROID ON CACHE BOOL "" FORCE)
+	set(STATICLIB ON CACHE BOOL "" FORCE)
+	set(DEFAULT_ES 2 CACHE STRING "" FORCE)
+	set(NO_GBM ON CACHE BOOL "" FORCE)
+	set(NOX11 ON CACHE BOOL "" FORCE)
+	set(USE_ANDROID_LOG ON CACHE BOOL "" FORCE)
+	set(NO_INIT_CONSTRUCTOR ON CACHE BOOL "" FORCE)
+	
+	# We are building gl4es as a static lib to link into our shared lib
+	add_subdirectory(extern/gl4es)
+endif()
+
 if(NOT ANDROID)
 	find_package(OpenGL REQUIRED)
 endif()
@@ -113,7 +127,8 @@ file(GLOB_RECURSE GAME_SOURCES CONFIGURE_DEPENDS ${GAME_SRCDIR}/*.c ${GAME_SRCDI
 source_group(TREE ${GAME_SRCDIR} PREFIX "" FILES ${GAME_SOURCES})
 
 if(ANDROID)
-	list(APPEND GAME_SOURCES ${GAME_SRCDIR}/System/Android_GLES_Compatibility.c)
+	# Legacy compatibility file removed in favor of gl4es
+	# list(APPEND GAME_SOURCES ${GAME_SRCDIR}/System/Android_GLES_Compatibility.c)
 endif()
 
 if(WIN32)
@@ -132,6 +147,9 @@ else()
 endif()
 
 target_include_directories(${GAME_TARGET} PRIVATE ${GAME_SRCDIR}/Headers)
+if(ANDROID)
+	target_include_directories(${GAME_TARGET} PRIVATE extern/gl4es/include)
+endif()
 
 #------------------------------------------------------------------------------
 # COMPILER/LINKER OPTIONS
@@ -330,7 +348,8 @@ if(WIN32)
 endif()
 
 if(ANDROID)
-	target_link_libraries(${GAME_TARGET} PRIVATE log android EGL GLESv1_CM OpenSLES)
+	# Link gl4es (target GL)
+	target_link_libraries(${GAME_TARGET} PRIVATE log android EGL OpenSLES GL dl)
 endif()
 
 # Copy documentation to output folder

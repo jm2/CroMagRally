@@ -5,7 +5,7 @@
 #include <stdbool.h>
 
 #include "version.h"
-#include "Android_GLES_Compatibility.h"
+
 #include "globals.h"
 #include "3dmath.h"
 #include "objects.h"

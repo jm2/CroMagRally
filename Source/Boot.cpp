@@ -10,6 +10,10 @@
 #include "PommeFiles.h"
 #include <sstream>
 
+#if defined(__ANDROID__)
+#include <gl4esinit.h>
+#endif
+
 extern "C"
 {
 	#include "game.h"
@@ -140,6 +144,11 @@ static void Boot(int argc, char** argv)
 
 	ParseCommandLine(argc, argv);
 
+#if defined(__ANDROID__)
+    // Manually initialize gl4es since we disabled the constructor to avoid hangs
+    initialize_gl4es();
+#endif
+
 	// Start our "machine"
 	Pomme::Init();
 
@@ -239,14 +248,14 @@ retryVideo:
 	}
     
 #if defined(__ANDROID__)
-    SDL_Log("Requesting ES 1.1 Context...");
+    SDL_Log("Requesting ES 2.0 Context (for gl4es)...");
 #endif
 
 	// Create window
 #if defined(__ANDROID__)
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 1);
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24); // Critical for avoiding Z-fighting on Android
 #else
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);

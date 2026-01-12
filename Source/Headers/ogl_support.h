@@ -6,8 +6,9 @@
 
 #include "main.h"
 #if defined(__ANDROID__)
-#include <GLES/gl.h>
-#include <GLES/glext.h>
+#define GL_GLEXT_PROTOTYPES 1
+#include <GL/gl.h>
+#include <GL/glext.h>
 #else
 #include <SDL3/SDL_opengl.h>
 #endif

@@ -1357,7 +1357,12 @@ short				numPanes;
 	OGL_NewViewDef(&viewDef);
 
 	viewDef.camera.hither 			= 50;
+#if defined(__ANDROID__)
+	// Android terrain needs larger yon due to view-space distance calculations
+	viewDef.camera.yon 				= (SUPERTILE_ACTIVE_RANGE * SUPERTILE_SIZE * TERRAIN_POLYGON_SIZE) * 4;
+#else
 	viewDef.camera.yon 				= (SUPERTILE_ACTIVE_RANGE * SUPERTILE_SIZE * TERRAIN_POLYGON_SIZE);
+#endif
 	viewDef.camera.fov 				= GAME_FOV;
 
 	viewDef.view.clearColor.r 		= 0;
