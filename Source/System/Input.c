@@ -3,6 +3,7 @@
 // This file is part of Cro-Mag Rally. https://github.com/jorio/CroMagRally
 
 #include "game.h"
+#include <stdlib.h>
 
 extern SDL_Window* gSDLWindow;
 
@@ -60,16 +61,71 @@ static int GetGamepadSlotFromJoystick(SDL_JoystickID joystickID);
 
 #if defined(__ANDROID__)
 static SDL_Sensor* gAccelerometer = NULL;
-static float gAndroidSteer = 0.0f;
-static float gAndroidGas = 0.0f;
-static float gAndroidBrake = 0.0f;
+
+typedef struct {
+	SDL_FingerID id;
+	float x, y;
+	bool active;
+} VirtualFinger;
+
+#define MAX_TOUCH_FINGERS 10
+static VirtualFinger gFingers[MAX_TOUCH_FINGERS];
+static SDL_JoystickID gVirtualJoystickID = 0;
+static SDL_Joystick *gVirtualJoystick = NULL;
+
+typedef struct {
+	float stickX, stickY;
+	bool btnA, btnB, btnX, btnY, btnStart;
+} VirtualInputState;
+static VirtualInputState gVirtualInput = {0};
+
+static SDL_FingerID gJoystickFingerID = 0;
+static bool gJoystickFingerActive = false;
 
 static void InitAndroidInput(void)
 {
+	// Check for stale static state (Android process reuse)
+	if (gVirtualJoystickID != 0 && gVirtualJoystick != NULL)
+	{
+		if (SDL_GetJoystickFromID(gVirtualJoystickID) == NULL)
+		{
+			SDL_Log("Detected stale Virtual Joystick ID! Resetting input state.");
+			gVirtualJoystickID = 0;
+			gVirtualJoystick = NULL;
+			gJoystickFingerActive = false;
+			gJoystickFingerID = 0;
+			// Wipe fingers to be safe
+			for (int i=0; i<MAX_TOUCH_FINGERS; i++) gFingers[i].active = false;
+		}
+	}
+
+	if (!gVirtualJoystickID)
+	{
+		SDL_Log("Initializing Virtual Gamepad...");
+		
+		SDL_VirtualJoystickDesc desc;
+		SDL_INIT_INTERFACE(&desc);
+		desc.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+		desc.naxes = 6;
+		desc.nbuttons = 15;
+		desc.nhats = 1;
+		desc.vendor_id = 0x1234;
+		desc.product_id = 0x5678;
+		desc.name = "Cro-Mag Virtual Gamepad";
+
+		gVirtualJoystickID = SDL_AttachVirtualJoystick(&desc);
+		if (gVirtualJoystickID) {
+			gVirtualJoystick = SDL_OpenJoystick(gVirtualJoystickID);
+			SDL_Log("Virtual Gamepad added with ID %u", (uint32_t)gVirtualJoystickID);
+		} else {
+			SDL_Log("Failed to add Virtual Gamepad: %s", SDL_GetError());
+		}
+	}
+
 	if (!gAccelerometer)
 	{
-        // Ensure touch events generate mouse events for menus
-        SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "1");
+		// Ensure touch events generate mouse events for menus
+		SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "1");
 
 		int num_sensors = 0;
 		SDL_SensorID* sensorIDs = SDL_GetSensors(&num_sensors);
@@ -86,37 +142,92 @@ static void InitAndroidInput(void)
 			SDL_free(sensorIDs);
 		}
 	}
+	
+	// SDL_memset(gFingers, 0, sizeof(gFingers)); // DO NOT WIPE FINGERS! Persist across frames.
 }
 
-static void UpdateAndroidInput(void)
+static void UpdateVirtualGamepad(void)
 {
-	if (gAccelerometer)
+	if (!gVirtualJoystick) return;
+
+	float stickX = 0, stickY = 0;
+	bool btnA = false, btnB = false, btnX = false, btnY = false, btnStart = false;
+
+	// ALWAYS process touch input to populate gVirtualInput for Input Injection.
+	// This ensures touch works even when gUserPrefersGamepad is true (BT controller present).
+	for (int i = 0; i < MAX_TOUCH_FINGERS; i++)
 	{
-		float data[3];
-		if (SDL_GetSensorData(gAccelerometer, data, 3) == 0)
+		if (!gFingers[i].active) continue;
+
+		float x = gFingers[i].x;
+		float y = gFingers[i].y;
+
+		// Check for Sticky Joystick Ownership
+		bool isJoystickFinger = false;
+		if (gJoystickFingerActive && gJoystickFingerID == gFingers[i].id) {
+			isJoystickFinger = true;
+		} else if (!gJoystickFingerActive && x < 0.4f && y > 0.4f) {
+			// New claim!
+			gJoystickFingerActive = true;
+			gJoystickFingerID = gFingers[i].id;
+			isJoystickFinger = true;
+			SDL_Log("STICK CLAIM: Finger=%lu at (%.2f, %.2f)", (unsigned long)gFingers[i].id, x, y);
+		}
+
+		if (isJoystickFinger)
 		{
-			// data[0] is X (left/right tilt in landscape usually? depends on device orientation)
-			// Assuming landscape: Y axis might be the roll.
-			// Let's try Y axis first for steering in landscape.
-			// Actually standard Android accelerometer:
-			// Landscape Left: +Y is Up.
-			// heavy tilt: Y goes to +/- 9.8.
-			
-			// Normalize Y / 4.0 to get some sensitivity range.
-			// Clamp to -1..1
-			float val = data[1] / 5.0f;
-			if (val < -1.0f) val = -1.0f;
-			if (val > 1.0f) val = 1.0f;
-			gAndroidSteer = val; 
+			float dx = (x - 0.27f) / 0.15f;
+			float dy = (y - 0.85f) / 0.15f;
+			if (dx < -1) dx = -1; if (dx > 1) dx = 1;
+			if (dy < -1) dy = -1; if (dy > 1) dy = 1;
+			stickX = dx;
+			stickY = dy;
+			SDL_Log("STICK: Finger=%lu X=%.2f Y=%.2f -> dX=%.2f dY=%.2f", (unsigned long)gFingers[i].id, x, y, stickX, stickY);
+		}
+		// Right side: Buttons (center: 0.85, 0.75, radius roughly 0.2)
+		else if (x > 0.6f && y > 0.4f)
+		{
+			float dx = x - 0.85f;
+			float dy = y - 0.75f;
+			float distSq = dx*dx + dy*dy;
+			if (distSq < 0.2f * 0.2f)
+			{
+				if (dy > 0.02f) btnA = true;
+				else if (dx > 0.02f) btnB = true;
+				else if (dx < -0.02f) btnX = true;
+				else if (dy < -0.02f) btnY = true;
+			}
+		}
+		// Top Right: Start (Pause) - expanded area for easier activation
+		else if (x > 0.8f && y < 0.25f)
+		{
+			btnStart = true;
 		}
 	}
 
-	// Touch for Gas/Brake
-	// SDL_StartTextInput() might interfere?
-	
-	// We'll use event loop for touch instead of polling states if possible,
-	// but polling touch devices is also possible.
+	// Update Global Virtual Input State (for Injection into Player 1)
+	gVirtualInput.stickX = stickX;
+	gVirtualInput.stickY = stickY;
+	gVirtualInput.btnA = btnA;
+	gVirtualInput.btnB = btnB;
+	gVirtualInput.btnX = btnX;
+	gVirtualInput.btnY = btnY;
+	gVirtualInput.btnStart = btnStart;
+
+	// Only send to SDL Virtual Joystick device when NOT using physical gamepad.
+	// This prevents the virtual device from conflicting with the physical one.
+	if (!gUserPrefersGamepad)
+	{
+		SDL_SetJoystickVirtualAxis(gVirtualJoystick, SDL_GAMEPAD_AXIS_LEFTX, (int16_t)(stickX * 32767));
+		SDL_SetJoystickVirtualAxis(gVirtualJoystick, SDL_GAMEPAD_AXIS_LEFTY, (int16_t)(stickY * 32767));
+		SDL_SetJoystickVirtualButton(gVirtualJoystick, SDL_GAMEPAD_BUTTON_SOUTH, btnA);
+		SDL_SetJoystickVirtualButton(gVirtualJoystick, SDL_GAMEPAD_BUTTON_EAST, btnB);
+		SDL_SetJoystickVirtualButton(gVirtualJoystick, SDL_GAMEPAD_BUTTON_WEST, btnX);
+		SDL_SetJoystickVirtualButton(gVirtualJoystick, SDL_GAMEPAD_BUTTON_NORTH, btnY);
+		SDL_SetJoystickVirtualButton(gVirtualJoystick, SDL_GAMEPAD_BUTTON_START, btnStart);
+	}
 }
+
 #endif
 
 static inline void UpdateKeyState(KeyState* state, bool downNow)
@@ -222,13 +333,6 @@ static void UpdateInputNeeds(void)
 
 //		downNow |= gMouseButtonStates[kb->mouseButton] & KEYSTATE_ACTIVE_BIT;
 
-#if defined(__ANDROID__)
-		if (i == kNeed_Forward && gAndroidGas > 0.5f) downNow = true;
-		if (i == kNeed_Backward && gAndroidBrake > 0.5f) downNow = true;
-		// Polarity check: -1 is Left, +1 is Right (Tentative)
-		if (i == kNeed_Left && gAndroidSteer < -0.3f) downNow = true;
-		if (i == kNeed_Right && gAndroidSteer > 0.3f) downNow = true;
-#endif
 
 		UpdateKeyState(&gNeedStates[i], downNow);
 	}
@@ -266,6 +370,19 @@ static void UpdateGamepadSpecificInputNeeds(int gamepadNum)
 				{
 					actuation = 1;
 				}
+
+				// Inject Virtual Gamepad Button
+				if (gamepadNum == 0 && !gUserPrefersGamepad)
+				{
+					if ((pb->id == SDL_GAMEPAD_BUTTON_SOUTH && gVirtualInput.btnA) ||
+						(pb->id == SDL_GAMEPAD_BUTTON_EAST && gVirtualInput.btnB) ||
+						(pb->id == SDL_GAMEPAD_BUTTON_WEST && gVirtualInput.btnX) ||
+						(pb->id == SDL_GAMEPAD_BUTTON_NORTH && gVirtualInput.btnY) ||
+						(pb->id == SDL_GAMEPAD_BUTTON_START && gVirtualInput.btnStart))
+					{
+						actuation = 1;
+					}
+				}
 			}
 			else if (type == kInputTypeAxisPlus || type == kInputTypeAxisMinus)
 			{
@@ -277,6 +394,25 @@ static void UpdateGamepadSpecificInputNeeds(int gamepadNum)
 					value = axis * (1.0f / 32767.0f);
 				else
 					value = axis * (1.0f / -32768.0f);
+
+				// Inject Virtual Gamepad Axis
+				if (gamepadNum == 0 && !gUserPrefersGamepad)
+				{
+					if (pb->id == SDL_GAMEPAD_AXIS_LEFTX)
+					{
+						float v = gVirtualInput.stickX;
+						if (type == kInputTypeAxisPlus && v > 0) value = SDL_max(value, v);
+						else if (type == kInputTypeAxisMinus && v < 0) value = SDL_max(value, -v);
+					}
+					else if (pb->id == SDL_GAMEPAD_AXIS_LEFTY)
+					{
+						float v = gVirtualInput.stickY;
+						if (type == kInputTypeAxisPlus && v > 0) value = SDL_max(value, v);
+						else if (type == kInputTypeAxisMinus && v < 0) value = SDL_max(value, -v);
+					}
+				}
+
+				// Avoid magnitude bump when thumbstick is pushed past dead zone:
 
 				// Avoid magnitude bump when thumbstick is pushed past dead zone:
 				// Bring magnitude from [kJoystickDeadZoneFrac, 1.0] to [0.0, 1.0].
@@ -385,80 +521,91 @@ void DoSDLMaintenance(void)
 				SDL_Log("Gamepad device remapped! %d", event.gdevice.which);
 				break;
 
+			case SDL_EVENT_DID_ENTER_BACKGROUND:
+			case SDL_EVENT_WINDOW_FOCUS_LOST:
+			case SDL_EVENT_WINDOW_MINIMIZED:
+				SDL_Log("App backgrounded/lost focus! Resetting touch state.");
+				// Wipe all fingers to prevent stuck inputs
+				for (int i = 0; i < MAX_TOUCH_FINGERS; i++) {
+					gFingers[i].active = false;
+				}
+				gJoystickFingerActive = false; // Release stick
+				// UpdateVirtualGamepad(); // Unsafe to call here? State is pushed on next frame anyway.
+				break;
+
 			case SDL_EVENT_KEY_DOWN:
 				gUserPrefersGamepad = false;
 				break;
 
 			case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
 			case SDL_EVENT_GAMEPAD_BUTTON_UP:
-				gUserPrefersGamepad = true;
+				if (GetGamepadSlotFromJoystick(event.gdevice.which) != -1) // Check if valid slot (virtual is usually mapped, but let's check explicit ID)
+				{
+					// We need to compare against the virtual joystick ID.
+					// SDL_EVENT_GAMEPAD_... uses 'which' as joystick ID.
+					if (event.gdevice.which != gVirtualJoystickID)
+						gUserPrefersGamepad = true;
+				}
+				break;
+
+			case SDL_EVENT_GAMEPAD_AXIS_MOTION:
+				if (event.gaxis.which != gVirtualJoystickID && abs(event.gaxis.value) > 3000) // Deadzone check & ID check
+					gUserPrefersGamepad = true;
 				break;
 
 #if defined(__ANDROID__)
 			case SDL_EVENT_FINGER_DOWN:
 			case SDL_EVENT_FINGER_MOTION:
 			{
-                // Only process gas/brake if in-game
-                if (gIsInGame) 
-                {
-                    // Simple scheme: Right half = Gas, Left half = Brake.
-                    // x is 0..1 normalized.
-                    if (event.tfinger.x > 0.5f)
-                    {
-                        gAndroidGas = 1.0f;
-                        gAndroidBrake = 0.0f;
-                    }
-                    else
-                    {
-                        gAndroidBrake = 1.0f;
-                        gAndroidGas = 0.0f;
-                    }
-                }
-                else if (event.type == SDL_EVENT_FINGER_DOWN)
-                {
-                    SDL_Log("Menu Touch! x: %f y: %f InGame: %d", event.tfinger.x, event.tfinger.y, gIsInGame);
-                    // Menu navigation
-                    SimulateKey(GetMenuKeyFromTouch(event.tfinger.x, event.tfinger.y), true);
-                }
-                else
-                {
-                    SDL_Log("Touch event ignored. Type: %d InGame: %d", event.type, gIsInGame);
-                }
+				gUserPrefersGamepad = false; // Touch Reactivation
+				for (int i = 0; i < MAX_TOUCH_FINGERS; i++)
+				{
+					if (!gFingers[i].active || gFingers[i].id == event.tfinger.fingerID)
+					{
+						gFingers[i].id = event.tfinger.fingerID;
+						gFingers[i].x = event.tfinger.x;
+						gFingers[i].y = event.tfinger.y;
+						gFingers[i].active = true;
+						break;
+					}
+				}
+				UpdateVirtualGamepad();
+
+				// Menu navigation (only if not handled by gamepad logic? or let both work)
+				if (event.type == SDL_EVENT_FINGER_DOWN && !gIsInGame)
+				{
+					SimulateKey(GetMenuKeyFromTouch(event.tfinger.x, event.tfinger.y), true);
+				}
 				break;
 			}
 
 			case SDL_EVENT_FINGER_UP:
+			case SDL_EVENT_FINGER_CANCELED:
 			{
-                if (gIsInGame)
-                {
-				    // Reset both? Or check if other fingers are down?
-				    // Simple stateless reset for now. Ideally track fingers.
-				    // If X > 0.5, gas off.
-				    if (event.tfinger.x > 0.5f) gAndroidGas = 0.0f;
-				    else gAndroidBrake = 0.0f;
-                }
-                else
-                {
-                    // Menu navigation release
-                    SimulateKey(GetMenuKeyFromTouch(event.tfinger.x, event.tfinger.y), false);
-                }
-				break;
-			}
-			case SDL_EVENT_SENSOR_UPDATE:
-			{
-				if (event.sensor.which == SDL_GetSensorID(gAccelerometer))
+				for (int i = 0; i < MAX_TOUCH_FINGERS; i++)
 				{
-					// event.sensor.data[0..2]
-					// Assuming landscape, Y is roll.
-					float val = event.sensor.data[1] / 5.0f; 
-					if (val < -1.0f) val = -1.0f;
-					if (val > 1.0f) val = 1.0f;
-					gAndroidSteer = val;
+					if (gFingers[i].active && gFingers[i].id == event.tfinger.fingerID)
+					{
+						gFingers[i].active = false;
+						if (gJoystickFingerActive && gJoystickFingerID == event.tfinger.fingerID) {
+							gJoystickFingerActive = false;
+						}
+						break;
+					}
+				}
+				UpdateVirtualGamepad();
+
+				if (!gIsInGame)
+				{
+					SimulateKey(GetMenuKeyFromTouch(event.tfinger.x, event.tfinger.y), false);
 				}
 				break;
 			}
+			case SDL_EVENT_SENSOR_UPDATE:
+				// Accelerometer steering removed in favor of virtual stick
+				break;
 #endif
-		}
+	}
 	}
 
 
@@ -485,8 +632,6 @@ void DoSDLMaintenance(void)
 
 #if defined(__ANDROID__)
 	InitAndroidInput();
-	UpdateAndroidInput();
-	// Events handled below, but maybe some polling needed?
 #endif
 
 
@@ -627,21 +772,7 @@ static float GetAnalogValue(int needID, int playerID)
 	}
 
 #if defined(__ANDROID__)
-	if (playerID == 0) // Only player 0 gets Android controls
-	{
-		if (needID == kNeed_Forward) return gAndroidGas;
-		if (needID == kNeed_Backward) return gAndroidBrake;
-		// Steering map: AndroidSteer is -1 (Right) to +1 (Left) or similar.
-		// If steer > 0 (Left), return it for kNeed_Left.
-		if (needID == kNeed_Right && gAndroidSteer > 0) return gAndroidSteer;
-		if (needID == kNeed_Left && gAndroidSteer < 0) return -gAndroidSteer; 
-		// Actually let's check polarity during testing. 
-		// Usually tilt right -> Y positive? No, fast check:
-		// Phone flat. Tilt right (monitor clockwise). Left side goes up. Y axis points which way?
-		// Standard: Y points out top of phone.
-		// Tilt right: Y component of gravity becomes positive?
-		// Let's assume standard behavior and fix if inverted.
-	}
+	// Android specific analog overrides removed in favor of virtual gamepad
 #endif
 
 	if (gamepad->open)
@@ -806,12 +937,69 @@ static SDL_Gamepad* TryOpenGamepadFromJoystick(SDL_JoystickID joystickID)
 		return NULL;
 	}
 
-	// Reserve a gamepad slot
-	gamepadSlot = FindFreeGamepadSlot();
+	// Check if we are opening the Virtual Gamepad
+	bool isVirtual = (joystickID == gVirtualJoystickID);
+
+	// Slot Allocation Logic
+	// 1. If Virtual: Prefer High Slots (End of array) to avoid taking Player 1.
+	// 2. If Physical: Prefer Low Slots (Start of array).
+	// 3. If Physical and Slot 0 is occupied by Virtual -> Swap/Evict Virtual to make room.
+
+	if (isVirtual)
+	{
+		// Search backwards for a free slot
+		for (int i = MAX_LOCAL_PLAYERS - 1; i >= 0; i--)
+		{
+			if (!gGamepads[i].open)
+			{
+				gamepadSlot = i;
+				break;
+			}
+		}
+	}
+	else
+	{
+		// Physical Gamepad: Check for Virtual Hogging Slot 0
+		if (gGamepads[0].open && SDL_GetGamepadID(gGamepads[0].sdlGamepad) == gVirtualJoystickID)
+		{
+			SDL_Log("Physical Gamepad detected! Moving Virtual Gamepad from Slot 0 to make room...");
+			
+			// Find a new home for the Virtual Gamepad (high slot)
+			int newVirtualSlot = -1;
+			for (int i = MAX_LOCAL_PLAYERS - 1; i > 0; i--)
+			{
+				if (!gGamepads[i].open)
+				{
+					newVirtualSlot = i;
+					break;
+				}
+			}
+
+			if (newVirtualSlot > 0)
+			{
+				// Move the struct data
+				gGamepads[newVirtualSlot] = gGamepads[0];
+				
+				// Zero out Slot 0 (but don't Close/Display message, just clear struct)
+				// Note: 'sdlGamepad' pointer is still valid, just ownership moved to new slot.
+				SDL_memset(&gGamepads[0], 0, sizeof(Gamepad));
+				
+				SDL_Log("Virtual Gamepad moved to Slot %d", newVirtualSlot);
+			}
+			else
+			{
+				SDL_Log("Warning: No room to move Virtual Gamepad! Player 1 might be blocked.");
+				// We could force close it, but let's try standard allocation
+			}
+		}
+
+		// Standard "First Free" search
+		gamepadSlot = FindFreeGamepadSlot();
+	}
+
 	if (gamepadSlot < 0)
 	{
 		SDL_Log("All gamepad slots used up.");
-		// TODO: when a gamepad is unplugged, if all gamepad slots are used up, re-scan connected joysticks and try to open any unopened joysticks.
 		return NULL;
 	}
 
@@ -1077,3 +1265,81 @@ void ResetDefaultMouseBindings(void)
 		gGamePrefs.bindings[i].mouseButton = kDefaultInputBindings[i].mouseButton;
 	}
 }
+
+#if defined(__ANDROID__)
+void DrawVirtualGamepad(void)
+{
+	// Check if assets are loaded and if we are in the overlay pass
+	if (gAtlases[SPRITE_GROUP_GAMEPAD] == NULL || !gDrawingOverlayPane)
+		return;
+
+	// Hide if user prefers physical gamepad
+	if (gUserPrefersGamepad)
+		return;
+
+	int paneNum = GetOverlayPaneNumber();
+	float lw = gGameView->panes[paneNum].logicalWidth;
+	float lh = gGameView->panes[paneNum].logicalHeight;
+
+	// Set 2D projection for overlay
+	OGL_PushState();
+	OGL_SetProjection(kProjectionType2DOrthoCentered);
+	glDisable(GL_DEPTH_TEST);
+	glDepthMask(GL_FALSE);
+	glDisable(GL_CULL_FACE);
+	glDisable(GL_LIGHTING);
+	glDisable(GL_DITHER);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glDisable(GL_ALPHA_TEST);
+	glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+
+	gGlobalTransparency = 0.5f;
+
+	unsigned long flags = kTextMeshKeepCurrentProjection;
+
+	// Use gVirtualInput for visual feedback (synced with sticky joystick logic)
+	float stickX = gVirtualInput.stickX;
+	float stickY = gVirtualInput.stickY;
+	bool btnA = gVirtualInput.btnA;
+	bool btnB = gVirtualInput.btnB;
+	bool btnX = gVirtualInput.btnX;
+	bool btnY = gVirtualInput.btnY;
+	bool btnStart = gVirtualInput.btnStart;
+
+	// Stick (centered at normalized 0.27, 0.85)
+	float sx = (-0.5f + 0.27f) * lw;
+	float sy = (-0.5f + 0.85f) * lh;
+	DrawSprite2(SPRITE_GROUP_GAMEPAD, GAMEPAD_SObjType_StickBase, sx, sy, 0.3f, 0.3f, 0, flags);
+	DrawSprite2(SPRITE_GROUP_GAMEPAD, GAMEPAD_SObjType_StickNub, sx + stickX * 40, sy + stickY * 40, 0.4f, 0.4f, 0, flags);
+
+	// Buttons (centered at normalized 0.85, 0.75)
+	float bx = (-0.5f + 0.85f) * lw;
+	float by = (-0.5f + 0.75f) * lh;
+	float bsp = 55.0f;
+
+	gGlobalColorFilter = btnA ? (OGLColorRGB){0.5f, 1.0f, 0.5f} : (OGLColorRGB){1, 1, 1};
+	DrawSprite2(SPRITE_GROUP_GAMEPAD, GAMEPAD_SObjType_ButtonA, bx, by + bsp, 0.3f, 0.3f, 0, flags);
+	
+	gGlobalColorFilter = btnB ? (OGLColorRGB){1.0f, 0.5f, 0.5f} : (OGLColorRGB){1, 1, 1};
+	DrawSprite2(SPRITE_GROUP_GAMEPAD, GAMEPAD_SObjType_ButtonB, bx + bsp, by, 0.3f, 0.3f, 0, flags);
+	
+	gGlobalColorFilter = btnX ? (OGLColorRGB){0.5f, 0.5f, 1.0f} : (OGLColorRGB){1, 1, 1};
+	DrawSprite2(SPRITE_GROUP_GAMEPAD, GAMEPAD_SObjType_ButtonX, bx - bsp, by, 0.3f, 0.3f, 0, flags);
+	
+	gGlobalColorFilter = btnY ? (OGLColorRGB){1.0f, 1.0f, 0.5f} : (OGLColorRGB){1, 1, 1};
+	DrawSprite2(SPRITE_GROUP_GAMEPAD, GAMEPAD_SObjType_ButtonY, bx, by - bsp, 0.3f, 0.3f, 0, flags);
+
+	gGlobalColorFilter = btnStart ? (OGLColorRGB){0.8f, 0.8f, 0.8f} : (OGLColorRGB){1, 1, 1};
+	// Start button: X aligned with Y button + offset right, Y at 0.15
+	DrawSprite2(SPRITE_GROUP_GAMEPAD, GAMEPAD_SObjType_ButtonStart, bx + 30, (-0.5f + 0.15f) * lh, 0.3f, 0.3f, 0, flags);
+
+	gGlobalColorFilter = (OGLColorRGB){1, 1, 1};
+	gGlobalTransparency = 1.0f;
+	glDisable(GL_BLEND);
+	glDepthMask(GL_TRUE);
+	OGL_PopState();
+}
+#else
+void DrawVirtualGamepad(void) {}
+#endif

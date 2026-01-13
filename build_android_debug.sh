@@ -46,11 +46,9 @@ build_abi() {
 
 # 0. Copy Assets
 ASSETS_DIR="$ANDROID_DIR/app/src/main/assets"
-if [ ! -d "$ASSETS_DIR" ]; then
-    echo "=== Copying Assets to $ASSETS_DIR ==="
-    mkdir -p $ASSETS_DIR
-    cp -r Data $ASSETS_DIR/
-fi
+echo "=== Copying Assets to $ASSETS_DIR ==="
+mkdir -p $ASSETS_DIR
+cp -r Data $ASSETS_DIR/
 
 # 1. Build x86_64 (Emulator)
 build_abi "x86_64" "build-android-x86"
@@ -61,6 +59,7 @@ build_abi "arm64-v8a" "build-android"
 echo "=== 3. Assembling Debug APK (Gradle) ==="
 cd $ANDROID_DIR
 ./gradlew assembleDebug
+cd ..
 
 echo "=== Success! APK is at $ANDROID_DIR/app/build/outputs/apk/debug/app-debug.apk ==="
 
@@ -88,3 +87,21 @@ if [ "$DEVICE_COUNT" -eq 0 ]; then
 else
     echo "=== Device detected. Skipping emulator launch. ==="
 fi
+
+echo "=== 5. Installing and Launching on All Devices ==="
+
+# Get list of devices (skipping header and empty lines)
+adb devices | grep -v "List of devices attached" | grep -v "^$" | while read -r line; do
+    DEVICE_SERIAL=$(echo $line | awk '{print $1}')
+    if [ ! -z "$DEVICE_SERIAL" ]; then
+        echo "--> Processing Device: $DEVICE_SERIAL"
+        
+        echo "    Installing APK..."
+        adb -s $DEVICE_SERIAL install -r $ANDROID_DIR/app/build/outputs/apk/debug/app-debug.apk
+        
+        echo "    Launching Activity..."
+        adb -s $DEVICE_SERIAL shell am start -n io.jor.cromagrally/io.jor.cromagrally.SDLActivity
+        
+        echo "--> Done with $DEVICE_SERIAL"
+    fi
+done

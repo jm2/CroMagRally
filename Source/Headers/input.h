@@ -128,6 +128,7 @@ void PushKeys(void);
 void PopKeys(void);
 
 void DoSDLMaintenance(void);
+void DrawVirtualGamepad(void);
 
 int GetNumGamepads(void);
 SDL_Gamepad* GetGamepad(int n);
