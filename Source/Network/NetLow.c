@@ -6,6 +6,7 @@
 #if _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <mstcpip.h>  // For tcp_keepalive struct and SIO_KEEPALIVE_VALS
 typedef int ssize_t;
 typedef int socklen_t;
 #define MSG_NOSIGNAL 0
@@ -45,6 +46,10 @@ int gNetPort = 49959;
 #define kSocketError_WouldBlock			EAGAIN
 #define kSocketError_AddressInUse		EADDRINUSE
 #endif
+
+// Socket buffer sizes for burst absorption
+#define SOCKET_SNDBUF_SIZE 65536
+#define SOCKET_RCVBUF_SIZE 65536
 
 typedef enum
 {
@@ -165,6 +170,68 @@ bool CloseSocket(sockfd_t* sockfdPtr)
 	*sockfdPtr = INVALID_SOCKET;
 
 	return true;
+}
+
+// Apply performance/robustness socket options to a TCP socket
+static void ApplyTCPSocketOptions(sockfd_t sockfd)
+{
+	int flag = 1;
+
+	// Disable Nagle's algorithm for low latency
+	if (-1 == setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, (void *)&flag, sizeof(int)))
+	{
+		printf("Warning: failed to set TCP_NODELAY: %d\n", GetSocketError());
+	}
+
+	// Enable keepalive for connection health monitoring
+	if (-1 == setsockopt(sockfd, SOL_SOCKET, SO_KEEPALIVE, (void *)&flag, sizeof(int)))
+	{
+		printf("Warning: failed to set SO_KEEPALIVE: %d\n", GetSocketError());
+	}
+
+#if !_WIN32
+	// Aggressive keepalive settings (Linux/macOS)
+#ifdef TCP_KEEPIDLE
+	int keepidle = 5;  // 5 seconds idle before probing
+	setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPIDLE, &keepidle, sizeof(int));
+#endif
+#ifdef TCP_KEEPINTVL
+	int keepintvl = 1;  // 1 second between probes
+	setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPINTVL, &keepintvl, sizeof(int));
+#endif
+#ifdef TCP_KEEPCNT
+	int keepcnt = 3;  // 3 probes before giving up
+	setsockopt(sockfd, IPPROTO_TCP, TCP_KEEPCNT, &keepcnt, sizeof(int));
+#endif
+
+	// Disable delayed ACKs for lower latency (Linux)
+#ifdef TCP_QUICKACK
+	setsockopt(sockfd, IPPROTO_TCP, TCP_QUICKACK, &flag, sizeof(int));
+#endif
+
+	// Limit unsent data to reduce buffer bloat on high-bandwidth links (Linux 3.12+)
+#ifdef TCP_NOTSENT_LOWAT
+	int lowat = 16384;
+	setsockopt(sockfd, IPPROTO_TCP, TCP_NOTSENT_LOWAT, &lowat, sizeof(int));
+#endif
+#else // _WIN32
+	// Windows-specific aggressive keepalive settings
+	// Uses SIO_KEEPALIVE_VALS ioctl - struct tcp_keepalive is from <mstcpip.h>
+	struct tcp_keepalive keepalive_vals = {
+		.onoff = 1,
+		.keepalivetime = 5000,   // 5 seconds idle
+		.keepaliveinterval = 1000 // 1 second interval
+	};
+	DWORD bytes_returned = 0;
+	WSAIoctl(sockfd, SIO_KEEPALIVE_VALS, &keepalive_vals, sizeof(keepalive_vals),
+		NULL, 0, &bytes_returned, NULL, NULL);
+#endif // _WIN32
+
+	// Increase send/receive buffer sizes for burst absorption
+	int sndbuf = SOCKET_SNDBUF_SIZE;
+	int rcvbuf = SOCKET_RCVBUF_SIZE;
+	setsockopt(sockfd, SOL_SOCKET, SO_SNDBUF, (void *)&sndbuf, sizeof(int));
+	setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, (void *)&rcvbuf, sizeof(int));
 }
 
 static const char* FormatAddress(struct sockaddr_in hostAddr)
@@ -331,9 +398,8 @@ NSpPlayerID NSpGame_AcceptNewClient(NSpGameReference gameRef)
 		goto fail;
 	}
 
-	// Disable Nagle's algorithm
-	int flag = 1;
-	setsockopt(newSocket, IPPROTO_TCP, TCP_NODELAY, (void *)&flag, sizeof(int));
+	// Apply all performance/robustness socket options
+	ApplyTCPSocketOptions(newSocket);
 
 	// Find vacant player slot
 	for (int i = 0; i < MAX_PLAYERS; i++)
@@ -434,19 +500,8 @@ static sockfd_t CreateTCPSocket(bool bindIt)
 		goto fail;
 	}
 
-	int flag = 1;
-	// Disable Nagle's algorithm. We want to send small packets immediately.
-	// This makes a huge difference in avoiding "rubber banding" lag!
-	if (-1 == setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, (void *)&flag, sizeof(int)))
-	{
-		printf("Warning: failed to set TCP_NODELAY: %d\n", GetSocketError());
-	}
-
-//	int set = 1;
-//	if (-1 == setsockopt(sockfd, SOL_SOCKET, SO_NOSIGPIPE, (void *)&set, sizeof(int)))
-//	{
-//		goto fail;
-//	}
+	// Apply all performance/robustness socket options
+	ApplyTCPSocketOptions(sockfd);
 
 	if (bindIt)
 	{
@@ -475,6 +530,64 @@ fail:
 	return INVALID_SOCKET;
 }
 
+#pragma mark - Robust recv helper
+
+// Receive exactly 'len' bytes into 'buf', handling partial reads (common on WiFi).
+// Returns:
+//   > 0: success (number of bytes received, will equal 'len')
+//   = 0: peer disconnected
+//   < 0: error (check GetSocketError())
+static ssize_t RecvAll(sockfd_t sockfd, void* buf, size_t len)
+{
+	size_t total = 0;
+	char* ptr = (char*)buf;
+	const Uint64 startTime = SDL_GetTicks();
+	const Uint64 timeoutMs = 5000;  // 5 second timeout to prevent infinite loops
+
+	while (total < len)
+	{
+		// Check for timeout
+		if (SDL_GetTicks() - startTime > timeoutMs)
+		{
+			printf("%s: timeout after %llu ms waiting for %zu bytes\n", 
+				__func__, (unsigned long long)timeoutMs, len - total);
+			return -1;
+		}
+
+		ssize_t n = recv(sockfd, ptr + total, len - total, MSG_NOSIGNAL);
+
+		if (n == 0)
+		{
+			// Peer disconnected
+			return 0;
+		}
+		else if (n < 0)
+		{
+			int err = GetSocketError();
+			if (err == kSocketError_WouldBlock)
+			{
+				// Non-blocking socket would block; wait a tiny bit and retry
+				SDL_Delay(1);
+				continue;
+			}
+			// Real error
+			return -1;
+		}
+
+		total += (size_t)n;
+	}
+
+#if !_WIN32
+	// Re-enable TCP_QUICKACK after each recv (it's a per-operation hint on Linux)
+#ifdef TCP_QUICKACK
+	int flag = 1;
+	setsockopt(sockfd, IPPROTO_TCP, TCP_QUICKACK, &flag, sizeof(int));
+#endif
+#endif
+
+	return (ssize_t)total;
+}
+
 #pragma mark - Basic message
 
 void NSpClearMessageHeader(NSpMessageHeader* h)
@@ -498,30 +611,37 @@ static NSpMessageHeader* PollSocket(sockfd_t sockfd, bool* outBrokenPipe)
 
 	char messageBuf[kNSpMaxMessageLength];
 
-	// Read header
+	// Peek at the header first to check if any data is available (non-blocking)
 	ssize_t recvRC = recv(
 		sockfd,
 		messageBuf,
 		sizeof(NSpMessageHeader),
-		MSG_NOSIGNAL
+		MSG_NOSIGNAL | MSG_PEEK
 	);
 
-	// If received 0 bytes, our peer is probably gone (in theory we never send 0-byte messages)
+	// If received 0 bytes, our peer is probably gone
 	if (recvRC == 0)
 	{
 		brokenPipe = true;
 		goto bye;
 	}
 
-	// if -1, probably EAGAIN since our sockets are non-blocking
+	// if -1, probably EAGAIN since our sockets are non-blocking - no data available
 	if (recvRC == -1)
 	{
 		goto bye;
 	}
 
-	if ((size_t) recvRC < sizeof(NSpMessageHeader))
+	// We have at least some data - now use RecvAll to get the full header reliably
+	recvRC = RecvAll(sockfd, messageBuf, sizeof(NSpMessageHeader));
+	if (recvRC == 0)
 	{
-		printf("%s: not enough bytes: %ld\n", __func__, recvRC);
+		brokenPipe = true;
+		goto bye;
+	}
+	if (recvRC < 0)
+	{
+		printf("%s: error reading header: %d\n", __func__, GetLastSocketError());
 		goto bye;
 	}
 
@@ -545,25 +665,19 @@ static NSpMessageHeader* PollSocket(sockfd_t sockfd, bool* outBrokenPipe)
 	// Read payload if there's more to the message than just the header
 	if (payloadLen > 0)
 	{
-		// Read rest of payload
-		recvRC = recv(
-			sockfd,
-			messageBuf + sizeof(NSpMessageHeader),
-			payloadLen,
-			MSG_NOSIGNAL
-		);
+		// Use RecvAll to ensure we get the complete payload (handles partial reads)
+		recvRC = RecvAll(sockfd, messageBuf + sizeof(NSpMessageHeader), payloadLen);
 
-		// If received 0 bytes, our peer is probably gone (in theory we never send 0-byte messages)
 		if (recvRC == 0)
 		{
 			brokenPipe = true;
 			goto bye;
 		}
 
-		// if -1, probably EAGAIN since our sockets are non-blocking
-		if (recvRC == -1)
+		if (recvRC < 0)
 		{
-			printf("%s: couldn't read payload for message '%s'\n", __func__, NSp4CCString(header->what));
+			printf("%s: error reading payload for message '%s': %d\n", 
+				__func__, NSp4CCString(header->what), GetLastSocketError());
 			goto bye;
 		}
 	}
@@ -1491,24 +1605,45 @@ static int SendOnSocket(sockfd_t sockfd, NSpMessageHeader* header)
 		return kNSpRC_InvalidSocket;
 	}
 
-	ssize_t sendRC = send(
-		sockfd,
-		(char*) header,
-		header->messageLen,
-		MSG_NOSIGNAL
-	);
+	// Retry loop for EWOULDBLOCK - important for slow WiFi clients where
+	// the send buffer may fill up temporarily
+	const int maxRetries = 10;
+	const int retryDelayMs = 10;
 
-	if (sendRC == -1)
+	for (int attempt = 0; attempt < maxRetries; attempt++)
 	{
-		printf("%s: error sending message on socket %d\n", __func__, (int) sockfd);
-		return kNSpRC_SendFailed;
+		ssize_t sendRC = send(
+			sockfd,
+			(char*) header,
+			header->messageLen,
+			MSG_NOSIGNAL
+		);
+
+		if (sendRC >= 0)
+		{
+			printf("send '%s' (%dB) #%d -> %d\n",
+				NSp4CCString(header->what), header->messageLen, header->id, (int) sockfd);
+			return kNSpRC_OK;
+		}
+
+		int err = GetSocketError();
+		if (err == kSocketError_WouldBlock)
+		{
+			// Buffer full, wait briefly and retry
+			if (attempt < maxRetries - 1)
+			{
+				SDL_Delay(retryDelayMs);
+				continue;
+			}
+			// Fall through to failure after max retries
+		}
+
+		// Non-retryable error or max retries exceeded
+		break;
 	}
-	else
-	{
-		printf("send '%s' (%dB) #%d -> %d\n",
-			NSp4CCString(header->what), header->messageLen, header->id, (int) sockfd);
-		return kNSpRC_OK;
-	}
+
+	printf("%s: error sending message on socket %d after retries\n", __func__, (int) sockfd);
+	return kNSpRC_SendFailed;
 }
 
 // Attempts to send a message.
