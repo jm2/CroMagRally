@@ -1020,7 +1020,7 @@ static void NavigateCycler(const MenuItem* entry)
 		}
 		else
 		{
-			PlayEffect_Parms(kSfxCycle, FULL_CHANNEL_VOLUME, FULL_CHANNEL_VOLUME, NORMAL_CHANNEL_RATE * 2/3 + (RandomFloat2() * 0x3000));
+			PlayEffect_Parms(kSfxCycle, FULL_CHANNEL_VOLUME, FULL_CHANNEL_VOLUME, NORMAL_CHANNEL_RATE * 2/3 + (VisualRandomFloat2() * 0x3000));
 		}
 
 		if (entry->callback)
@@ -1123,7 +1123,7 @@ enum
 		// Play sound
 		float pitch = 0.5f;
 		pitch += GAME_MIN(6, data->nIncrements) * (1.0f/6.0f) * 0.5f;
-		pitch += RandomFloat() * 0.2f;
+		pitch += VisualRandomFloat() * 0.2f;
 		PlayEffect_Parms(EFFECT_MINE, FULL_CHANNEL_VOLUME, FULL_CHANNEL_VOLUME, NORMAL_CHANNEL_RATE * pitch);
 
 		// Prepare to lay out new value text

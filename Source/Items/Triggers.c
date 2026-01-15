@@ -887,9 +887,9 @@ float	speed;
 		theNode->Delta.z = gDelta.z * .3f;
 
 		speed *= .0015f;
-		theNode->DeltaRot.x = RandomFloat2() * speed;		// set spinning
-		theNode->DeltaRot.z = RandomFloat2() * speed;
-		theNode->DeltaRot.y = RandomFloat2() * speed * .5f;
+		theNode->DeltaRot.x = VisualRandomFloat2() * speed;		// set spinning
+		theNode->DeltaRot.z = VisualRandomFloat2() * speed;
+		theNode->DeltaRot.y = VisualRandomFloat2() * speed * .5f;
 
 		gDelta.y += 1000.0f;				// pop up the guy who hit the cactus
 		gDelta.x *= .5f;					// slow
@@ -1007,22 +1007,22 @@ float					x,y,z;
 
 		for (i = 0; i < 220; i++)
 		{
-			pt.x = x + RandomFloat2() * 140.0f;
-			pt.y = y + RandomFloat() * 700.0f;
-			pt.z = z + RandomFloat2() * 140.0f;
+			pt.x = x + VisualRandomFloat2() * 140.0f;
+			pt.y = y + VisualRandomFloat() * 700.0f;
+			pt.z = z + VisualRandomFloat2() * 140.0f;
 
-			d.y = RandomFloat() * 800.0f;
-			d.x = RandomFloat2() * 600.0f;
-			d.z = RandomFloat2() * 600.0f;
+			d.y = VisualRandomFloat() * 800.0f;
+			d.x = VisualRandomFloat2() * 600.0f;
+			d.z = VisualRandomFloat2() * 600.0f;
 
 
 			newParticleDef.groupNum		= pg;
 			newParticleDef.where		= &pt;
 			newParticleDef.delta		= &d;
-			newParticleDef.scale		= RandomFloat() + 1.0f;
+			newParticleDef.scale		= VisualRandomFloat() + 1.0f;
 			newParticleDef.rotZ			= 0;
 			newParticleDef.rotDZ		= 0;
-			newParticleDef.alpha		= FULL_ALPHA + (RandomFloat() * .3f);
+			newParticleDef.alpha		= FULL_ALPHA + (VisualRandomFloat() * .3f);
 			AddParticleToGroup(&newParticleDef);
 		}
 	}
@@ -1109,8 +1109,8 @@ static Boolean DoTrig_CampFire(ObjNode *theNode, ObjNode *whoNode, Byte sideBits
 
 			/* MAKE CAR SPIN WILDLY */
 
-		whoNode->DeltaRot.y = RandomFloat2() * 20.0f;
-		whoNode->DeltaRot.z = RandomFloat2() * 10.0f;
+		whoNode->DeltaRot.y = VisualRandomFloat2() * 20.0f;
+		whoNode->DeltaRot.z = VisualRandomFloat2() * 10.0f;
 
 
 			/* MAKE EXPLOSION */
@@ -1162,7 +1162,7 @@ ObjNode	*newObj;
 		.flags		= gAutoFadeStatusBits,
 		.slot		= PLAYER_SLOT + 5,	// we need this trigger to be *after* the player so it looks correct when carried!
 		.moveCall	= MoveTeamTorch,
-		.rot		= RandomFloat() * PI2,
+		.rot		= VisualRandomFloat() * PI2,
 		.scale		= 1.0,
 	};
 	newObj = MakeNewDisplayGroupObject(&def);
@@ -1420,8 +1420,8 @@ short	teamNum;
 
 			/* PUT TORCH ON BASE */
 
-	theTorch->Coord.x = theNode->Coord.x + RandomFloat2() * 100.0f;
-	theTorch->Coord.z = theNode->Coord.z + RandomFloat2() * 100.0f;
+	theTorch->Coord.x = theNode->Coord.x + VisualRandomFloat2() * 100.0f;
+	theTorch->Coord.z = theNode->Coord.z + VisualRandomFloat2() * 100.0f;
 	theTorch->Coord.y = theNode->Coord.y + gObjectGroupBBoxList[MODEL_GROUP_GLOBAL][GLOBAL_ObjType_TeamBaseRed].max.y;
 
 	UpdateObjectTransforms(theTorch);
@@ -1542,22 +1542,22 @@ float					x,y,z;
 
 		for (i = 0; i < 100; i++)
 		{
-			pt.x = x + RandomFloat2() * 100.0f;
-			pt.y = y + RandomFloat() * 300.0f;
-			pt.z = z + RandomFloat2() * 100.0f;
+			pt.x = x + VisualRandomFloat2() * 100.0f;
+			pt.y = y + VisualRandomFloat() * 300.0f;
+			pt.z = z + VisualRandomFloat2() * 100.0f;
 
-			d.y = RandomFloat() * 400.0f;
-			d.x = RandomFloat2() * 600.0f;
-			d.z = RandomFloat2() * 600.0f;
+			d.y = VisualRandomFloat() * 400.0f;
+			d.x = VisualRandomFloat2() * 600.0f;
+			d.z = VisualRandomFloat2() * 600.0f;
 
 
 			newParticleDef.groupNum		= pg;
 			newParticleDef.where		= &pt;
 			newParticleDef.delta		= &d;
-			newParticleDef.scale		= RandomFloat() + 1.0f;
+			newParticleDef.scale		= VisualRandomFloat() + 1.0f;
 			newParticleDef.rotZ			= 0;
 			newParticleDef.rotDZ		= 0;
-			newParticleDef.alpha		= FULL_ALPHA + (RandomFloat() * .3f);
+			newParticleDef.alpha		= FULL_ALPHA + (VisualRandomFloat() * .3f);
 			AddParticleToGroup(&newParticleDef);
 		}
 	}
@@ -1937,13 +1937,13 @@ NewParticleDefType		newParticleDef;
 	{
 		for (i = 0; i < 150; i++)
 		{
-			pt.x = x + RandomFloat2() * 100.0f;
-			pt.y = y + RandomFloat2() * 100.0f;
-			pt.z = z + RandomFloat2() * 100.0f;
+			pt.x = x + VisualRandomFloat2() * 100.0f;
+			pt.y = y + VisualRandomFloat2() * 100.0f;
+			pt.z = z + VisualRandomFloat2() * 100.0f;
 
-			d.y = RandomFloat2() * 700.0f;
-			d.x = RandomFloat2() * 700.0f;
-			d.z = RandomFloat2() * 700.0f;
+			d.y = VisualRandomFloat2() * 700.0f;
+			d.x = VisualRandomFloat2() * 700.0f;
+			d.z = VisualRandomFloat2() * 700.0f;
 
 
 			newParticleDef.groupNum		= pg;
@@ -1952,7 +1952,7 @@ NewParticleDefType		newParticleDef;
 			newParticleDef.scale		= 1.0;
 			newParticleDef.rotZ			= 0;
 			newParticleDef.rotDZ		= 0;
-			newParticleDef.alpha		= FULL_ALPHA + (RandomFloat() * .3f);
+			newParticleDef.alpha		= FULL_ALPHA + (VisualRandomFloat() * .3f);
 			AddParticleToGroup(&newParticleDef);
 		}
 	}

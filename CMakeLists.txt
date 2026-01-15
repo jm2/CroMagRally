@@ -36,6 +36,8 @@ endif()
 # GLOBAL OPTIONS (BEFORE ADDING SUBDIRECTORIES)
 #------------------------------------------------------------------------------
 
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+
 if(MSVC)
 	# This lets us detect that MSVC supports C++20 features via the __cplusplus macro
 	# (See: https://docs.microsoft.com/en-us/cpp/build/reference/zc-cplusplus)

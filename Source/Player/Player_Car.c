@@ -300,7 +300,7 @@ void SetPhysicsForVehicleType(short playerNum)
 				/* SPEED  */
 
 	if (gTrackNum == TRACK_NUM_ATLANTIS)				// rigged speed in subs
-		info->maxSpeed = MAX_SUBMARINE_SPEED + RandomFloat()*200.0f;
+		info->maxSpeed = MAX_SUBMARINE_SPEED + VisualRandomFloat()*200.0f;
 	else
 		info->maxSpeed = 3000.0f + speed * 3000.0f;
 
@@ -2018,10 +2018,10 @@ short		p2 = car2->PlayerNum;
 			car1->DeltaRot.y = PI2 * (1.0f- dot) * .1f;
 			car2->DeltaRot.y = -PI2 * (1.0f - dot) * .1f;
 
-			car1->DeltaRot.x = (RandomFloat()-.5f) * 3.0f;				// send other axes into wild spin
-			car1->DeltaRot.z = (RandomFloat()-.5f) * 3.0f;
-			car2->DeltaRot.x = (RandomFloat()-.5f) * 3.0f;
-			car2->DeltaRot.z = (RandomFloat()-.5f) * 3.0f;
+			car1->DeltaRot.x = (VisualRandomFloat()-.5f) * 3.0f;				// send other axes into wild spin
+			car1->DeltaRot.z = (VisualRandomFloat()-.5f) * 3.0f;
+			car2->DeltaRot.x = (VisualRandomFloat()-.5f) * 3.0f;
+			car2->DeltaRot.z = (VisualRandomFloat()-.5f) * 3.0f;
 
 
 					/* SET SKID INFO */
@@ -2090,7 +2090,7 @@ short		p2 = car2->PlayerNum;
 
 	if (didBumpFeedback)
 	{
-		float nextBumpFeedbackDelay = 0.45f + RandomFloat() * 0.1f;
+		float nextBumpFeedbackDelay = 0.45f + VisualRandomFloat() * 0.1f;
 		gPlayerInfo[p1].bumpSoundTimer = nextBumpFeedbackDelay;
 		gPlayerInfo[p2].bumpSoundTimer = nextBumpFeedbackDelay;
 	}
@@ -2544,7 +2544,7 @@ short	bestFront,bestBack,bestShot;
 						gPlayerInfo[playerNum].controlBits_New |= (1L << kControlBit_ThrowBackward);
 					else
 						gPlayerInfo[playerNum].controlBits_New |= (1L << kControlBit_ThrowForward);
-					gPlayerInfo[playerNum].attackTimer = RandomFloat() * 1.1f;
+					gPlayerInfo[playerNum].attackTimer = VisualRandomFloat() * 1.1f;
 				}
 			}
 		}
@@ -2602,7 +2602,7 @@ short	targetP;
 			if (gPlayerInfo[playerNum].targetingTimer > 1.0f)						// see if we can fire!
 			{
 				gPlayerInfo[playerNum].controlBits_New |= (1L << kControlBit_ThrowForward);
-				gPlayerInfo[playerNum].attackTimer = RandomFloat() * .7f;
+				gPlayerInfo[playerNum].attackTimer = VisualRandomFloat() * .7f;
 			}
 		}
 		else
@@ -2624,7 +2624,7 @@ short	targetP;
 static void DoCPUPOWLogic_Mine(short playerNum)
 {
 	gPlayerInfo[playerNum].controlBits_New |= (1L << kControlBit_ThrowBackward);
-	gPlayerInfo[playerNum].attackTimer = RandomFloat() * 2.0f;
+	gPlayerInfo[playerNum].attackTimer = VisualRandomFloat() * 2.0f;
 }
 
 
@@ -2678,7 +2678,7 @@ Boolean	attackCPUCars, inFront;
 				else
 					gPlayerInfo[playerNum].controlBits_New |= (1L << kControlBit_ThrowBackward);
 
-				gPlayerInfo[playerNum].attackTimer = RandomFloat() * .7f;
+				gPlayerInfo[playerNum].attackTimer = VisualRandomFloat() * .7f;
 			}
 		}
 		else
@@ -3048,7 +3048,7 @@ stopSkidding:
 				else if (gPlayerInfo[p].braking)					// always make same sound if braking
 					effect = EFFECT_SKID;
 				else												// otherwise random
-					effect = skidEffect[RandomRange(0,2)];
+					effect = skidEffect[VisualRandomLong() % 3];
 
 				gPlayerInfo[p].skidChannel = PlayEffect_Parms3D(effect, &gCoord, NORMAL_CHANNEL_RATE, vol);
 				gPlayerInfo[p].skidSoundTimer = gPlayerInfo[p].isComputer ? 1.3f : 0.8f;
@@ -3504,7 +3504,7 @@ short			textureNum;
 	{
 		NewParticleGroupDefType	groupDef;
 new_group:
-		gPlayerInfo[p].dragDebrisMagicNum = magicNum = MyRandomLong();			// generate a random magic num
+		gPlayerInfo[p].dragDebrisMagicNum = magicNum = VisualRandomLong();			// generate a random magic num
 
 		groupDef.magicNum				= magicNum;
 		groupDef.type					= PARTICLE_TYPE_FALLINGSPARKS;
@@ -3547,12 +3547,12 @@ new_group:
 			/* ADD PARTICLES TO GROUP */
 
 		r = wheelObj->Rot.y + carObj->Rot.y;								// calc rot of wheel in world
-		r += (RandomFloat() - .5f) * .3f;									// offset randomly
+		r += (VisualRandomFloat() - .5f) * .3f;									// offset randomly
 		speed = gPlayerInfo[p].currentRPM * 1200.0f;
 
 
 		smokeDelta.x = sin(r) * speed;
-		smokeDelta.y = speed * (.1f + RandomFloat() * .1f);
+		smokeDelta.y = speed * (.1f + VisualRandomFloat() * .1f);
 		smokeDelta.z = cos(r) * speed;
 
 		if (gPlayerInfo[p].accelBackwards)
@@ -3565,9 +3565,9 @@ new_group:
 		newParticleDef.groupNum		= particleGroup;
 		newParticleDef.where		= &coord;
 		newParticleDef.delta		= &smokeDelta;
-		newParticleDef.scale		= RandomFloat() + 1.0f;
-		newParticleDef.rotZ			= RandomFloat() * PI2;
-		newParticleDef.rotDZ		= (RandomFloat()-.5f) * 2.0f;
+		newParticleDef.scale		= VisualRandomFloat() + 1.0f;
+		newParticleDef.rotZ			= VisualRandomFloat() * PI2;
+		newParticleDef.rotDZ		= (VisualRandomFloat()-.5f) * 2.0f;
 		newParticleDef.alpha		= .8;
 		AddParticleToGroup(&newParticleDef);
 	}

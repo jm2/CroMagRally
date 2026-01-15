@@ -298,6 +298,8 @@ retryVideo:
 		}
 		else
 		{
+			const char* err = SDL_GetError();
+			SDL_Log("SDL_CreateWindow failed: %s", err ? err : "Unknown error");
 			throw std::runtime_error("Couldn't create SDL window.");
 		}
 	}

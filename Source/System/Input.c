@@ -374,6 +374,7 @@ static void UpdateGamepadSpecificInputNeeds(int gamepadNum)
 				// Inject Virtual Gamepad Button
 				if (gamepadNum == 0 && !gUserPrefersGamepad)
 				{
+#if defined(__ANDROID__)
 					if ((pb->id == SDL_GAMEPAD_BUTTON_SOUTH && gVirtualInput.btnA) ||
 						(pb->id == SDL_GAMEPAD_BUTTON_EAST && gVirtualInput.btnB) ||
 						(pb->id == SDL_GAMEPAD_BUTTON_WEST && gVirtualInput.btnX) ||
@@ -382,6 +383,7 @@ static void UpdateGamepadSpecificInputNeeds(int gamepadNum)
 					{
 						actuation = 1;
 					}
+#endif
 				}
 			}
 			else if (type == kInputTypeAxisPlus || type == kInputTypeAxisMinus)
@@ -398,6 +400,7 @@ static void UpdateGamepadSpecificInputNeeds(int gamepadNum)
 				// Inject Virtual Gamepad Axis
 				if (gamepadNum == 0 && !gUserPrefersGamepad)
 				{
+#if defined(__ANDROID__)
 					if (pb->id == SDL_GAMEPAD_AXIS_LEFTX)
 					{
 						float v = gVirtualInput.stickX;
@@ -410,6 +413,7 @@ static void UpdateGamepadSpecificInputNeeds(int gamepadNum)
 						if (type == kInputTypeAxisPlus && v > 0) value = SDL_max(value, v);
 						else if (type == kInputTypeAxisMinus && v < 0) value = SDL_max(value, -v);
 					}
+#endif
 				}
 
 				// Avoid magnitude bump when thumbstick is pushed past dead zone:
@@ -525,11 +529,13 @@ void DoSDLMaintenance(void)
 			case SDL_EVENT_WINDOW_FOCUS_LOST:
 			case SDL_EVENT_WINDOW_MINIMIZED:
 				SDL_Log("App backgrounded/lost focus! Resetting touch state.");
+#if defined(__ANDROID__)
 				// Wipe all fingers to prevent stuck inputs
 				for (int i = 0; i < MAX_TOUCH_FINGERS; i++) {
 					gFingers[i].active = false;
 				}
 				gJoystickFingerActive = false; // Release stick
+#endif
 				// UpdateVirtualGamepad(); // Unsafe to call here? State is pushed on next frame anyway.
 				break;
 
@@ -543,15 +549,25 @@ void DoSDLMaintenance(void)
 				{
 					// We need to compare against the virtual joystick ID.
 					// SDL_EVENT_GAMEPAD_... uses 'which' as joystick ID.
-					if (event.gdevice.which != gVirtualJoystickID)
+					bool isVirtual = false;
+#if defined(__ANDROID__)
+					if (event.gdevice.which == gVirtualJoystickID) isVirtual = true;
+#endif
+					if (!isVirtual)
 						gUserPrefersGamepad = true;
 				}
 				break;
 
 			case SDL_EVENT_GAMEPAD_AXIS_MOTION:
-				if (event.gaxis.which != gVirtualJoystickID && abs(event.gaxis.value) > 3000) // Deadzone check & ID check
+			{
+				bool isVirtual = false;
+#if defined(__ANDROID__)
+				if (event.gaxis.which == gVirtualJoystickID) isVirtual = true;
+#endif
+				if (!isVirtual && abs(event.gaxis.value) > 3000) // Deadzone check & ID check
 					gUserPrefersGamepad = true;
 				break;
+			}
 
 #if defined(__ANDROID__)
 			case SDL_EVENT_FINGER_DOWN:
@@ -938,7 +954,10 @@ static SDL_Gamepad* TryOpenGamepadFromJoystick(SDL_JoystickID joystickID)
 	}
 
 	// Check if we are opening the Virtual Gamepad
-	bool isVirtual = (joystickID == gVirtualJoystickID);
+	bool isVirtual = false;
+#if defined(__ANDROID__)
+	isVirtual = (joystickID == gVirtualJoystickID);
+#endif
 
 	// Slot Allocation Logic
 	// 1. If Virtual: Prefer High Slots (End of array) to avoid taking Player 1.
@@ -960,7 +979,12 @@ static SDL_Gamepad* TryOpenGamepadFromJoystick(SDL_JoystickID joystickID)
 	else
 	{
 		// Physical Gamepad: Check for Virtual Hogging Slot 0
+		bool hogging = false;
+#if defined(__ANDROID__)
 		if (gGamepads[0].open && SDL_GetGamepadID(gGamepads[0].sdlGamepad) == gVirtualJoystickID)
+			hogging = true;
+#endif
+		if (hogging)
 		{
 			SDL_Log("Physical Gamepad detected! Moving Virtual Gamepad from Slot 0 to make room...");
 			

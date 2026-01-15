@@ -285,26 +285,49 @@ static sockfd_t CreateUDPBroadcastSocket(void)
 {
 	sockfd_t sockfd = INVALID_SOCKET;
 
-	sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	// Use protocol 0 (default) for robustness
+	sockfd = socket(AF_INET, SOCK_DGRAM, 0);
 	if (!IsSocketValid(sockfd))
 	{
-		printf("%s: socket failed: %d\n", __func__, GetSocketError());
-		goto fail;
+		GetSocketError();
+#if _WIN32
+		SDL_Log("%s: socket(UDP) failed: %d", __func__, gLastQueriedSocketError);
+#else
+		const char *errStr = strerror(gLastQueriedSocketError);
+		SDL_Log("%s: socket(UDP) failed: %d (%s)", 
+			__func__, gLastQueriedSocketError, errStr ? errStr : "unknown");
+#endif
+		return INVALID_SOCKET;
 	}
 
+	// 1. Set SO_BROADCAST
 	int broadcast = 1;
 	int sockoptRC = setsockopt(sockfd, SOL_SOCKET, SO_BROADCAST, (void*) &broadcast, sizeof(broadcast));
 	if (-1 == sockoptRC)
 	{
+		GetSocketError();
+		SDL_Log("%s: setsockopt(SO_BROADCAST) failed: %d", __func__, gLastQueriedSocketError);
+		goto fail;
+	}
+
+	// 2. Set SO_REUSEADDR (Critical for Android/Linux broadcast listeners)
+	int reuse = 1;
+	sockoptRC = setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (void*) &reuse, sizeof(reuse));
+	if (-1 == sockoptRC)
+	{
+		GetSocketError();
+		SDL_Log("%s: setsockopt(SO_REUSEADDR) failed: %d", __func__, gLastQueriedSocketError);
 		goto fail;
 	}
 
 	if (!MakeSocketNonBlocking(sockfd))
 	{
+		GetSocketError();
+		SDL_Log("%s: MakeSocketNonBlocking failed: %d", __func__, gLastQueriedSocketError);
 		goto fail;
 	}
 
-	printf("Created UDP socket %d.\n", (int) sockfd);
+	SDL_Log("Created UDP socket %d.", (int) sockfd);
 	return sockfd;
 
 fail:
@@ -469,35 +492,29 @@ int NSpGame_StopAcceptingNewClients(NSpGameReference gameRef)
 
 static sockfd_t CreateTCPSocket(bool bindIt)
 {
-	sockfd_t sockfd = INVALID_SOCKET;
-	struct addrinfo* res = NULL;
-
-	struct addrinfo hints =
-	{
-		.ai_family = AF_INET,
-		.ai_socktype = SOCK_STREAM,
-		.ai_flags = AI_PASSIVE,
-		.ai_protocol = IPPROTO_TCP,
-	};
-
-	char portStr[16];
-	snprintf(portStr, sizeof(portStr), "%d", gNetPort);
-	if (0 != getaddrinfo(NULL, portStr, &hints, &res))
-	{
-		goto fail;
-	}
-
-	struct addrinfo* goodRes = res;  // TODO: actually walk through res
-
-	sockfd = socket(goodRes->ai_family, goodRes->ai_socktype, goodRes->ai_protocol);
+	// Try protocol 0 (default) instead of IPPROTO_TCP, just in case
+	sockfd_t sockfd = socket(AF_INET, SOCK_STREAM, 0);
+	
 	if (!IsSocketValid(sockfd))
 	{
-		goto fail;
+		GetSocketError(); // Capture errno
+#if _WIN32
+		SDL_Log("%s: socket(AF_INET=%d, SOCK_STREAM=%d) failed: %d", 
+			__func__, AF_INET, SOCK_STREAM, gLastQueriedSocketError);
+#else
+		const char *errStr = strerror(gLastQueriedSocketError);
+		SDL_Log("%s: socket(AF_INET=%d, SOCK_STREAM=%d) failed: %d (%s)", 
+			__func__, AF_INET, SOCK_STREAM, gLastQueriedSocketError, errStr ? errStr : "unknown");
+#endif
+		return INVALID_SOCKET;
 	}
 
 	if (bindIt && !MakeSocketNonBlocking(sockfd))
 	{
-		goto fail;
+		GetSocketError();
+		SDL_Log("%s: MakeSocketNonBlocking failed: %d", __func__, gLastQueriedSocketError);
+		CloseSocket(&sockfd);
+		return INVALID_SOCKET;
 	}
 
 	// Apply all performance/robustness socket options
@@ -505,29 +522,24 @@ static sockfd_t CreateTCPSocket(bool bindIt)
 
 	if (bindIt)
 	{
-		int bindRC = bind(sockfd, goodRes->ai_addr, goodRes->ai_addrlen);
-		if (0 != bindRC)
+		struct sockaddr_in bindAddr;
+		memset(&bindAddr, 0, sizeof(bindAddr));
+		bindAddr.sin_family = AF_INET;
+		bindAddr.sin_port = htons(gNetPort);
+		bindAddr.sin_addr.s_addr = INADDR_ANY;
+
+		if (bind(sockfd, (struct sockaddr*)&bindAddr, sizeof(bindAddr)) != 0)
 		{
-			printf("%s: bind failed: %d\n", __func__, GetSocketError());
-			goto fail;
+			GetSocketError();
+			SDL_Log("%s: bind failed: %d", __func__, gLastQueriedSocketError);
+			CloseSocket(&sockfd);
+			return INVALID_SOCKET;
 		}
 	}
 
-	freeaddrinfo(res);
-	res = NULL;
-
-	printf("Created TCP socket %d.\n", (int) sockfd);
+	SDL_Log("Created TCP socket %d.", (int) sockfd);
 
 	return sockfd;
-
-fail:
-	if (res != NULL)
-	{
-		freeaddrinfo(res);
-		res = NULL;
-	}
-	CloseSocket(&sockfd);
-	return INVALID_SOCKET;
 }
 
 #pragma mark - Robust recv helper
@@ -966,10 +978,13 @@ NSpGameReference NSpGame_Host(void)
 	game->isHosting				= true;
 	game->myID					= kNSpHostID;
 
+	gLastQueriedSocketError = 0; // Reset stale error
+
 	game->hostListenSocket		= CreateTCPSocket(true);
 
 	if (!IsSocketValid(game->hostListenSocket))
 	{
+		SDL_Log("%s: CreateTCPSocket failed (errno=%d)", __func__, gLastQueriedSocketError);
 		goto fail;
 	}
 
@@ -977,6 +992,8 @@ NSpGameReference NSpGame_Host(void)
 
 	if (listenRC != 0)
 	{
+		GetSocketError();
+		SDL_Log("%s: listen failed: %d", __func__, gLastQueriedSocketError);
 		goto fail;
 	}
 
@@ -984,6 +1001,7 @@ NSpGameReference NSpGame_Host(void)
 	NSpPlayer* me = NSpGame_GetPlayerFromID(game, kNSpHostID);
 	if (me == NULL)
 	{
+		SDL_Log("%s: NSpGame_GetPlayerFromID returned NULL!", __func__);
 		goto fail;
 	}
 	me->id			= kNSpHostID;
