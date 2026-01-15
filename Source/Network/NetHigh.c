@@ -778,7 +778,11 @@ short							i;
 		gHostOutMess.controlBits[i] = gPlayerInfo[i].controlBits;
 		gHostOutMess.controlBitsNew[i] = gPlayerInfo[i].controlBits_New;
 		gHostOutMess.analogSteering[i] = gPlayerInfo[i].analogSteering;
-		gHostOutMess.pauseState[i] = gPlayerInfo[i].net.pauseState;
+
+		if (gPlayerInfo[i].isComputer)
+			gHostOutMess.pauseState[i] = 0; // Ensure bots/dropped players don't pause the game
+		else
+			gHostOutMess.pauseState[i] = gPlayerInfo[i].net.pauseState;
 
 #if _DEBUG
 		if (!gPlayerInfo[i].headObj)
@@ -1252,8 +1256,9 @@ NSpPlayerID	playerID = mess->playerID;
 
 	gPlayerInfo[i].isComputer = true;							// turn it into a computer player.
 	gPlayerInfo[i].isEliminated = true;							// also eliminate from battles
+	gPlayerInfo[i].net.pauseState = 0;							// unpause if they were paused
 	gNumGatheredPlayers--;										// one less net player in the game
-	gNumRealPlayers--;
+	// gNumRealPlayers--;										// DON'T decrement this, or the screen layout will change mid-game!
 
 	if (gNumRealPlayers <= 1)									// see if nobody to play with
 		gGameOver = true;

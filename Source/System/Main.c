@@ -1169,6 +1169,7 @@ static void PlayArea(void)
 		if (GetNewNeedStateAnyP(kNeed_UIPause) || IsCmdQPressed())
 		{
 			DoPaused();
+			schedulePause = false; // Prevent second pause invocation later in this frame
 		}
 
 			/* CHECK CHEATS */

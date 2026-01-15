@@ -16,7 +16,7 @@
 /*     PROTOTYPES     */
 /**********************/
 
-static void GetLocalKeyStateForPlayer(short playerNum);
+static void GetLocalKeyStateForPlayer(short playerNum, short gamepadSlot);
 
 
 /****************************/
@@ -90,7 +90,9 @@ void GetLocalKeyState(void)
 
 	if (gActiveSplitScreenMode == SPLITSCREEN_MODE_NONE)
 	{
-		GetLocalKeyStateForPlayer(gMyNetworkPlayerNum);
+		// Single local player: always read from gamepad slot 0 (where the local gamepad lives),
+		// but store in the correct player slot (gMyNetworkPlayerNum for network, 0 for solo)
+		GetLocalKeyStateForPlayer(gMyNetworkPlayerNum, 0);
 	}
 
 		/* GET KEY STATES FOR BOTH PLAYERS */
@@ -99,7 +101,8 @@ void GetLocalKeyState(void)
 	{
 		for (int i = 0; i < gNumRealPlayers; i++)
 		{
-			GetLocalKeyStateForPlayer(i);
+			// Split-screen: each local player maps directly to their gamepad slot
+			GetLocalKeyStateForPlayer(i, i);
 		}
 	}
 }
@@ -111,12 +114,12 @@ void GetLocalKeyState(void)
 // Creates a bitfield of information for the player's key state.
 // This bitfield is use throughout the game and over the network for all player controls.
 //
-// INPUT:  	playerNum 			=	player #0..n
-// 			secondaryControsl	=	if doing split-screen player, true to check secondary local controls
+// INPUT:  	playerNum 		= player slot to store control bits (can be network player num)
+//			gamepadSlot		= which local gamepad slot to read from (0 for single player)
 //
 
 
-static void GetLocalKeyStateForPlayer(short playerNum)
+static void GetLocalKeyStateForPlayer(short playerNum, short gamepadSlot)
 {
 uint32_t	mask,old;
 short	i;
@@ -130,8 +133,8 @@ short	i;
 
 	for (i = 0; i < NUM_CONTROL_BITS; i++)
 	{
-		if (GetNeedState(i, playerNum))								// see if key is down
-			gPlayerInfo[playerNum].controlBits |= mask;				// set bit in bitfield
+		if (GetNeedState(i, gamepadSlot))							// see if key is down (read from local gamepad slot)
+			gPlayerInfo[playerNum].controlBits |= mask;				// set bit in bitfield (store in network player slot)
 
 		mask <<= 1;													// shift bit to next position
 	}
@@ -144,7 +147,7 @@ short	i;
 
 			/* COPY ANALOG STEERING */
 
-	gPlayerInfo[playerNum].analogSteering = GetAnalogSteering(playerNum);
+	gPlayerInfo[playerNum].analogSteering = GetAnalogSteering(gamepadSlot);
 }
 
 
