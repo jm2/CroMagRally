@@ -16,7 +16,7 @@
 #include <stdio.h>
 #include <unistd.h>
 
-int			gTargetFPS = 60;
+int			gTargetFPS = 0;  // 0 = uncapped (vsync), set during network game setup
 Boolean		gUseRedundancy = false;
 
 
@@ -1078,9 +1078,9 @@ static void PlayArea(void)
 
 
 		//
-		// 5. FPS CAP (LCD SYNC)
+		// 5. FPS CAP (LCD SYNC - NETWORK GAMES ONLY)
 		//
-		if (gTargetFPS > 0)
+		if (gNetGameInProgress && gTargetFPS > 0)
 		{
 			uint64_t elapsed = SDL_GetTicks() - startTick;
 			uint64_t targetPeriod = 1000 / gTargetFPS;
