@@ -720,6 +720,7 @@ void PreloadGameArt(void)
 {
 	LoadCavemanSkins();
 	LoadSpriteGroup(SPRITE_GROUP_INFOBAR, "infobar", 0);
+	LoadSpriteGroup(SPRITE_GROUP_GAMEPAD, "gamepad", 0);
 	LoadSpriteGroup(SPRITE_GROUP_EFFECTS, "effects", 0);
 	LoadSoundBank(SOUNDBANK_MAIN);
 	LoadSoundBank(SOUNDBANK_ANNOUNCER);

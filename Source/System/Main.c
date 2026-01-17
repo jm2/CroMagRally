@@ -13,7 +13,11 @@
 #include "miscscreens.h"
 #include "network.h"
 #include <SDL3/SDL.h>
-#include <stdio.h>
+#if defined(__ANDROID__)
+#include <jni.h>
+#include <SDL3/SDL_system.h>
+#endif
+#include <stddef.h>
 #include <unistd.h>
 
 int			gTargetFPS = 60;
@@ -1303,7 +1307,11 @@ short				numPanes;
 	OGL_NewViewDef(&viewDef);
 
 	viewDef.camera.hither 			= 50;
+#if defined(__ANDROID__)
+	viewDef.camera.yon 				= (SUPERTILE_ACTIVE_RANGE * SUPERTILE_SIZE * TERRAIN_POLYGON_SIZE) * 4;
+#else
 	viewDef.camera.yon 				= (SUPERTILE_ACTIVE_RANGE * SUPERTILE_SIZE * TERRAIN_POLYGON_SIZE);
+#endif
 	viewDef.camera.fov 				= GAME_FOV;
 
 	viewDef.view.clearColor.r 		= 0;
@@ -1707,6 +1715,69 @@ void GameMain(void)
 				/**************/
 				/* BOOT STUFF */
 				/**************/
+
+#ifdef __ANDROID__
+	// Acquire MulticastLock to allow UDP discovery
+	JNIEnv *env = (JNIEnv *)SDL_GetAndroidJNIEnv();
+	jobject activity = (jobject)SDL_GetAndroidActivity();
+	if (env && activity)
+	{
+		SDL_Log("Attempting to acquire MulticastLock...");
+		
+		// Context.WIFI_SERVICE
+		jclass contextClass = (*env)->FindClass(env, "android/content/Context");
+		jfieldID wifiServiceField = (*env)->GetStaticFieldID(env, contextClass, "WIFI_SERVICE", "Ljava/lang/String;");
+		jstring wifiServiceString = (jstring)(*env)->GetStaticObjectField(env, contextClass, wifiServiceField);
+		
+		// context.getSystemService(Context.WIFI_SERVICE) -> WifiManager
+		jmethodID getSystemService = (*env)->GetMethodID(env, contextClass, "getSystemService", "(Ljava/lang/String;)Ljava/lang/Object;");
+		jobject wifiManager = (*env)->CallObjectMethod(env, activity, getSystemService, wifiServiceString);
+
+		if (wifiManager)
+		{
+			jclass wifiManagerClass = (*env)->GetObjectClass(env, wifiManager);
+			
+			// wifiManager.createMulticastLock("CroMagRally")
+			jmethodID createMulticastLock = (*env)->GetMethodID(env, wifiManagerClass, "createMulticastLock", "(Ljava/lang/String;)Landroid/net/wifi/WifiManager$MulticastLock;");
+			jstring tag = (*env)->NewStringUTF(env, "CroMagRally");
+			jobject lock = (*env)->CallObjectMethod(env, wifiManager, createMulticastLock, tag);
+
+			if (lock)
+			{
+				jclass lockClass = (*env)->GetObjectClass(env, lock);
+				jmethodID acquire = (*env)->GetMethodID(env, lockClass, "acquire", "()V");
+				(*env)->CallVoidMethod(env, lock, acquire);
+
+				// Create GlobalRef to keep lock active
+				static jobject globalLock = NULL;
+				globalLock = (*env)->NewGlobalRef(env, lock);
+
+				SDL_Log("MulticastLock acquired successfully!");
+			}
+			else
+			{
+				SDL_Log("Failed to create MulticastLock");
+			}
+		}
+		else
+		{
+			SDL_Log("Failed to get WifiManager");
+		}
+
+		// Clean up locals
+		(*env)->DeleteLocalRef(env, contextClass);
+		(*env)->DeleteLocalRef(env, wifiServiceString);
+		if (wifiManager) (*env)->DeleteLocalRef(env, wifiManager);
+		(*env)->DeleteLocalRef(env, activity); 
+	}
+	else
+	{
+		SDL_Log("Failed to get JNIEnv or Activity");
+	}
+	
+	// Safety: clear any pending JNI exceptions so we don't crash SDL later
+	if (env) (*env)->ExceptionClear(env);
+#endif
 
 	ToolBoxInit();
 

@@ -11,6 +11,7 @@ enum
 	SPRITE_GROUP_OVERHEADMAP,
 	SPRITE_GROUP_TRACKSELECTSCREEN,
 	SPRITE_GROUP_SCOREBOARDSCREEN,
+	SPRITE_GROUP_GAMEPAD,
 	MAX_SPRITE_GROUPS
 };
 
@@ -131,3 +132,15 @@ enum
 	INFOBAR_SObjType_OverlayBackgroundH,
 };
 
+
+enum
+{
+GAMEPAD_SObjType_NULL = 0,
+GAMEPAD_SObjType_StickBase,
+GAMEPAD_SObjType_StickNub,
+GAMEPAD_SObjType_ButtonA,
+GAMEPAD_SObjType_ButtonB,
+GAMEPAD_SObjType_ButtonX,
+GAMEPAD_SObjType_ButtonY,
+GAMEPAD_SObjType_ButtonStart,
+};

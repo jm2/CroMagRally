@@ -36,6 +36,8 @@ endif()
 # GLOBAL OPTIONS (BEFORE ADDING SUBDIRECTORIES)
 #------------------------------------------------------------------------------
 
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+
 if(MSVC)
 	# This lets us detect that MSVC supports C++20 features via the __cplusplus macro
 	# (See: https://docs.microsoft.com/en-us/cpp/build/reference/zc-cplusplus)
@@ -95,7 +97,23 @@ endif()
 
 add_subdirectory(extern/Pomme)
 
-find_package(OpenGL REQUIRED)
+if(ANDROID)
+	# Configure gl4es
+	set(ANDROID ON CACHE BOOL "" FORCE)
+	set(STATICLIB ON CACHE BOOL "" FORCE)
+	set(DEFAULT_ES 2 CACHE STRING "" FORCE)
+	set(NO_GBM ON CACHE BOOL "" FORCE)
+	set(NOX11 ON CACHE BOOL "" FORCE)
+	set(USE_ANDROID_LOG ON CACHE BOOL "" FORCE)
+	set(NO_INIT_CONSTRUCTOR ON CACHE BOOL "" FORCE)
+	
+	# We are building gl4es as a static lib to link into our shared lib
+	add_subdirectory(extern/gl4es)
+endif()
+
+if(NOT ANDROID)
+	find_package(OpenGL REQUIRED)
+endif()
 
 #------------------------------------------------------------------------------
 # EXECUTABLE TARGET
@@ -119,9 +137,16 @@ elseif(APPLE)
 	set_source_files_properties(${CMAKE_SOURCE_DIR}/packaging/${GAME_TARGET}.icns PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
 endif()
 
-add_executable(${GAME_TARGET} ${GAME_SOURCES})
+if(ANDROID)
+	add_library(${GAME_TARGET} SHARED ${GAME_SOURCES})
+else()
+	add_executable(${GAME_TARGET} ${GAME_SOURCES})
+endif()
 
 target_include_directories(${GAME_TARGET} PRIVATE ${GAME_SRCDIR}/Headers)
+if(ANDROID)
+	target_include_directories(${GAME_TARGET} PRIVATE extern/gl4es/include)
+endif()
 
 #------------------------------------------------------------------------------
 # COMPILER/LINKER OPTIONS
@@ -212,7 +237,10 @@ else()
 endif()
 
 # Link core dependencies
-target_link_libraries(${GAME_TARGET} PRIVATE Pomme OpenGL::GL)
+target_link_libraries(${GAME_TARGET} PRIVATE Pomme)
+if(NOT ANDROID)
+	target_link_libraries(${GAME_TARGET} PRIVATE OpenGL::GL)
+endif()
 
 if(WIN32)
 	target_link_libraries(${GAME_TARGET} PRIVATE ws2_32 wlanapi)
@@ -221,6 +249,11 @@ endif()
 # Add required frameworks for KillMacMouseAcceleration and WiFi Detection
 if(APPLE)
 	target_link_libraries(${GAME_TARGET} PRIVATE "-framework Foundation" "-framework IOKit" "-framework SystemConfiguration")
+endif()
+
+if(ANDROID)
+	# Link gl4es (target GL)
+	target_link_libraries(${GAME_TARGET} PRIVATE log android EGL OpenSLES GL dl)
 endif()
 
 #------------------------------------------------------------------------------

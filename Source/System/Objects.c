@@ -924,6 +924,10 @@ next:
 	gGlobalColorFilter.b = 1.0;
 
 	glEnable(GL_NORMALIZE);
+#if defined(__ANDROID__)
+	if (gDrawingOverlayPane)
+		DrawVirtualGamepad();
+#endif
 }
 
 

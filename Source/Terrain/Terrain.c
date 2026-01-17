@@ -874,7 +874,86 @@ uint32_t			pictRowBytes;
 
 					/* SUBMIT THE GEOMETRY */
 
+#if defined(__ANDROID__)
+		// gl4es workaround: Camera Relative Rendering
+		// Textures Enabled, Lighting/Culling Disabled for safety visibility
+		{
+			MOVertexArrayData *data = gSuperTileMemoryList[i].meshData;
+			
+			// 1. Get Camera Position
+			OGLPoint3D camPos = gGameView->cameraPlacement[gCurrentSplitScreenPane].cameraLocation;
+			
+			// 2. Tile Origin
+			float originX = data->points[0].x;
+			float originY = data->points[0].y;
+			float originZ = data->points[0].z;
+			
+			// 3. Relative Pos
+			float relX = originX - camPos.x;
+			float relY = originY - camPos.y;
+			float relZ = originZ - camPos.z;
+
+			// 4. Matrix Setup
+			extern OGLMatrix4x4 gLocalToViewMatrix;
+			GLfloat viewRot[16];
+			for(int k=0; k<16; k++) viewRot[k] = gLocalToViewMatrix.value[k];
+			viewRot[12] = 0.0f; viewRot[13] = 0.0f; viewRot[14] = 0.0f;
+			
+			glPushMatrix();
+			glLoadMatrixf(viewRot);
+			glTranslatef(relX, relY, relZ);
+			
+			// 5. STATE: Unlit White Textured (DIAGNOSTIC MODE)
+			
+			// Texture Setup
+			glMatrixMode(GL_TEXTURE);
+			glLoadIdentity();
+			glMatrixMode(GL_MODELVIEW);
+			glBindTexture(GL_TEXTURE_2D, textureName);
+			glEnable(GL_TEXTURE_2D);
+			glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+			
+			// FORCE VISIBILITY: Disable everything that hides pixels
+			glDisable(GL_CULL_FACE);
+			glDisable(GL_LIGHTING);
+			glDisable(GL_ALPHA_TEST);     
+			glDisable(GL_BLEND);          
+			
+			// Force White (Textured) - Ignoring vertex colors for now as they might be dark
+			glColor4f(1.0f, 1.0f, 1.0f, 1.0f); 
+			
+			// 6. Draw
+			glBegin(GL_TRIANGLES);
+			for (int t = 0; t < data->numTriangles; t++) {
+				GLuint i0 = data->triangles[t].vertexIndices[0];
+				GLuint i1 = data->triangles[t].vertexIndices[1];
+				GLuint i2 = data->triangles[t].vertexIndices[2];
+				
+				// Vertex 0
+				if (data->uvs) glTexCoord2f(data->uvs[i0].u, data->uvs[i0].v);
+				 // if (data->normals) glNormal3f(data->normals[i0].x, data->normals[i0].y, data->normals[i0].z); 
+				glVertex3f(data->points[i0].x - originX, data->points[i0].y - originY, data->points[i0].z - originZ);
+				
+				// Vertex 1
+				if (data->uvs) glTexCoord2f(data->uvs[i1].u, data->uvs[i1].v);
+				glVertex3f(data->points[i1].x - originX, data->points[i1].y - originY, data->points[i1].z - originZ);
+
+				// Vertex 2
+				if (data->uvs) glTexCoord2f(data->uvs[i2].u, data->uvs[i2].v);
+				glVertex3f(data->points[i2].x - originX, data->points[i2].y - originY, data->points[i2].z - originZ);
+			}
+			glEnd();
+			
+			// Restore States to prevent regression on other objects
+			glEnable(GL_CULL_FACE);
+			glEnable(GL_LIGHTING);
+			glEnable(GL_ALPHA_TEST);
+			
+			glPopMatrix();
+		}
+#else
 				MO_DrawGeometry_VertexArray(gSuperTileMemoryList[i].meshData);
+#endif
 				gNumSuperTilesDrawn++;
 			}
 		}
