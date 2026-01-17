@@ -274,12 +274,26 @@ TerrainItemEntryType *itemPtr;
 long			type,numItems,startIndex,i;
 Boolean			flag;
 
+    // Safety check: grid may be NULL if terrain not loaded or already disposed
+    if (gSuperTileItemIndexGrid == nil)
+    {
+        SDL_Log("AddTerrainItems: gSuperTileItemIndexGrid is NULL!");
+        return;
+    }
 
 	numItems = gSuperTileItemIndexGrid[row][col].numItems;		// see how many items are on this supertile
 	if (numItems == 0)
 		return;
 
 	startIndex = gSuperTileItemIndexGrid[row][col].itemIndex;	// get starting index into item list
+	
+	// Safety check for gMasterItemList
+	if (gMasterItemList == nil || *gMasterItemList == nil)
+	{
+	    SDL_Log("AddTerrainItems: gMasterItemList is NULL!");
+	    return;
+	}
+	
 	itemPtr = &(*gMasterItemList)[startIndex];					// get pointer to 1st item on this supertile
 
 
@@ -303,10 +317,12 @@ Boolean			flag;
 		type = itemPtr[i].type;									// get item #
 		if (type > MAX_ITEM_NUM)								// error check!
 		{
+			SDL_Log("AddTerrainItems: Illegal item type %ld at row=%ld col=%ld", type, row, col);
 			DoAlert("Illegal Map Item Type!");
 			ShowSystemErr(type);
 		}
 
+		// SDL_Log("AddTerrainItems: Adding type %ld at (%f, %f)", type, x, z);
 		flag = gTerrainItemAddRoutines[type](&itemPtr[i],itemPtr[i].x, itemPtr[i].y); // call item's ADD routine
 		if (flag)
 			itemPtr[i].flags |= ITEM_FLAGS_INUSE;				// set in-use flag

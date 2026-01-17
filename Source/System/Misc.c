@@ -150,14 +150,32 @@ uint32_t GetRandomSeed(void)
 //
 uint32_t MyRandomLong(void)
 {
+	// Original Pangea Macro:
+	// seed2 ^= (((seed1 ^= (seed2>>5)*1568397607UL)>>7)+
+	//           (seed0 = (seed0+1)*3141592621UL))*2435386481UL;
+
+	// 1. Update seed1
+	// (seed1 ^= (seed2>>5)*1568397607UL)
 	uint32_t a = (seed2 >> 5) * 1568397607U;
-	seed1 ^= (a >> 7);
+	seed1 ^= a;
 	
-	uint32_t b = (seed0 + 1) * 3141592621U;
-	seed0 = b;
+	// 2. Calculate first term using new seed1
+	// ... >> 7
+	uint32_t term1 = seed1 >> 7;
 	
-	uint32_t c = (seed1 + seed0) * 2435386481U;
-	seed2 ^= c;
+	// 3. Update seed0 and get second term
+	// (seed0 = (seed0+1)*3141592621UL)
+	seed0 = (seed0 + 1) * 3141592621U;
+	uint32_t term2 = seed0;
+	
+	// 4. Combine terms
+	uint32_t sum = term1 + term2;
+	
+	// 5. Multiply result
+	uint32_t product = sum * 2435386481U;
+	
+	// 6. Update seed2
+	seed2 ^= product;
 	
 	return seed2;
 }

@@ -1847,3 +1847,28 @@ NSpPlayerID NSpPlayer_GetMyID(NSpGameReference gameRef)
 
 	return game->myID;
 }
+
+uint32_t NSpMessage_PeekWhat(NSpGameReference gameRef)
+{
+	NSpGame* game = NSpGame_Unbox(gameRef);
+	if (!game) return 0;
+	
+	if (!IsSocketValid(game->clientToHostSocket)) return 0;
+
+	char headerBuf[sizeof(NSpMessageHeader)];
+	
+	// Peek just the header size
+	ssize_t rc = recv(game->clientToHostSocket, headerBuf, sizeof(NSpMessageHeader), MSG_PEEK);
+	
+	if (rc == sizeof(NSpMessageHeader))
+	{
+		NSpMessageHeader* h = (NSpMessageHeader*)headerBuf;
+		// Validate magic to be sure it's one of ours
+		if (h->version == kNSpCMRProtocol4CC)
+		{
+			return h->what;
+		}
+	}
+	
+	return 0; // Unknown or no data
+}

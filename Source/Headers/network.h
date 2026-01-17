@@ -44,15 +44,29 @@ typedef struct
 
 		/* HOST CONTROL INFO MESSAGE */
 
+#define NET_BATCH_SIZE 4
+
+typedef struct
+{
+	uint32_t			controlBits;
+	uint32_t			controlBitsNew;
+	OGLVector2D			analogSteering;
+} NetInputUnit;
+
+		/* HOST CONTROL INFO MESSAGE */
+
 typedef struct
 {
 	NSpMessageHeader	h;
 	float				fps, fpsFrac;
 	uint32_t			randomSeed;					// simply used for error checking (all machines should have same seed!)
-	uint32_t			controlBits[MAX_PLAYERS];
-	uint32_t			controlBitsNew[MAX_PLAYERS];
-	OGLVector2D			analogSteering[MAX_PLAYERS];
-	uint32_t			frameCounter;
+	
+	uint32_t			frameCounter;				// The sim frame of the FIRST input in this batch
+	uint8_t				numInputs;					// usually 8
+	
+	// For each player, we have a batch of inputs
+	NetInputUnit		inputs[MAX_PLAYERS][NET_BATCH_SIZE];
+	
 	uint8_t				pauseState[MAX_PLAYERS];
 
 #if _DEBUG
@@ -68,10 +82,12 @@ typedef struct
 {
 	NSpMessageHeader	h;
 	int16_t				playerNum;
-	uint32_t			controlBits;
-	uint32_t			controlBitsNew;
-	uint32_t			frameCounter;
-	OGLVector2D			analogSteering;
+	
+	uint32_t			frameCounter;				// The sim frame of the FIRST input in this batch
+	uint8_t				numInputs;					// usually 8
+	
+	NetInputUnit		inputs[NET_BATCH_SIZE];
+	
 	uint8_t				pauseState;
 }NetClientControlInfoMessageType;
 
@@ -93,6 +109,7 @@ typedef struct
 
 void InitNetworkManager(void);
 void ShutdownNetworkManager(void);
+extern void ResetNetworkQueues(void);
 Boolean SetupNetworkHosting(void);
 Boolean SetupNetworkJoin(void);
 void ClientTellHostLevelIsPrepared(void);
@@ -101,8 +118,22 @@ void HostWaitForPlayersToPrepareLevel(void);
 void HostSend_ControlInfoToClients(void);
 void ClientSend_ControlInfoToHost(void);
 void ClientReceive_ControlInfoFromHost(void);
-Boolean Client_CheckIfMorePacketsWaiting(void);
+void ClientReceive_ControlInfoFromHost(void);
+Boolean Client_ConsumeNextPacketIfAvailable(void);
+Boolean Client_IsPacketWaiting(void);
 void HostReceive_ControlInfoFromClients(void);
+void HostReceive_ControlInfoFromClients(void);
+
+typedef struct {
+    uint32_t controlBits;
+    uint32_t controlBitsNew;
+    OGLVector2D analogSteering;
+    uint8_t pauseState;
+} NetInputFrame;
+
+void Net_Client_AccumulateInput(uint32_t controlBits, uint32_t controlBitsNew, OGLVector2D analogSteering, uint8_t pauseState);
+Boolean Net_GetNextSimulationFrame(NetInputFrame* outInputs);
+void Net_Host_AccumulateBatch(NetInputFrame* frames);
 
 void PlayerBroadcastVehicleType(void);
 void GetVehicleSelectionFromNetPlayers(void);

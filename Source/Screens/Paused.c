@@ -142,8 +142,7 @@ void OnToggleSplitscreenMode(const MenuItem* mi)
 static void UpdatePausedMenuCallback(void)
 {
 	MoveObjects();
-	DoPlayerTerrainUpdate();							// need to call this to keep supertiles active
-
+	// DoPlayerTerrainUpdate called in DrawPausedScene now
 
 			/* IF DOING NET GAME, LET OTHER PLAYERS KNOW WE'RE STILL GOING SO THEY DONT TIME OUT */
 
@@ -164,6 +163,16 @@ static void UpdatePausedMenuCallback(void)
 	}
 }
 
+static void DrawPausedScene(void)
+{
+	// Ensure flags are set (simulate pass 0)
+	gCurrentSplitScreenPane = 0;
+	DoPlayerTerrainUpdate();
+	
+	// Draw the scene (will iterate panes if needed)
+	OGL_DrawScene(DrawTerrain);
+}
+
 void DoPaused(void)
 {
 	MenuStyle style = kDefaultMenuStyle;
@@ -172,7 +181,7 @@ void DoPaused(void)
 	style.darkenPaneOpacity = .6f;
 	style.labelColor = (OGLColorRGBA){.7,.7,.7,1};
 	style.startButtonExits = true;
-
+	
 	//TODO: PushKeys/PopKeys isn't implemented! Save analog?
 	PushKeys();										// save key state so things dont get de-synced during net games
 
@@ -181,14 +190,18 @@ void DoPaused(void)
 	gSimulationPaused = true;
 	gHideInfobar = true;
 
-				/*************/
+					/*************/
 				/* MAIN LOOP */
 				/*************/
 
+	// Reset frame timing to realistic values for UI animation
+	// (PlayArea sets gFramesPerSecondFrac to 1/240Hz which is too slow for fade animation)
+	gFramesPerSecond = 60.0f;
+	gFramesPerSecondFrac = 1.0f / 60.0f;
 	CalcFramesPerSecond();
 	ReadKeyboard();
 
-	int outcome = StartMenu(gPauseMenuTree, &style, UpdatePausedMenuCallback, DrawTerrain);
+	int outcome = StartMenu(gPauseMenuTree, &style, UpdatePausedMenuCallback, DrawPausedScene);
 
 	// In net games, we let PlayArea get us out of gSimulationPaused.
 	if (!gNetGameInProgress)

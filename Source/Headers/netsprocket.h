@@ -157,6 +157,7 @@ void NSpClearMessageHeader(NSpMessageHeader* h);
 NSpMessageHeader* NSpMessage_Get(NSpGameReference gameRef);
 int NSpMessage_Send(NSpGameReference inGame, NSpMessageHeader* inMessage, int inFlags);
 void NSpMessage_Release(NSpGameReference gameRef, NSpMessageHeader* message);
+uint32_t NSpMessage_PeekWhat(NSpGameReference gameRef);
 
 int GetSocketError(void);
 int GetLastSocketError(void);

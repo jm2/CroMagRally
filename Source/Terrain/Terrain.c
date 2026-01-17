@@ -697,6 +697,10 @@ OGLVector3D			vertexNormalList[NUM_VERTICES_IN_SUPERTILE];
 
 static inline void ReleaseSuperTileObject(short superTileNum)
 {
+    if (superTileNum < 0 || superTileNum >= MAX_SUPERTILES) {
+        SDL_Log("ERROR: ReleaseSuperTileObject invalid index %d", superTileNum);
+        return;
+    }
 	gSuperTileMemoryList[superTileNum].mode = SUPERTILE_MODE_FREE;		// it's free!
 	gNumFreeSupertiles++;
 }
@@ -1063,6 +1067,7 @@ skip_cull_check:
 		SDL_Log("Terrain Frame %d: Used=%d, Visible=%d, Drawn=%d", frameCounter, usedCount, visibleCount, gNumSuperTilesDrawn);
 	}
 
+	//	DrawTrees();
 	OGL_PopState();
 
 
@@ -1071,9 +1076,6 @@ skip_cull_check:
 	DrawSkidMarks();
 	DrawObjects();														// draw objNodes & fences
 
-						/*******************************************/
-						/* PREPARE SUPERTILE GRID FOR THE NEXT FRAME */
-						/*******************************************/
 
 	// Fix: OGL_DrawScene runs gNumSplitScreenPanes+1 passes (Main + Overlay)
 	// Only clear flags after the FINAL pass to ensure all passes can see the USED bit
@@ -1322,6 +1324,8 @@ float		x,y;
 Byte		mask;
 short		playerNum;
 
+if (gNumSuperTilesDeep == 0) return; // Safety check for startup race conditions
+
 #if (SUPERTILE_ACTIVE_RANGE+SUPERTILE_ITEMRING_MARGIN) == 9
 static const Byte gridMask[(SUPERTILE_ACTIVE_RANGE+SUPERTILE_ITEMRING_MARGIN)*2]
 						  [(SUPERTILE_ACTIVE_RANGE+SUPERTILE_ITEMRING_MARGIN)*2] =
@@ -1443,12 +1447,6 @@ static const Byte gridMask[(SUPERTILE_ACTIVE_RANGE+SUPERTILE_ITEMRING_MARGIN)*2]
 
 		gCurrentSuperTileCol[playerNum] = x * TERRAIN_SUPERTILE_UNIT_SIZE_Frac;		// top/left row,col
 		gCurrentSuperTileRow[playerNum] = y * TERRAIN_SUPERTILE_UNIT_SIZE_Frac;
-
-		if (doLog) {
-			SDL_Log("TerrainUpdate P%d: Cam(%.2f, %.2f) ST_RC(%d, %d) Machine=%d Comp=%d", 
-				playerNum, x, y, gCurrentSuperTileRow[playerNum], gCurrentSuperTileCol[playerNum],
-				gPlayerInfo[playerNum].onThisMachine, gPlayerInfo[playerNum].isComputer);
-		}
 
 
 					/* SEE IF ROW/COLUMN HAVE CHANGED */

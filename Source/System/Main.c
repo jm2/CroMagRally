@@ -29,6 +29,10 @@ static void CleanupLevel(void);
 static void PlayArea(void);
 static Boolean PlayGame(void);
 
+static Boolean DoKeyboardChecks(Boolean inGame);
+static void DoPauseDialog(void);
+static void CheckCheats(void);
+
 static Boolean PlayGame_MultiplayerRace(void);
 static Boolean PlayGame_Practice(void);
 static Boolean PlayGame_Tournament(void);
@@ -263,6 +267,9 @@ static Boolean PlayGame(void)
 static Boolean PlayGame_Practice(void)
 {
 	gMyNetworkPlayerNum = 0;								// no networking in practice mode
+    gNetGameInProgress = false;
+    gIsNetworkHost = false;
+    gIsNetworkClient = false;
 
 
 
@@ -948,7 +955,7 @@ static void CheckCheats(void)
 
 static void PlayArea(void)
 {
-	Boolean schedulePause = false;
+
 
 
 	/* IF DOING NET GAME THEN WAIT FOR SYNC */
@@ -992,251 +999,189 @@ static void PlayArea(void)
 	//==========================================================================
 
 	MakeFadeEvent(true);
-	
-	// Frame Skipping: Limit max skip to avoid infinite loop death spiral
-	const int kMaxFrameSkip = 5;
+const double SIM_RATE = 240.0;
+const double SIM_STEP = 1.0 / SIM_RATE;
 
-	while(true)
-	{
-		int framesToSimulate = 1;
-		
-		// If we are a client, we might need to simulate multiple frames if we are behind
-		// (i.e. if multiple packets arrived at once)
-		bool doSkipRender = false;
-		
-		//
-		// SIMULATION LOOP
-		//
-		// We loop here to consume network packets. 
-		// If we process more than 1 packet, we skip rendering for the intermediate frames.
-		//
-		
-		for (int simLoop = 0; simLoop < framesToSimulate; simLoop++)
-		{
+    bool schedulePause = false;
+    double accumulator = 0.0;
+    uint32_t lastTime = SDL_GetTicks();
+    
+    // FORCE PHYSICS ENGINE TO 480Hz
+    // This ensures all clients run identical math.
+    gFramesPerSecond = (float)SIM_RATE;
+    gFramesPerSecondFrac = (float)SIM_STEP;
 
-				/******************************************/
-				/* GET CONTROL INFORMATION FOR THIS FRAME */
-				/******************************************/
-				//
-				// Also gathers frame rate info for the net clients.
-				//
+    // Flush any pending events
+    SDL_PumpEvents();
+    
+    // Clear all input states to prevent menu button press from triggering in-game exit
+    InvalidateAllInputs();
 
-				/* NON-NET */
+    while(true)
+    {
+        // 1. MEASURE DELTA TIME
+        uint32_t now = SDL_GetTicks();
+        double frameTime = (now - lastTime) / 1000.0;
+        lastTime = now;
+        
+        // Clamp frame time to avoid "Spiral of Death" on slow machines
+        if (frameTime > 0.1) frameTime = 0.1;
+        
+        accumulator += frameTime;
+        
+        // 2. NETWORK DRAIN (Fetch all available data)
+        if (gNetGameInProgress)
+        {
+            if (gIsNetworkHost) 
+                HostReceive_ControlInfoFromClients();
+            else if (gIsNetworkClient) 
+                ClientReceive_ControlInfoFromHost();
+        }
 
-		if (!gNetGameInProgress)
-		{
-			ReadKeyboard();									// read local keys
-			GetLocalKeyState();								// build a control state bitfield
+        // 2.5 INPUT POLLING (Once per render frame, before simulation loop)
+        ReadKeyboard();
+        GetLocalKeyState();
+        // Both UIPause (Start) and UIBack (ESC/B during gameplay) trigger pause
+        schedulePause = GetNewNeedStateAnyP(kNeed_UIPause) || GetNewNeedStateAnyP(kNeed_UIBack);
 
-			schedulePause = GetNewNeedStateAnyP(kNeed_UIPause);
-		}
+        // 3. SIMULATION LOOP (Fixed 240Hz)
+        int simSteps = 0;
+        while (accumulator >= SIM_STEP)
+        {
+            simSteps++;
+            // SDL_Log("Sim Step %d", simSteps); // Verbose
 
-				/* NETWORK CLIENT */
+            NetInputFrame inputs[MAX_PLAYERS];
+            
+            // Push local input to Batcher
+            if (gNetGameInProgress)
+            {
+               gPlayerInfo[gMyNetworkPlayerNum].net.pauseState = schedulePause;
+               Net_Client_AccumulateInput(
+                    gPlayerInfo[gMyNetworkPlayerNum].controlBits,
+                    gPlayerInfo[gMyNetworkPlayerNum].controlBits_New,
+                    gPlayerInfo[gMyNetworkPlayerNum].analogSteering,
+                    schedulePause
+               );
+            }
+            
+            // B. SYNC & RETRIEVE INPUTS
+            if (gNetGameInProgress)
+            {
+                // Try to pop the next frame from our Jitter Buffer
+                if (!Net_GetNextSimulationFrame(inputs))
+                {
+                    // SDL_Log("Stall!"); 
+                    break; 
+                }
+                
+                // We have inputs! Apply them to players.
+                for (int i=0; i < gNumRealPlayers; i++)
+                {
+                    gPlayerInfo[i].controlBits      = inputs[i].controlBits;
+                    gPlayerInfo[i].controlBits_New  = inputs[i].controlBitsNew;
+                    gPlayerInfo[i].analogSteering   = inputs[i].analogSteering;
+                    gPlayerInfo[i].net.pauseState   = inputs[i].pauseState;
+                }
+                
+                // HOST: Store the simulated frame inputs into the Host Batch (to send to clients)
+                if (gIsNetworkHost)
+                {
+                    Net_Host_AccumulateBatch(inputs);
+                }
+            }
 
-		else if (gIsNetworkClient)
-		{
-			// If this is the first iteration, block until we get a packet (sync with host)
-			// If this is a catch-up iteration (simLoop > 0), we already have the packet from the peek
-			if (simLoop == 0)
-			{
-				ClientReceive_ControlInfoFromHost();			// read all player's control info back from the Host once he's gathered it all
-			}
-			// (else: we already consumed the packet in the check below)
-		}
+            // C. PHYSICS STEP
+            if (IsNetGamePaused())
+            {
+                gSimulationPaused = true;
+                SetupNetPauseScreen();
+                MoveObjects(); // Paused movement only
+            }
+            else
+            {
+                gSimulationPaused = false;
+                RemoveNetPauseScreen();
+                
+                // [DEBUG]
+                // static uint32_t lastLog = 0;
+                // if (SDL_GetTicks() - lastLog > 1000) {
+                //    SDL_Log("Simulating Frame %u, Accumulator: %f", gSimulationFrame, accumulator);
+                //    lastLog = SDL_GetTicks();
+                // }
 
-				/* NETWORK HOST */
-		else
-		{
-			HostSend_ControlInfoToClients();			// now send everyone's key states to all clients
-		}
+                MoveEverything();
+                UpdateGameModeSpecifics();
+                
+                gSimulationFrame++;
+            }
+            
+            // D. CONSUME ACCUMULATOR
+            accumulator -= SIM_STEP;
+        }
 
+        // 4. RENDER PREPARATION
+        if (gSimulationFrame % 60 == 0) SDL_Log("Render Frame %d", gSimulationFrame);
 
-				/**********************/
-				/* SIMULATE THE WORLD */
-				/**********************/
+        // Force pane index to 0 to ensure DoPlayerTerrainUpdate sets flags but SKIPS cleanup.
+        // Cleanup must occur in DrawTerrain (after rendering) to avoid clearing usage flags too early.
+        gCurrentSplitScreenPane = 0; 
+        DoPlayerTerrainUpdate();
 
-		if (IsNetGamePaused())
-		{
-			gSimulationPaused = true;
-			SetupNetPauseScreen();
-
-			MoveObjects();								// DON'T MoveEverything!!
-			DoPlayerTerrainUpdate();					// required to keep terrain meshes alive
-		}
-		else
-		{
-//			printf("Running simulation frame %u\n", gSimulationFrame);
-
-			gSimulationPaused = false;
-			RemoveNetPauseScreen();
-
-			MoveEverything();
-			UpdateGameModeSpecifics();
-			DoPlayerTerrainUpdate();
-
-			gSimulationFrame++;
-		}
-
-
-
-			/******************************************/
-			/* UPDATE LOCAL INPUTS FOR NEXT NET FRAME */
-			/* AND SEND CLIENT INPUTS                 */
-			/******************************************/
-			//
-			// We can do this anytime AFTER this frame's key control info is no longer needed.
-			// Since this will change the control bits, we MUST BE SURE that the bits are not
-			// used again until the next frame!
-			//
-			// For best performance, we do this before the render function.  That way there is
-			// time for this send to get to the host while we're still waiting for the render to
-			// complete - we essentially get this send for free!
-			//
-
-		if (gNetGameInProgress)
-		{
-			ReadKeyboard();									// read local client keys
-
-			GetLocalKeyState();								// build a control state bitfield
-
-			schedulePause = GetNewNeedStateAnyP(kNeed_UIPause);
-			gPlayerInfo[gMyNetworkPlayerNum].net.pauseState = schedulePause;
-
-			if (gIsNetworkClient)
-				ClientSend_ControlInfoToHost();				// send this info to the host to be used the next frame
-		}
-
-		
-			/*******************************************/
-			/* CHECK FOR MORE PACKETS (FRAME SKIPPING) */
-			/*******************************************/
-			
-			if (gIsNetworkClient && gNetGameInProgress)
-			{
-				if (simLoop < kMaxFrameSkip)
-				{
-					// If there are more packets waiting, we should process them immediately
-					// instead of rendering. This allows us to catch up visually without "fast forwarding".
-                    // Client_CheckIfMorePacketsWaiting() consumes the packet if found.
-					if (Client_CheckIfMorePacketsWaiting())
-					{
-						framesToSimulate++; // Run the loop again!
-						doSkipRender = true;
-					}
-					else
-					{
-						doSkipRender = false;
-					}
-				}
-				else
-				{
-					// Hit limit, force render
-					doSkipRender = false;
-				}
-			}
-
-		} // END SIMULATION LOOP
-
-
-
-			/***************/
-			/* DRAW IT ALL */
-			/***************/
-
-		if (!doSkipRender)
-		{
-			OGL_DrawScene(DrawTerrain);
-		}
-
-
-
-			/************************************/
-			/* NET HOST RECEIVE CLIENT KEY INFO */
-			/************************************/
-			//
-			// Odds are that the clients have all sent their control into to the Host by now,
-			// so the Host can read all of the client key info for use on the next frame.
-			//
-
-		if (gIsNetworkHost)
-		{
-			HostReceive_ControlInfoFromClients();		// get client info
-		}
-
-
-			/**************/
-			/* MISC STUFF */
-			/**************/
-
-			/* SEE IF PAUSED */
-
-		if (GetNewNeedStateAnyP(kNeed_UIPause) || IsCmdQPressed())
-		{
-			DoPaused();
-			schedulePause = false; // Prevent second pause invocation later in this frame
-		}
-
-			/* CHECK CHEATS */
-
-		if (!gNetGameInProgress)
-		{
-			CheckCheats();
-		}
-
-			/* SEE IF PAUSED */
-
-		if (!gIsSelfRunningDemo && schedulePause)
-		{
-			RemoveNetPauseScreen();					// don't show pause menu on top of net pause message
-
-			DoPaused();
-			schedulePause = false;
-
-			gPlayerInfo[gMyNetworkPlayerNum].net.pauseState = 0;
-		}
-
-			/* UPDATE FRAMERATE AND SIM FRAME */
-
-		if (!gIsNetworkClient)						// clients dont need to calc frame rate since its passed to them from host.
-			CalcFramesPerSecond();
-
-
-
-				/* SEE IF TRACK IS COMPLETED */
-
-		if (gGameOver)													// if we need immediate abort, then bail now
-			break;
-
-		if (gTrackCompleted)
-		{
-			gTrackCompletedCoolDownTimer -= gFramesPerSecondFrac;		// game is done, but wait for cool-down timer before bailing
-			if (gTrackCompletedCoolDownTimer <= 0.0f)
-				break;
-		}
-
-		gDisableHiccupTimer = false;									// reenable this after the 1st frame
-
-			/* UPDATE SELF-RUNNING DEMO */
-
-		if (gIsSelfRunningDemo)
-		{
-			if (UserWantsOut())											// stop SRD if any key is pressed
-				break;
-
-			gSelfRunningDemoTimer -= gFramesPerSecondFrac;
-			if (gSelfRunningDemoTimer <= 0.0f)							// or stop of timer runs out
-			{
-				break;
-			}
-		}
-	}
-
-	gIsInGame = false;
+        // 5. RENDER (Variable Rate)
+        OGL_DrawScene(DrawTerrain);
+        
+        // 5. CHECK QUIT (with grace period to allow button release after menu selection)
+        static uint32_t gameStartTime = 0;
+        if (gameStartTime == 0) gameStartTime = SDL_GetTicks();
+        
+        bool pastGracePeriod = (SDL_GetTicks() - gameStartTime) > 500; // 500ms grace
+        if (pastGracePeriod && DoKeyboardChecks(false)) {
+            SDL_Log("Kickback: DoKeyboardChecks returned true");
+            gameStartTime = 0; // Reset for next game
+            break;
+        }
+            
+        if (schedulePause) {
+            DoPauseDialog();
+            // Reset timing after pause to prevent accumulator catchup (speed doubling)
+            lastTime = SDL_GetTicks();
+            accumulator = 0.0;
+            // Restore fixed frame rate - DoPaused() calls CalcFramesPerSecond() which corrupts these
+            gFramesPerSecond = (float)SIM_RATE;
+            gFramesPerSecondFrac = (float)SIM_STEP;
+            // Clear input states to prevent button persistence after unpause
+            InvalidateAllInputs();
+        }
+            
+        gSimulationFrame++;
+        
+        if (gGameOver) {
+             SDL_Log("Kickback: gGameOver is true");
+             break;  // Exit game loop when Retire Game is selected
+        }
+        
+        if (gNetSequenceState == kNetSequence_ClientOffline || 
+            gNetSequenceState == kNetSequence_HostOffline ||
+            gNetSequenceState >= kNetSequence_Error)
+        {
+             // Game ended
+             SDL_Log("Kickback: NetSequence Error %d", gNetSequenceState);
+             break;
+        }
+    }
+    
+    gIsInGame = false;
+    SDL_Log("Entering FadeOutArea");
+    FadeOutArea();
+    CleanupLevel();
 }
 
 
 void FadeOutArea(void)
 {
+    if (gGameView == NULL) return;
+
 			/* FADE OUT */
 
 	gGameView->fadeSound = true;
@@ -1334,6 +1279,7 @@ short				numPanes;
 	if ((!gIsSelfRunningDemo) && (gGameMode != GAME_MODE_PRACTICE))				// dont reset random seed for SRD - we want variety!
 		InitMyRandomSeed();
 	InitControlBits();
+    InvalidateAllInputs();
 
 	gSimulationFrame 		= 0;
 	gGameOver 			= false;
@@ -1544,6 +1490,8 @@ short				numPanes;
 
 
 			/* INIT OTHER MANAGERS */
+	
+	ResetNetworkQueues();
 
 	InitEffects();
 	InitItemsManager();
@@ -1586,7 +1534,8 @@ static void CleanupLevel(void)
 
 	DisposeAllBG3DContainers();
 
-	OGL_DisposeGameView();	// do this last!
+    if (gGameView)
+	    OGL_DisposeGameView();	// do this last!
 	DisposeSoundBank(SOUNDBANK_LEVELSPECIFIC);
 
 	gNumRealPlayers = 1;					// reset at end of level to be safe
@@ -1930,5 +1879,23 @@ void GameMain(void)
 }
 
 
+
+
+
+// ----------------------------------------------------------------------------
+// REIMPLEMENTED HELPERS
+// ----------------------------------------------------------------------------
+
+static Boolean DoKeyboardChecks(Boolean inGame)
+{
+    if (UserWantsOut()) return true;
+    // Add other checks if needed (screenshot?)
+    return false;
+}
+
+static void DoPauseDialog(void)
+{
+    DoPaused();
+}
 
 

@@ -845,11 +845,20 @@ OGLPolar2D GetNeedAxis2D(int negXID, int posXID, int negYID, int posYID)
 
 Boolean UserWantsOut(void)
 {
-	return GetNewNeedStateAnyP(kNeed_UIConfirm)
-		|| GetNewNeedStateAnyP(kNeed_UIBack)
-		|| GetNewNeedStateAnyP(kNeed_UIPause)
+    // kNeed_UIConfirm (A button) only for splash screens, NOT during gameplay
+    // (A button conflicts with Forward/Throw gameplay inputs)
+    if (!gIsInGame && GetNewNeedStateAnyP(kNeed_UIConfirm)) {
+        return true;
+    }
+    // kNeed_UIBack (B button / Escape) - only exit when NOT in game
+    // During gameplay, ESC should trigger pause (handled by schedulePause), not exit
+    if (!gIsInGame && GetNewNeedStateAnyP(kNeed_UIBack)) {
+        return true;
+    }
+    // NOTE: kNeed_UIPause (Start button) removed - it should trigger pause dialog (DoPauseDialog),
+    // not immediate game exit. Pause handling is in PlayArea via schedulePause variable.
 //		|| GetNewClickState(SDL_BUTTON_LEFT)
-        ;
+    return false;
 }
 
 Boolean IsCmdQPressed(void)

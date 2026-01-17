@@ -56,8 +56,74 @@ uint32_t			gClientSendCounter[MAX_PLAYERS];
 uint32_t			gHostSendCounter;
 int				gTimeoutCounter;
 
+
 NetHostControlInfoMessageType	gHostOutMess;
 NetClientControlInfoMessageType	gClientOutMess;
+
+// ============================================================================
+// HIGH-FREQUENCY NETWORK BUFFERS
+// ============================================================================
+
+#define INPUT_QUEUE_SIZE 256
+#define INPUT_QUEUE_MASK (INPUT_QUEUE_SIZE - 1)
+
+// Client Jitter Buffers (One per player, filled by Host updates)
+static NetInputFrame s_ClientInputQueue[MAX_PLAYERS][INPUT_QUEUE_SIZE];
+static int s_ClientQueueHead[MAX_PLAYERS];
+static int s_ClientQueueTail[MAX_PLAYERS];
+
+// Host Jitter Buffers (One per player, filled by Client updates)
+static NetInputFrame s_HostInputQueue[MAX_PLAYERS][INPUT_QUEUE_SIZE];
+static int s_HostQueueHead[MAX_PLAYERS];
+static int s_HostQueueTail[MAX_PLAYERS];
+
+// Local Batch Accumulator (Waiting to be sent to Host)
+static NetInputUnit s_LocalBatch[NET_BATCH_SIZE];
+static int s_LocalBatchCount = 0;
+// FORWARD DECLARATIONS
+static Boolean Host_InGame_HandleClientControlInfoMessage(NetClientControlInfoMessageType* mess);
+
+static uint32_t s_LocalBatchStartFrame = 0;
+
+// Host Batch Accumulator (Waiting to be sent to Clients)
+// Host must batch inputs for ALL players.
+static NetInputUnit s_HostBatch[MAX_PLAYERS][NET_BATCH_SIZE];
+static int s_HostBatchCount = 0;
+static uint32_t s_HostBatchStartFrame = 0;
+static float s_HostLastFPS = 60.0f;
+static float s_HostLastFPSFrac = 0.016f;
+
+// ----------------------------------------------------------------------------
+// QUEUE HELPERS
+// ----------------------------------------------------------------------------
+
+static void Queue_Append(NetInputFrame* queue, int* head, int* tail, NetInputFrame* item)
+{
+    queue[*tail] = *item;
+    *tail = (*tail + 1) & INPUT_QUEUE_MASK;
+    
+    // Overflow check: if tail hits head, drop the oldest item (head++)
+    if (*tail == *head)
+    {
+        *head = (*head + 1) & INPUT_QUEUE_MASK;
+        printf("NETWORK WARNING: Input Queue Overflow! Dropping frame.\n");
+    }
+}
+
+static Boolean Queue_Pop(NetInputFrame* queue, int* head, int* tail, NetInputFrame* outItem)
+{
+    if (*head == *tail) return false; // Empty
+    
+    *outItem = queue[*head];
+    *head = (*head + 1) & INPUT_QUEUE_MASK;
+    return true;
+}
+
+static int Queue_Count(int head, int tail)
+{
+    return (tail - head) & INPUT_QUEUE_MASK;
+}
+
 
 
 #pragma mark - Net fatal error
@@ -147,6 +213,20 @@ void InitNetworkManager(void)
 #endif
 
 	gNetSprocketInitialized = true;
+}
+
+void ResetNetworkQueues(void)
+{
+    SDL_memset(s_ClientQueueHead, 0, sizeof(s_ClientQueueHead));
+    SDL_memset(s_ClientQueueTail, 0, sizeof(s_ClientQueueTail));
+    
+    SDL_memset(s_HostQueueHead, 0, sizeof(s_HostQueueHead));
+    SDL_memset(s_HostQueueTail, 0, sizeof(s_HostQueueTail));
+    
+    s_LocalBatchCount = 0;
+    s_HostBatchCount = 0;
+    s_LocalBatchStartFrame = 0;
+    s_HostBatchStartFrame = 0;
 }
 
 
@@ -743,68 +823,61 @@ int						startTick = TickCount();
 #pragma mark -
 
 
-/************** SEND HOST CONTROL INFO TO CLIENTS *********************/
-//
-// The host sends this at the beginning of each frame to all of the network clients.
-// This data contains the gFramesPerSecond/Frac info plus the key controls state bitfields for each player.
-//
+// ----------------------------------------------------------------------------
+// HIGH-FREQUENCY API (Called by Main.c)
+// ----------------------------------------------------------------------------
 
-void HostSend_ControlInfoToClients(void)
+void Net_Client_AccumulateInput(uint32_t controlBits, uint32_t controlBitsNew, OGLVector2D analogSteering, uint8_t pauseState)
 {
-OSStatus						status;
-short							i;
+    if (!gNetGameInProgress) return; // Allow both Host and Client
 
-	GAME_ASSERT(gIsNetworkHost);
+    // 1. Add to local batch
+    s_LocalBatch[s_LocalBatchCount].controlBits = controlBits;
+    s_LocalBatch[s_LocalBatchCount].controlBitsNew = controlBitsNew;
+    s_LocalBatch[s_LocalBatchCount].analogSteering = analogSteering;
+    
+    // We update the global pause state immediately so it's fresh when we flush
+    gPlayerInfo[gMyNetworkPlayerNum].net.pauseState = pauseState; 
+    
+    s_LocalBatchCount++;
+    
+    // 2. If full, send
+    if (s_LocalBatchCount >= NET_BATCH_SIZE)
+    {
+        ClientSend_ControlInfoToHost();
+        s_LocalBatchCount = 0;
+        s_LocalBatchStartFrame += NET_BATCH_SIZE;
+    }
+}
 
-				/* BUILD MESSAGE */
-
-	NSpClearMessageHeader(&gHostOutMess.h);
-
-	gHostOutMess.h.to 			= kNSpAllPlayers;						// send to all clients
-	gHostOutMess.h.what 		= kNetHostControlInfoMessage;			// set message type
-	gHostOutMess.h.messageLen 	= sizeof(gHostOutMess);						// set size of message
-
-	gHostOutMess.frameCounter	= gHostSendCounter++;					// send the frame counter & inc
-	gHostOutMess.fps 			= gFramesPerSecond;						// fps
-	gHostOutMess.fpsFrac		= gFramesPerSecondFrac;					// fps frac
-	gHostOutMess.randomSeed		= MyRandomLong();						// send the host's current random value for sync verification
-
-#if _DEBUG
-	gHostOutMess.simTick		= gSimulationFrame;
-#endif
-
-	for (i = 0; i < MAX_PLAYERS; i++)								// control bits
-	{
-		gHostOutMess.controlBits[i] = gPlayerInfo[i].controlBits;
-		gHostOutMess.controlBitsNew[i] = gPlayerInfo[i].controlBits_New;
-		gHostOutMess.analogSteering[i] = gPlayerInfo[i].analogSteering;
-
-		if (gPlayerInfo[i].isComputer)
-			gHostOutMess.pauseState[i] = 0; // Ensure bots/dropped players don't pause the game
-		else
-			gHostOutMess.pauseState[i] = gPlayerInfo[i].net.pauseState;
-
-#if _DEBUG
-		if (!gPlayerInfo[i].headObj)
-			gHostOutMess.playerPositionCheck[i] = (OGLPoint3D) {0,0,0};
-		else
-			gHostOutMess.playerPositionCheck[i] = gPlayerInfo[i].coord;
-#endif
-	}
-
-			/* SEND IT */
-
-	status = NSpMessage_Send(gNetGame, &gHostOutMess.h, kNSpSendFlag_Registered);
-	if (status)
-		NetGameFatalError(kNetSequence_ErrorSendFailed);
+Boolean Net_GetNextSimulationFrame(NetInputFrame* outInputs)
+{
+    // Retrieve one frame of input for ALL players
+    for (int i=0; i < gNumRealPlayers; i++)
+    {
+        NSpPlayerID pid = gPlayerInfo[i].net.nspPlayerID; // Map to index? No, gPlayerInfo IS the index map.
+        
+        // Host uses s_HostInputQueue, Client uses s_ClientInputQueue
+        NetInputFrame* q = gIsNetworkHost ? s_HostInputQueue[i] : s_ClientInputQueue[i];
+        int* head = gIsNetworkHost ? &s_HostQueueHead[i] : &s_ClientQueueHead[i];
+        int* tail = gIsNetworkHost ? &s_HostQueueTail[i] : &s_ClientQueueTail[i];
+        
+        if (!Queue_Pop(q, head, tail, &outInputs[i]))
+        {
+             static uint32_t lastLog = 0;
+             if (SDL_GetTicks() - lastLog > 1000) {
+                 SDL_Log("Stall! Waiting for Player %d (Host=%d, Head=%d, Tail=%d)", 
+                    i, gIsNetworkHost, *head, *tail);
+                 lastLog = SDL_GetTicks();
+             }
+            return false; // Stutter / buffer empty
+        }
+    }
+    return true;
 }
 
 
 /************** GET NETWORK CONTROL INFO FROM HOST *********************/
-//
-// The client reads this from the host at the beginning of each frame.
-// This data will contain the fps and control bitfield info for each player.
-//
 
 static Boolean Client_InGame_HandleHostControlInfoMessage(NetHostControlInfoMessageType* mess)
 {
@@ -812,45 +885,55 @@ static Boolean Client_InGame_HandleHostControlInfoMessage(NetHostControlInfoMess
 
 	gTimeoutCounter = 0;
 
-	if (mess->frameCounter < gHostSendCounter)			// see if this is an old packet, possibly a duplicate.  If so, skip it
+    // Unlike before, we don't reject "old" packets by counter because batches might arrive out of order (UDP) 
+    // but we use TCP/Registered so order is guaranteed.
+    // However, we DO need to ensure we don't process a duplicate.
+    
+	if (mess->frameCounter < gHostSendCounter)			
 		return false;
 
-	if (mess->frameCounter > gHostSendCounter)			// see if we skipped a packet; one must have gotten lost
+	if (mess->frameCounter > gHostSendCounter)			
 	{
+		// Gap in frames? Should not happen with TCP.
+        // But if it does, we are in trouble.
 		NetGameFatalError(kNetSequence_ErrorLostPacket);
 		return false;
 	}
 
-	gHostSendCounter++;									// inc host counter since the next packet we get will be +1
+    // Advance expected frame counter by number of inputs in batch
+	gHostSendCounter += mess->numInputs; 
 
 	gFramesPerSecond 		= mess->fps;
 	gFramesPerSecondFrac 	= mess->fpsFrac;
-
-#if _DEBUG
-	if (mess->simTick != gSimulationFrame)
-	{
-		DoFatalAlert("Sim tick mismatch! mine=%u host=%u", mess->simTick, gSimulationFrame);
-	}
-#endif
 
 	if (MyRandomLong() != mess->randomSeed)				// verify that host's random # is in sync with ours!
 	{
 		NetGameFatalError(kNetSequence_SeedDesync);
 		return false;
 	}
-
-	for (int i = 0; i < MAX_PLAYERS; i++)					// control bits
+    
+    // Unpack Batch into Queue
+    int numInputs = mess->numInputs;
+    if (numInputs > NET_BATCH_SIZE) numInputs = NET_BATCH_SIZE;
+    
+	for (int p = 0; p < MAX_PLAYERS; p++)
 	{
-		gPlayerInfo[i].controlBits 		= mess->controlBits[i];
-		gPlayerInfo[i].controlBits_New 	= mess->controlBitsNew[i];
-		gPlayerInfo[i].analogSteering	= mess->analogSteering[i];
-		gPlayerInfo[i].net.pauseState	= mess->pauseState[i];
+        for (int i = 0; i < numInputs; i++)
+        {
+            NetInputFrame frame;
+            frame.controlBits       = mess->inputs[p][i].controlBits;
+            frame.controlBitsNew    = mess->inputs[p][i].controlBitsNew;
+            frame.analogSteering    = mess->inputs[p][i].analogSteering;
+            frame.pauseState        = mess->pauseState[p]; // Pause state is per-packet, applied to all frames
+            
+            Queue_Append(s_ClientInputQueue[p], &s_ClientQueueHead[p], &s_ClientQueueTail[p], &frame);
+        }
 
 #if _DEBUG
-		if (gPlayerInfo[i].headObj)
+		if (gPlayerInfo[p].headObj)
 		{
 			GAME_ASSERT_MESSAGE(
-					0 == memcmp(&mess->playerPositionCheck[i], &gPlayerInfo[i].coord, sizeof(OGLPoint3D)),
+					0 == memcmp(&mess->playerPositionCheck[p], &gPlayerInfo[p].coord, sizeof(OGLPoint3D)),
 					"Player positions got out of sync!");
 		}
 #endif
@@ -863,148 +946,161 @@ void ClientReceive_ControlInfoFromHost(void)
 {
 NSpMessageHeader 					*inMess = NULL;
 uint32_t							tick;
-Boolean								gotIt = false;
+//Boolean								gotIt = false;
 
 	GAME_ASSERT(gIsNetworkClient);
 
-	tick = TickCount();														// init tick for timeout
-
-	while (!gotIt)
+    // Drain the socket until empty.
+    // We want to fill our Jitter Buffer as much as possible.
+	while (true)
 	{
-		inMess = NSpMessage_Get(gNetGame);									// get message
+		inMess = NSpMessage_Get(gNetGame);
+		if (!inMess) break;
 
-		if (inMess)
-		{
-				/* WE GOT A PACKET */
+        switch (inMess->what)
+        {
+            case kNetHostControlInfoMessage:
+                Client_InGame_HandleHostControlInfoMessage((NetHostControlInfoMessageType*) inMess);
+                break;
 
-			switch (inMess->what)
-			{
-				case kNetHostControlInfoMessage:
-					gotIt = true;
-					Client_InGame_HandleHostControlInfoMessage((NetHostControlInfoMessageType*) inMess);
-					break;
+            default:
+                HandleOtherNetMessage(inMess);
+                break;
+        }
 
-				default:
-					if (HandleOtherNetMessage(inMess))
-					{
-						gotIt = true;
-					}
-					break;
-			}
-
-			NSpMessage_Release(gNetGame, inMess);
-			inMess = NULL;
-		}
-		else
-		{
-				/* SEE IF WE ARE NOT GETTING THE PACKET */
-				//
-				// If this happens, then it is possible that Net Sprocket lost a packet.  There is no way to know who's packet got lost
-				// so go ahead and send our most recent packet again in case it was us.  The Host will throw out any dupes that it gets.
-				//
-				// [SOURCE PORT NOTE: I don't think we should resend packets since we're using TCP for everything]
-
-			if ((TickCount() - tick) > (DATA_TIMEOUT*60))	// see if we've been waiting longer than n seconds
-			{
-				gTimeoutCounter++;								// keep track of how often this happens
-				if (gTimeoutCounter > 3)
-				{
-					NetGameFatalError(kNetSequence_ErrorNoResponseFromHost);
-					return;
-				}
-
-#if 0	// SOURCE PORT: DON'T RESEND - We're using TCP!
-				NSpMessage_Send(gNetGame, &gClientOutMess.h, kNSpSendFlag_Registered);	// resend the last message
-#endif
-
-				tick = TickCount();														// reset tick
-			}
-		}
+        NSpMessage_Release(gNetGame, inMess);
 	}
 }
 
 
-/**************** CLIENT CHECK IF MORE PACKETS WAITING *****************/
-//
-// Returns true if there is another Host Control Info packet waiting in the buffer.
-//
-Boolean Client_CheckIfMorePacketsWaiting(void)
+/**************** CLIENT CHECK IF PACKET WAITING *****************/
+Boolean Client_IsPacketWaiting(void)
 {
-	if (!gNetGame)
-		return false;
-		
-	// Peek at the socket to see if there is data
-	// Note: NSpMessage_Get does a recv(), so we just try to get a message.
-	// Since we are non-blocking, this is effectively a peek if we don't break the message handling.
-	// However, NSpMessage_Get consumes the message.
-	// So we need to handle it OR peek.
-	
-	// Actually, looking at NSpMessage_GetAsClient loop in Main.c:
-	// The game loop calls ClientReceive_ControlInfoFromHost blocking.
-	// We want to know if we should loop *again*.
-	// BUT ClientReceive_ControlInfoFromHost *consumes* the message.
-	
-	// The plan says: "Refactor the game loop... if (morePackets) ClientReceive_PollControlInfo()"
-	// But ClientReceive_ControlInfoFromHost handles the message internally.
-	
-	// Let's implement this by peeking NSpMessage_Get and if it returns a specific message type, we handle it and return true.
-	
-	NSpMessageHeader* message = NSpMessage_Get(gNetGame);
-	if (message)
-	{
-		if (message->what == kNetHostControlInfoMessage)
-		{
-			// We got another frame! Handle it immediately.
-			Client_InGame_HandleHostControlInfoMessage((NetHostControlInfoMessageType*) message);
-			NSpMessage_Release(gNetGame, message);
-			return true;
-		}
-		else
-		{
-			// Some other message, handle it standard way
-			HandleOtherNetMessage(message);
-			NSpMessage_Release(gNetGame, message);
-			return false; // Not a control info packet, so don't skip frame for this
-		}
-	}
-	
-	return false;
+    // Deprecated in new architecture. The "Packet" is now a batch in the queue.
+    // We return true if the queue has data.
+    return (Queue_Count(s_ClientQueueHead[0], s_ClientQueueTail[0]) > 0);
 }
 
 
+/**************** CLIENT CONSUME NEXT PACKET IF AVAILABLE *****************/
+Boolean Client_ConsumeNextPacketIfAvailable(void)
+{
+    // Deprecated. Just call Receive to drain socket.
+    ClientReceive_ControlInfoFromHost();
+    return false; 
+}
 
-/************** CLIENT SEND CONTROL INFO TO HOST *********************/
-//
-// At the end of each frame, the client sends the new control state info to the host for
-// the next frame.
-//
+
+// ----------------------------------------------------------------------------
+// CLIENT SEND CONTROL INFO TO HOST
+// ----------------------------------------------------------------------------
 
 void ClientSend_ControlInfoToHost(void)
 {
+OSStatus status;
+
+    // GAME_ASSERT(gIsNetworkClient); // Removed, Host calls this too
+
+    NSpClearMessageHeader(&gClientOutMess.h);
+
+    gClientOutMess.h.to             = kNSpHostID;                           // send to Host
+    gClientOutMess.h.what           = kNetClientControlInfoMessage;         // set message type
+    gClientOutMess.h.messageLen     = sizeof(gClientOutMess);               // set size of message
+    
+    gClientOutMess.frameCounter     = s_LocalBatchStartFrame;
+    gClientOutMess.numInputs        = s_LocalBatchCount;
+    gClientOutMess.playerNum        = gMyNetworkPlayerNum;
+    gClientOutMess.pauseState       = gPlayerInfo[gMyNetworkPlayerNum].net.pauseState;
+    
+    // Copy batch
+    for (int i = 0; i < s_LocalBatchCount; i++)
+    {
+        gClientOutMess.inputs[i] = s_LocalBatch[i];
+    }
+
+    // SEND IT (or LOOPBACK)
+    if (gIsNetworkHost)
+    {
+        // Direct injection for Host (Loopback)
+        Host_InGame_HandleClientControlInfoMessage(&gClientOutMess);
+    }
+    else
+    {
+        status = NSpMessage_Send(gNetGame, &gClientOutMess.h, kNSpSendFlag_Registered);
+        if (status)
+            NetGameFatalError(kNetSequence_ErrorSendFailed);
+    }
+}
+
+
+// ----------------------------------------------------------------------------
+// HOST BATCH API
+// ----------------------------------------------------------------------------
+
+void Net_Host_AccumulateBatch(NetInputFrame* frames) 
+{
+    // Store inputs for ALL players into the host batch
+    for (int i = 0; i < MAX_PLAYERS; i++)
+    {
+        s_HostBatch[i][s_HostBatchCount].controlBits     = frames[i].controlBits;
+        s_HostBatch[i][s_HostBatchCount].controlBitsNew  = frames[i].controlBitsNew;
+        s_HostBatch[i][s_HostBatchCount].analogSteering  = frames[i].analogSteering;
+    }
+    
+    // Also track pause state? Host tracks it separately.
+    
+    s_HostBatchCount++;
+    
+    if (s_HostBatchCount >= NET_BATCH_SIZE)
+    {
+        HostSend_ControlInfoToClients();
+        s_HostBatchCount = 0;
+        s_HostBatchStartFrame += NET_BATCH_SIZE;
+    }
+}
+
+
+/************** SEND HOST CONTROL INFO TO CLIENTS *********************/
+
+void HostSend_ControlInfoToClients(void)
+{
 OSStatus						status;
 
-	GAME_ASSERT(gIsNetworkClient);
+	GAME_ASSERT(gIsNetworkHost);
 
-				/* BUILD MESSAGE */
+	NSpClearMessageHeader(&gHostOutMess.h);
 
-	NSpClearMessageHeader(&gClientOutMess.h);
+	gHostOutMess.h.to 			= kNSpAllPlayers;						// send to all clients
+	gHostOutMess.h.what 		= kNetHostControlInfoMessage;			// set message type
+	gHostOutMess.h.messageLen 	= sizeof(gHostOutMess);						// set size of message
 
-	gClientOutMess.h.to 			= kNSpHostID;							// send to Host
-	gClientOutMess.h.what 			= kNetClientControlInfoMessage;			// set message type
-	gClientOutMess.h.messageLen 	= sizeof(gClientOutMess);				// set size of message
+	gHostOutMess.frameCounter	= s_HostBatchStartFrame;
+	
+	// We send the *average* FPS over the batch? Or just current.
+	// Since physics is fixed, this is mostly for debug or pure render.
+	gHostOutMess.fps 			= s_HostLastFPS;						
+	gHostOutMess.fpsFrac		= s_HostLastFPSFrac;
+	
+	gHostOutMess.randomSeed		= MyRandomLong();
+    gHostOutMess.numInputs      = s_HostBatchCount;
 
-	gClientOutMess.frameCounter		= gClientSendCounter[gMyNetworkPlayerNum]++;	// send client frame counter & inc
-	gClientOutMess.playerNum		= gMyNetworkPlayerNum;
-	gClientOutMess.controlBits 		= gPlayerInfo[gMyNetworkPlayerNum].controlBits;
-	gClientOutMess.controlBitsNew  	= gPlayerInfo[gMyNetworkPlayerNum].controlBits_New;
-	gClientOutMess.analogSteering	= gPlayerInfo[gMyNetworkPlayerNum].analogSteering;
-	gClientOutMess.pauseState		= gPlayerInfo[gMyNetworkPlayerNum].net.pauseState;
+    // Copy batch
+    for (int p=0; p < MAX_PLAYERS; p++)
+    {
+        for (int i=0; i < s_HostBatchCount; i++)
+        {
+            gHostOutMess.inputs[p][i] = s_HostBatch[p][i];
+        }
+		gHostOutMess.pauseState[p] = gPlayerInfo[p].net.pauseState;
+    }
+    
+    // TODO: SimTick and PositionCheck
 
 			/* SEND IT */
 
-	status = NSpMessage_Send(gNetGame, &gClientOutMess.h, kNSpSendFlag_Registered);
-//	if (status)
-//		DoFatalAlert("ClientSend_ControlInfoToHost: NSpMessage_Send failed!");
+	status = NSpMessage_Send(gNetGame, &gHostOutMess.h, kNSpSendFlag_Registered);
+	if (status)
+		NetGameFatalError(kNetSequence_ErrorSendFailed);
 }
 
 
@@ -1012,78 +1108,55 @@ OSStatus						status;
 
 static Boolean Host_InGame_HandleClientControlInfoMessage(NetClientControlInfoMessageType* mess)
 {
-	GAME_ASSERT(gIsNetworkHost);
-
-	int i = mess->playerNum;								// get player #
-
-	if (mess->frameCounter < gClientSendCounter[i])			// see if this is an old packet, possibly a duplicate.  If so, skip it
-		return false;
-	if (mess->frameCounter > gClientSendCounter[i])			// see if we skipped a packet; one must have gotten lost
-		DoFatalAlert("HostReceive_ControlInfoFromClients: It seems Net Sprocket has lost a packet");
-	gClientSendCounter[i]++;								// inc counter since the next packet we get will be +1
-
-
-	gPlayerInfo[i].controlBits	= mess->controlBits;
-	gPlayerInfo[i].controlBits_New = mess->controlBitsNew;
-	gPlayerInfo[i].analogSteering = mess->analogSteering;
-	gPlayerInfo[i].net.pauseState = mess->pauseState;
-
-	return true;
+    int playerNum = mess->playerNum;
+    if (playerNum < 0 || playerNum >= MAX_PLAYERS) return false;
+    
+    int numInputs = mess->numInputs;
+    if (numInputs > NET_BATCH_SIZE) numInputs = NET_BATCH_SIZE;
+    
+    // Unpack Batch into Host Queue
+    for (int i = 0; i < numInputs; i++)
+    {
+        NetInputFrame frame;
+        frame.controlBits       = mess->inputs[i].controlBits;
+        frame.controlBitsNew    = mess->inputs[i].controlBitsNew;
+        frame.analogSteering    = mess->inputs[i].analogSteering;
+        frame.pauseState        = mess->pauseState;
+        
+        Queue_Append(s_HostInputQueue[playerNum], &s_HostQueueHead[playerNum], &s_HostQueueTail[playerNum], &frame);
+    }
+    
+    return true;
 }
 
 void HostReceive_ControlInfoFromClients(void)
 {
-NSpMessageHeader 					*inMess;
-uint32_t								tick;
-Boolean								abort = false;
+    NSpMessageHeader* inMess;
+    // We do NOT block anymore. We just drain the network buffer.
+    // If the queue is empty, the Simulation loop will handle the stall.
 
 	GAME_ASSERT(gIsNetworkHost);
+    
+    while(true)
+    {
+        inMess = NSpMessage_Get(gNetGame);
+        if (!inMess) break;
+        
+        switch(inMess->what)
+        {
+            case kNetClientControlInfoMessage:
+                if (Host_InGame_HandleClientControlInfoMessage((NetClientControlInfoMessageType*) inMess))
+                {
+                    MarkPlayerSynced(inMess->from); // keep stats happy
+                }
+                break;
 
-	ClearPlayerSyncMask();
-	MarkPlayerSynced(NSpPlayer_GetMyID(gNetGame));			// the host already has its own info
-
-	tick = TickCount();										// start tick for timeout
-
-	while (!AreAllPlayersSynced() && !abort)				// loop until I've got the message from all players
-	{
-		inMess = NSpMessage_Get(gNetGame);					// get message
-		if (inMess)
-		{
-			tick = TickCount();								// reset tick for timeout
-			switch(inMess->what)
-			{
-				case kNetClientControlInfoMessage:
-					if (Host_InGame_HandleClientControlInfoMessage((NetClientControlInfoMessageType*) inMess))
-					{
-						MarkPlayerSynced(inMess->from);
-					}
-					break;
-
-				default:
-					if (HandleOtherNetMessage(inMess))
-					{
-						abort = true;
-					}
-					break;
-			}
-			NSpMessage_Release(gNetGame, inMess);			// dispose of message
-		}
-
-		if ((TickCount() - tick) > (DATA_TIMEOUT*60))		// see if we've been waiting longer than n seconds
-		{
-			gTimeoutCounter++;								// keep track of how often this happens
-			if (gTimeoutCounter > 3)
-			{
-				NetGameFatalError(kNetSequence_ErrorNoResponseFromClients);
-				return;
-			}
-
-#if 0		// Resending this while the client is paused will throw them out of sync!!
-			NSpMessage_Send(gNetGame, &gHostOutMess.h, kNSpSendFlag_Registered);
-#endif
-			tick = TickCount();														// reset tick
-		}
-	}
+            default:
+                HandleOtherNetMessage(inMess);
+                break;
+        }
+        NSpMessage_Release(gNetGame, inMess);
+    }
 }
 
 
