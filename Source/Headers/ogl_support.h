@@ -340,6 +340,7 @@ void OGL_Shutdown(void);
 void OGL_NewViewDef(OGLSetupInputType *viewDef);
 void OGL_SetupGameView(OGLSetupInputType *setupDefPtr);
 void OGL_DisposeGameView(void);
+int OGL_GetMonitorRefreshRate(void);
 void OGL_DrawScene(void (*drawRoutine)(void));
 void OGL_Camera_SetPlacementAndUpdateMatrices(int camNum);
 void OGL_MoveCameraFromTo(float fromDX, float fromDY, float fromDZ, float toDX, float toDY, float toDZ, int camNum);

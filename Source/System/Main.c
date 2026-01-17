@@ -14,6 +14,10 @@
 #include "network.h"
 #include <SDL3/SDL.h>
 #include <stdio.h>
+#include <unistd.h>
+
+int			gTargetFPS = 60;
+Boolean		gUseRedundancy = false;
 
 
 /****************************/
@@ -987,82 +991,60 @@ static void PlayArea(void)
 	// GAME LOOP
 	//==========================================================================
 
-	MakeFadeEvent(true);
-	
-	// Frame Skipping: Limit max skip to avoid infinite loop death spiral
-	const int kMaxFrameSkip = 5;
+	//
+	// WIFI JITTER FIX: CLIENT PRE-ROLL
+	// Send a burst of initial input packets to fill the Host's OS buffer.
+	// This prevents the Host from stalling (stuttering) if packets arrive with jitter.
+	//
+	if (gIsNetworkClient && gUseRedundancy)
+	{
+		for (int i = 0; i < 30; i++) // 30 frames = ~500ms buffer
+		{
+			ClientSend_ControlInfoToHost();
+		}
+	}
 
+	MakeFadeEvent(true);
+
+	
 	while(true)
 	{
-		int framesToSimulate = 1;
-		
-		// If we are a client, we might need to simulate multiple frames if we are behind
-		// (i.e. if multiple packets arrived at once)
-		bool doSkipRender = false;
-		
-		//
-		// SIMULATION LOOP
-		//
-		// We loop here to consume network packets. 
-		// If we process more than 1 packet, we skip rendering for the intermediate frames.
-		//
-		
-		for (int simLoop = 0; simLoop < framesToSimulate; simLoop++)
-		{
+		uint64_t startTick = SDL_GetTicks();
 
-				/******************************************/
-				/* GET CONTROL INFORMATION FOR THIS FRAME */
-				/******************************************/
-				//
-				// Also gathers frame rate info for the net clients.
-				//
-
-				/* NON-NET */
-
+		//
+		// 1. INPUT & NETWORK SYNC
+		//
 		if (!gNetGameInProgress)
 		{
 			ReadKeyboard();									// read local keys
 			GetLocalKeyState();								// build a control state bitfield
-
 			schedulePause = GetNewNeedStateAnyP(kNeed_UIPause);
 		}
-
-				/* NETWORK CLIENT */
-
 		else if (gIsNetworkClient)
 		{
-			// If this is the first iteration, block until we get a packet (sync with host)
-			// If this is a catch-up iteration (simLoop > 0), we already have the packet from the peek
-			if (simLoop == 0)
-			{
-				ClientReceive_ControlInfoFromHost();			// read all player's control info back from the Host once he's gathered it all
-			}
-			// (else: we already consumed the packet in the check below)
+			// Clients MUST wait for the Host's packet (Lockstep)
+			// This blocks until the packet for this frame arrives.
+			ClientReceive_ControlInfoFromHost();
 		}
-
-				/* NETWORK HOST */
 		else
 		{
-			HostSend_ControlInfoToClients();			// now send everyone's key states to all clients
+			// Host must send the inputs for THIS frame before simulation
+			HostSend_ControlInfoToClients();
 		}
 
 
-				/**********************/
-				/* SIMULATE THE WORLD */
-				/**********************/
-
+		//
+		// 2. SIMULATION
+		//
 		if (IsNetGamePaused())
 		{
 			gSimulationPaused = true;
 			SetupNetPauseScreen();
-
-			MoveObjects();								// DON'T MoveEverything!!
-			DoPlayerTerrainUpdate();					// required to keep terrain meshes alive
+			MoveObjects();
+			DoPlayerTerrainUpdate();
 		}
 		else
 		{
-//			printf("Running simulation frame %u\n", gSimulationFrame);
-
 			gSimulationPaused = false;
 			RemoveNetPauseScreen();
 
@@ -1074,76 +1056,39 @@ static void PlayArea(void)
 		}
 
 
-
-			/******************************************/
-			/* UPDATE LOCAL INPUTS FOR NEXT NET FRAME */
-			/* AND SEND CLIENT INPUTS                 */
-			/******************************************/
-			//
-			// We can do this anytime AFTER this frame's key control info is no longer needed.
-			// Since this will change the control bits, we MUST BE SURE that the bits are not
-			// used again until the next frame!
-			//
-			// For best performance, we do this before the render function.  That way there is
-			// time for this send to get to the host while we're still waiting for the render to
-			// complete - we essentially get this send for free!
-			//
-
+		//
+		// 3. SEND CLIENT INPUT (For NEXT frame)
+		//
 		if (gNetGameInProgress)
 		{
-			ReadKeyboard();									// read local client keys
-
-			GetLocalKeyState();								// build a control state bitfield
-
+			ReadKeyboard();
+			GetLocalKeyState();
 			schedulePause = GetNewNeedStateAnyP(kNeed_UIPause);
 			gPlayerInfo[gMyNetworkPlayerNum].net.pauseState = schedulePause;
 
 			if (gIsNetworkClient)
-				ClientSend_ControlInfoToHost();				// send this info to the host to be used the next frame
+				ClientSend_ControlInfoToHost();
 		}
 
-		
-			/*******************************************/
-			/* CHECK FOR MORE PACKETS (FRAME SKIPPING) */
-			/*******************************************/
-			
-			if (gIsNetworkClient && gNetGameInProgress)
-			{
-				if (simLoop < kMaxFrameSkip)
-				{
-					// If there are more packets waiting, we should process them immediately
-					// instead of rendering. This allows us to catch up visually without "fast forwarding".
-                    // Client_CheckIfMorePacketsWaiting() consumes the packet if found.
-					if (Client_CheckIfMorePacketsWaiting())
-					{
-						framesToSimulate++; // Run the loop again!
-						doSkipRender = true;
-					}
-					else
-					{
-						doSkipRender = false;
-					}
-				}
-				else
-				{
-					// Hit limit, force render
-					doSkipRender = false;
-				}
-			}
 
-		} // END SIMULATION LOOP
+		//
+		// 4. RENDER
+		//
+		OGL_DrawScene(DrawTerrain);
 
 
-
-			/***************/
-			/* DRAW IT ALL */
-			/***************/
-
-		if (!doSkipRender)
+		//
+		// 5. FPS CAP (LCD SYNC)
+		//
+		if (gTargetFPS > 0)
 		{
-			OGL_DrawScene(DrawTerrain);
+			uint64_t elapsed = SDL_GetTicks() - startTick;
+			uint64_t targetPeriod = 1000 / gTargetFPS;
+			if (elapsed < targetPeriod)
+			{
+				SDL_Delay((uint32_t)(targetPeriod - elapsed));
+			}
 		}
-
 
 
 			/************************************/
@@ -1372,6 +1317,7 @@ short				numPanes;
 	viewDef.styles.useFog			= false;
 	viewDef.styles.fogStart			= viewDef.camera.yon * .1f;
 	viewDef.styles.fogEnd			= viewDef.camera.yon;
+// REMOVING INCORRECT DEFINITION IF FOUND
 
 
 			/* SET LIGHTS */

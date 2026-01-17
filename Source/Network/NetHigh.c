@@ -17,6 +17,14 @@
 #include <stdio.h>
 #include <SDL3/SDL.h>
 
+#if defined(__APPLE__)
+#include <SystemConfiguration/SystemConfiguration.h>
+#elif defined(_WIN32)
+#include <windows.h>
+#include <wlanapi.h>
+#pragma comment(lib, "wlanapi.lib")
+#endif
+
 /**********************/
 /*     PROTOTYPES     */
 /**********************/
@@ -24,9 +32,12 @@
 static OSErr HostSendGameConfigInfo(void);
 static void HandleGameConfigMessage(NetConfigMessage *inMessage);
 static Boolean HandleOtherNetMessage(NSpMessageHeader	*message);
+static Boolean HandleOtherNetMessage(NSpMessageHeader	*message);
 static void PlayerUnexpectedlyLeavesGame(NSpPlayerLeftMessage *mess);
+int Net_GetConnectionHint(void);
 
 /****************************/
+
 /*    CONSTANTS             */
 /****************************/
 
@@ -96,7 +107,13 @@ static void MarkPlayerSynced(NSpPlayerID playerID)
 	gPlayerSyncMask |= 1 << playerID;
 }
 
+static Boolean PlayerIsSynced(NSpPlayerID playerID)
+{
+	return (gPlayerSyncMask & (1 << playerID)) != 0;
+}
+
 static Boolean AreAllPlayersSynced(void)
+
 {
 	uint32_t targetMask = NSpGame_GetActivePlayersIDMask(gNetGame);
 	return 0 == (gPlayerSyncMask ^ targetMask);
@@ -361,6 +378,21 @@ bool UpdateNetSequence(void)
 						gPlayerInfo[mess->playerNum].vehicleType = mess->vehicleType;	// save this player's type
 						gPlayerInfo[mess->playerNum].sex = mess->sex;					// save this player's sex
 						gPlayerInfo[mess->playerNum].skin = mess->skin;					// save this player's skin
+						
+						// Update target FPS (Lowest Common Denominator)
+						if (mess->refreshRate > 0 && mess->refreshRate < gTargetFPS)
+						{
+							gTargetFPS = mess->refreshRate;
+							printf("New client joined with %dHz. Lowering TargetFPS to %d.\n", mess->refreshRate, gTargetFPS);
+						}
+
+						// Check for WiFi / Redundancy
+						if (mess->connectionType == 1)
+						{
+							gUseRedundancy = true;
+							printf("New client is on WiFi. Enabling Redundant Input Mode.\n");
+						}
+
 						MarkPlayerSynced(message->from);								// inc count of received info
 
 						break;
@@ -440,6 +472,9 @@ bool UpdateNetSequence(void)
 Boolean SetupNetworkHosting(void)
 {
 	gNetSequenceState = kNetSequence_HostOffline;
+	gTargetFPS = OGL_GetMonitorRefreshRate();
+	gUseRedundancy = (Net_GetConnectionHint() == 1);
+	printf("Hosting Game. Local Refresh Rate: %dHz, WiFi: %d\n", gTargetFPS, gUseRedundancy);
 
 
 			/* GET SOME NAMES */
@@ -575,6 +610,8 @@ NetConfigMessage		message;
 //			message.numTracksCompleted= gTransientNumTracksCompleted;	// set # tracks completed (for car selection)
 			message.difficulty		= gDifficulty;			// set difficulty
 			message.tagDuration		= gTagDuration;					// set tag duration
+			message.targetFPS		= gTargetFPS;					// Set the global target FPS
+			message.useRedundancy	= gUseRedundancy;				// Set Redundancy Flag
 
 			status = NSpMessage_Send(gNetGame, &message.h, kNSpSendFlag_Registered);	// send message
 			if (status)
@@ -606,10 +643,15 @@ void HandleGameConfigMessage(NetConfigMessage* inMessage)
 	gTrackNum 			= inMessage->trackNum;
 	gNumRealPlayers 	= inMessage->numPlayers;
 	gMyNetworkPlayerNum = inMessage->playerNum;
+	gDifficulty			= inMessage->difficulty;
+	gTagDuration		= inMessage->tagDuration;
+	gTargetFPS			= inMessage->targetFPS;
+	gUseRedundancy		= inMessage->useRedundancy;
+
+	printf("Join Config Received. TargetFPS: %d, Redundancy: %d\n", gTargetFPS, gUseRedundancy);
+
 
 	// Copy transient settings
-	gTagDuration = inMessage->tagDuration;
-	gDifficulty = inMessage->difficulty;
 //	gTransientNumTracksCompleted = inMessage->numTracksCompleted;
 
 	// Get NSp's playerIDs (for use when player leaves game)
@@ -982,8 +1024,31 @@ Boolean Client_CheckIfMorePacketsWaiting(void)
 void ClientSend_ControlInfoToHost(void)
 {
 OSStatus						status;
+static uint32_t					historyControlBits[8];
+static OGLVector2D				historyAnalog[8];
 
 	GAME_ASSERT(gIsNetworkClient);
+
+				/* UPDATE HISTORY */
+	
+	if (gUseRedundancy)
+	{
+		// Shift history
+		for (int k = 7; k > 0; k--)
+		{
+			historyControlBits[k] = historyControlBits[k-1];
+			historyAnalog[k] = historyAnalog[k-1];
+		}
+		
+		// Store previous frame (current info before sending)
+		// Wait! This function sends info for NEXT frame?
+		// "ClientSend_ControlInfoToHost: send this info to the host to be used the next frame"
+		// The values in gPlayerInfo are what we just read.
+		// So we want to save THIS frame to history for NEXT packet.
+		historyControlBits[0] = gPlayerInfo[gMyNetworkPlayerNum].controlBits;
+		historyAnalog[0] = gPlayerInfo[gMyNetworkPlayerNum].analogSteering;
+	}
+
 
 				/* BUILD MESSAGE */
 
@@ -1000,6 +1065,15 @@ OSStatus						status;
 	gClientOutMess.analogSteering	= gPlayerInfo[gMyNetworkPlayerNum].analogSteering;
 	gClientOutMess.pauseState		= gPlayerInfo[gMyNetworkPlayerNum].net.pauseState;
 
+	if (gUseRedundancy)
+	{
+		for (int k = 0; k < 8; k++)
+		{
+			gClientOutMess.prevControlBits[k] = historyControlBits[k];
+			gClientOutMess.prevAnalogSteering[k] = historyAnalog[k];
+		}
+	}
+
 			/* SEND IT */
 
 	status = NSpMessage_Send(gNetGame, &gClientOutMess.h, kNSpSendFlag_Registered);
@@ -1010,25 +1084,74 @@ OSStatus						status;
 
 /*************** HOST GET CONTROL INFO FROM CLIENTS ***********************/
 
-static Boolean Host_InGame_HandleClientControlInfoMessage(NetClientControlInfoMessageType* mess)
+#define NET_QUEUE_SIZE 64
+typedef struct {
+    int head;
+    int tail;
+    NetClientControlInfoMessageType msgs[NET_QUEUE_SIZE];
+} PacketQueue;
+
+static PacketQueue sHostInputQueues[MAX_PLAYERS];
+
+// Init queues (Call this somewhere? Or rely on 0-init? Static is 0-init. Correct.)
+
+static void Queue_Push(int playerNum, NetClientControlInfoMessageType* msg)
 {
-	GAME_ASSERT(gIsNetworkHost);
+    PacketQueue* q = &sHostInputQueues[playerNum];
+    // Check overflow
+    int next = (q->tail + 1) % NET_QUEUE_SIZE;
+    if (next != q->head)
+    {
+        q->msgs[q->tail] = *msg;
+        q->tail = next;
+    }
+}
 
-	int i = mess->playerNum;								// get player #
+static NetClientControlInfoMessageType* Queue_Peek(int playerNum)
+{
+    PacketQueue* q = &sHostInputQueues[playerNum];
+    if (q->head == q->tail) return NULL;
+    return &q->msgs[q->head];
+}
 
-	if (mess->frameCounter < gClientSendCounter[i])			// see if this is an old packet, possibly a duplicate.  If so, skip it
-		return false;
-	if (mess->frameCounter > gClientSendCounter[i])			// see if we skipped a packet; one must have gotten lost
-		DoFatalAlert("HostReceive_ControlInfoFromClients: It seems Net Sprocket has lost a packet");
-	gClientSendCounter[i]++;								// inc counter since the next packet we get will be +1
+static void Queue_Pop(int playerNum)
+{
+    PacketQueue* q = &sHostInputQueues[playerNum];
+    if (q->head != q->tail)
+    {
+        q->head = (q->head + 1) % NET_QUEUE_SIZE;
+    }
+}
 
+// Helper to Apply msg to gPlayerInfo (Shared logic)
+static void ApplyClientMessage(NetClientControlInfoMessageType* mess)
+{
+    int i = mess->playerNum;
+    gPlayerInfo[i].controlBits	= mess->controlBits;
+    gPlayerInfo[i].controlBits_New = mess->controlBitsNew;
+    gPlayerInfo[i].analogSteering = mess->analogSteering;
+    gPlayerInfo[i].net.pauseState = mess->pauseState;
+}
 
-	gPlayerInfo[i].controlBits	= mess->controlBits;
-	gPlayerInfo[i].controlBits_New = mess->controlBitsNew;
-	gPlayerInfo[i].analogSteering = mess->analogSteering;
-	gPlayerInfo[i].net.pauseState = mess->pauseState;
-
-	return true;
+// Recover N from Future Packet (N+Gap)
+static Boolean RecoverFromFuture(NetClientControlInfoMessageType* future, int expectedFrame)
+{
+    int i = future->playerNum;
+    if (!gUseRedundancy) return false;
+    
+    int gap = future->frameCounter - expectedFrame;
+    int historyIndex = gap - 1; // Gap=1(N+1) -> Idx 0. Gap=2(N+2) -> Idx 1.
+    
+    if (historyIndex >= 0 && historyIndex < 8)
+    {
+        printf("Recovering Frame %d from Future Packet %d\n", expectedFrame, future->frameCounter);
+        gPlayerInfo[i].controlBits = future->prevControlBits[historyIndex];
+        gPlayerInfo[i].controlBits_New = 0;
+        gPlayerInfo[i].analogSteering = future->prevAnalogSteering[historyIndex];
+        gPlayerInfo[i].net.pauseState = 0;
+        return true;
+    }
+    return false;
 }
 
 void HostReceive_ControlInfoFromClients(void)
@@ -1046,6 +1169,46 @@ Boolean								abort = false;
 
 	while (!AreAllPlayersSynced() && !abort)				// loop until I've got the message from all players
 	{
+		// 1. Process Queues (Buffers)
+		for (int i = 0; i < gNumRealPlayers; i++)
+		{
+			if (PlayerIsSynced(i)) continue; // Already have data for this frame
+
+			NetClientControlInfoMessageType* msg = Queue_Peek(i);
+			while (msg)
+			{
+				if (msg->frameCounter < gClientSendCounter[i])
+				{
+					// Discard Old Packet
+					Queue_Pop(i);
+					msg = Queue_Peek(i);
+				}
+				else if (msg->frameCounter == gClientSendCounter[i])
+				{
+					// Exact Match
+					ApplyClientMessage(msg);
+					gClientSendCounter[i]++;
+					MarkPlayerSynced(i);
+					Queue_Pop(i);
+					break; // Done for this player
+				}
+				else // Future
+				{
+					// Try Recovery
+					if (RecoverFromFuture(msg, gClientSendCounter[i]))
+					{
+						gClientSendCounter[i]++;
+						MarkPlayerSynced(i);
+						// Do NOT Pop. Keep future packet for later.
+					}
+					break; // Wait for missing packets (or used recovery)
+				}
+			}
+		}
+
+		if (AreAllPlayersSynced()) break;
+
+		// 2. Poll Network
 		inMess = NSpMessage_Get(gNetGame);					// get message
 		if (inMess)
 		{
@@ -1053,11 +1216,19 @@ Boolean								abort = false;
 			switch(inMess->what)
 			{
 				case kNetClientControlInfoMessage:
-					if (Host_InGame_HandleClientControlInfoMessage((NetClientControlInfoMessageType*) inMess))
-					{
-						MarkPlayerSynced(inMess->from);
-					}
+				{
+					NetClientControlInfoMessageType* cMsg = (NetClientControlInfoMessageType*)inMess;
+					int i = cMsg->playerNum;
+                    
+                    // Route to Queue (or process directly if empty and matching?)
+                    // Simpler: Always Push to Queue, then let Step 1 handle it?
+                    // Or Optimization: If Queue Empty & Match, Process. Else Push.
+                    // Let's Push and let Step 1 handle it immediately (via "continue" or loop structure?).
+                    // Since we are inside the `while(!Synced)` loop, Step 1 will run next iteration.
+                    // This adds 1 loop iteration latency (0 time). Cleanest logic.
+                    Queue_Push(i, cMsg);
 					break;
+				}
 
 				default:
 					if (HandleOtherNetMessage(inMess))
@@ -1077,10 +1248,6 @@ Boolean								abort = false;
 				NetGameFatalError(kNetSequence_ErrorNoResponseFromClients);
 				return;
 			}
-
-#if 0		// Resending this while the client is paused will throw them out of sync!!
-			NSpMessage_Send(gNetGame, &gHostOutMess.h, kNSpSendFlag_Registered);
-#endif
 			tick = TickCount();														// reset tick
 		}
 	}
@@ -1088,6 +1255,94 @@ Boolean								abort = false;
 
 
 #pragma mark -
+
+
+/******************** GET CONNECTION HINT ************************/
+//
+// Returns 1 if likely WiFi, 0 if wired.
+//
+//
+// DETECT WIFI CONNECTION
+// Returns: 1 if WiFi, 0 if Wired/Unknown
+//
+int Net_GetConnectionHint(void)
+{
+#if defined(__APPLE__)
+	// macOS Implementation using SystemConfiguration
+	int isWifi = 0;
+	CFArrayRef interfaces = SCNetworkInterfaceCopyAll();
+	if (interfaces)
+	{
+		CFIndex count = CFArrayGetCount(interfaces);
+		for (CFIndex i = 0; i < count; i++)
+		{
+			SCNetworkInterfaceRef interface = (SCNetworkInterfaceRef)CFArrayGetValueAtIndex(interfaces, i);
+			CFStringRef interfaceType = SCNetworkInterfaceGetInterfaceType(interface);
+			
+			if (CFStringCompare(interfaceType, kSCNetworkInterfaceTypeIEEE80211, 0) == kCFCompareEqualTo)
+			{
+				isWifi = 1;
+				break;
+			}
+		}
+		CFRelease(interfaces);
+	}
+	return isWifi;
+
+#elif defined(_WIN32)
+	// Windows Implementation using wlanapi
+	HANDLE hClient = NULL;
+	DWORD dwMaxClient = 2; // WLAN_API_VERSION_2_0
+	DWORD dwCurVersion = 0;
+	DWORD dwResult = 0;
+	int isWifi = 0;
+
+	dwResult = WlanOpenHandle(dwMaxClient, NULL, &dwCurVersion, &hClient);
+	if (dwResult == ERROR_SUCCESS)
+	{
+		PWLAN_INTERFACE_INFO_LIST pIfList = NULL;
+		dwResult = WlanEnumInterfaces(hClient, NULL, &pIfList);
+		if (dwResult == ERROR_SUCCESS)
+		{
+			if (pIfList->dwNumberOfItems > 0)
+			{
+				// Found a wireless interface. Check if any are connected?
+				// For now, presence of interface is hint enough to enable redundancy safety.
+				for (int i = 0; i < (int)pIfList->dwNumberOfItems; i++)
+				{
+					if (pIfList->InterfaceInfo[i].isState == wlan_interface_state_connected)
+					{
+						isWifi = 1;
+						break;
+					}
+				}
+			}
+			WlanFreeMemory(pIfList);
+		}
+		WlanCloseHandle(hClient, NULL);
+	}
+	return isWifi;
+
+#else
+	// Linux / Default Implementation
+	FILE *fp = fopen("/proc/net/wireless", "r");
+	if (fp) {
+		char line[256];
+		int lineCount = 0;
+		int isWifi = 0;
+		while (fgets(line, sizeof(line), fp)) {
+			lineCount++;
+			if (lineCount > 2) { 
+				isWifi = 1; // Content implies interface exists.
+				break;
+			}
+		}
+		fclose(fp);
+		return isWifi;
+	}
+	return 0;
+#endif
+}
 
 
 /********************* PLAYER BROADCAST VEHICLE TYPE *******************************/
@@ -1113,6 +1368,8 @@ NetPlayerCharTypeMessage	outMess;
 	outMess.vehicleType		= gPlayerInfo[gMyNetworkPlayerNum].vehicleType;
 	outMess.sex				= gPlayerInfo[gMyNetworkPlayerNum].sex;
 	outMess.skin			= gPlayerInfo[gMyNetworkPlayerNum].skin;
+	outMess.refreshRate		= OGL_GetMonitorRefreshRate();
+	outMess.connectionType	= Net_GetConnectionHint();
 
 			/* SEND IT */
 

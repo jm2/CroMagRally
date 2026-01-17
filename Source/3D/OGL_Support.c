@@ -138,6 +138,28 @@ void OGL_Boot(void)
 }
 
 
+/******************** OGL GET MONITOR REFRESH RATE *****************/
+//
+// Returns the refresh rate in Hz (e.g., 60, 120, 144).
+// Defaults to 60 if it fails to detect.
+//
+
+int OGL_GetMonitorRefreshRate(void)
+{
+	if (!gSDLWindow) return 60;
+
+	SDL_DisplayID displayID = SDL_GetDisplayForWindow(gSDLWindow);
+	if (displayID == 0) return 60;
+
+	const SDL_DisplayMode* mode = SDL_GetDesktopDisplayMode(displayID);
+	if (!mode) return 60;
+
+	if (mode->refresh_rate <= 0.0f) return 60;
+
+	return (int)roundf(mode->refresh_rate);
+}
+
+
 /******************** OGL SHUTDOWN *****************/
 
 void OGL_Shutdown(void)

@@ -29,9 +29,11 @@ typedef struct
 	int8_t				trackNum;							// which track to play for battle modes
 	int8_t				playerNum;							// this player's index
 	int8_t				numPlayers;							// # players in net game
-//	uint8_t				numTracksCompleted;					// pass saved game value to clients so we're all the same here
+	//	uint8_t				numTracksCompleted;					// pass saved game value to clients so we're all the same here
 	uint8_t				difficulty;							// pass host's difficulty setting so we're in sync
 	uint8_t				tagDuration;						// # minutes in tag game
+	uint8_t				useRedundancy;						// Enable redundant input transmission (WiFi mode)
+	uint16_t			targetFPS;							// The FPS cap for the game (min of all players)
 }NetConfigMessage;
 
 		/* SYNC MESSAGE */
@@ -72,6 +74,11 @@ typedef struct
 	uint32_t			controlBitsNew;
 	uint32_t			frameCounter;
 	OGLVector2D			analogSteering;
+
+	// Redundancy History (Last 8 frames)
+	uint32_t			prevControlBits[8];
+	OGLVector2D			prevAnalogSteering[8];
+	
 	uint8_t				pauseState;
 }NetClientControlInfoMessageType;
 
@@ -85,6 +92,8 @@ typedef struct
 	int16_t				vehicleType;
 	int16_t				sex;				// 0 = male, 1 = female
 	int16_t				skin;
+	int16_t				refreshRate;						// Client's monitor refresh rate
+	int16_t				connectionType;						// 0 = Wired, 1 = WiFi
 }NetPlayerCharTypeMessage;
 
 

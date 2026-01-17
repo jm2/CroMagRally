@@ -99,7 +99,10 @@ extern int						gLoadTextureFlags;
 extern int						gNetPort;
 extern int						gNetSequenceError;
 extern int						gNetSequenceState;
+extern int						gTargetFPS;
+extern Boolean					gUseRedundancy;
 extern int						gNumObjectNodes;
+
 extern int						gNumObjectsInBG3DGroupList[MAX_BG3D_GROUPS];
 extern int						gNumPointers;
 extern int						gNumSplitScreenPanes;
