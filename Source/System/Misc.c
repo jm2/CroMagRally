@@ -11,6 +11,7 @@
 
 #include "game.h"
 #include "network.h"
+#include <time.h>
 
 extern	SDL_Window* 	gSDLWindow;
 
@@ -142,10 +143,67 @@ uint32_t GetRandomSeed(void)
 //		without the 0xffff at the end.
 //
 
-unsigned long MyRandomLong(void)
+//
+// My own random number generator that returns a 32-bit integer.
+// Rewritten to be safe on 64-bit systems (enforcing 32-bit wrap-around behavior).
+// Used for deterministic gameplay sync.
+//
+uint32_t MyRandomLong(void)
 {
-  return seed2 ^= (((seed1 ^= (seed2>>5)*1568397607UL)>>7)+
-                   (seed0 = (seed0+1)*3141592621UL))*2435386481UL;
+	// Original Pangea Macro:
+	// seed2 ^= (((seed1 ^= (seed2>>5)*1568397607UL)>>7)+
+	//           (seed0 = (seed0+1)*3141592621UL))*2435386481UL;
+
+	// 1. Update seed1
+	// (seed1 ^= (seed2>>5)*1568397607UL)
+	uint32_t a = (seed2 >> 5) * 1568397607U;
+	seed1 ^= a;
+	
+	// 2. Calculate first term using new seed1
+	// ... >> 7
+	uint32_t term1 = seed1 >> 7;
+	
+	// 3. Update seed0 and get second term
+	// (seed0 = (seed0+1)*3141592621UL)
+	seed0 = (seed0 + 1) * 3141592621U;
+	uint32_t term2 = seed0;
+	
+	// 4. Combine terms
+	uint32_t sum = term1 + term2;
+	
+	// 5. Multiply result
+	uint32_t product = sum * 2435386481U;
+	
+	// 6. Update seed2
+	seed2 ^= product;
+	
+	return seed2;
+}
+
+
+/******************** VISUAL RANDOM LONG **********************/
+//
+// Separate RNG for visual effects that don't need network sync.
+// This prevents high-FPS clients from consuming more gameplay RNG calls 
+// than low-FPS clients (which causes desync).
+//
+
+static uint32_t vSeed = 0x12345678;
+
+uint32_t VisualRandomLong(void)
+{
+	// Simple Xorshift or LCG would suffice, let's reuse a similar robust algo
+	// but with a separate state variable.
+	vSeed ^= (vSeed << 13);
+	vSeed ^= (vSeed >> 17);
+	vSeed ^= (vSeed << 5);
+	return vSeed;
+}
+
+// Ensure visual seed is somewhat random on startup
+void InitVisualRandomSeed(void)
+{
+	vSeed = (uint32_t)time(NULL);
 }
 
 
@@ -206,6 +264,24 @@ float	f;
 	f = f * (2.0f/(float)0xfff);			// get # between 0..2
 	f -= 1.0f;								// get -1..+1
 	return(f);
+}
+
+
+/************** VISUAL RANDOM FLOATS ********************/
+
+float VisualRandomFloat(void)
+{
+	uint32_t r = VisualRandomLong() & 0xfff;
+	if (r == 0) return 0.0f;
+	return (float)r * (1.0f / (float)0xfff);
+}
+
+float VisualRandomFloat2(void)
+{
+	uint32_t r = VisualRandomLong() & 0xfff;
+	if (r == 0) return 0.0f;
+	float f = (float)r * (2.0f / (float)0xfff); // 0..2
+	return f - 1.0f;                             // -1..1
 }
 
 

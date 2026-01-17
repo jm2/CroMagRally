@@ -202,9 +202,9 @@ static void PlayerThrowsWeapon(short playerNum, Boolean forwardThrow)
 			MorphToSkeletonAnim(head->Skeleton, PLAYER_ANIM_THROWBACKWARD, 8.0);
 
 		if (pinfo->sex)
-			PlayEffect_Parms3D(EFFECT_THROW1 + RandomRange(0,2), &gCoord, NORMAL_CHANNEL_RATE + 0x5000, 1.5);
+			PlayEffect_Parms3D(EFFECT_THROW1 + (VisualRandomLong() % 3), &gCoord, NORMAL_CHANNEL_RATE + 0x5000, 1.5);
 		else
-			PlayEffect_Parms3D(EFFECT_THROW1 + RandomRange(0,2), &gCoord, NORMAL_CHANNEL_RATE, 1.5);
+			PlayEffect_Parms3D(EFFECT_THROW1 + (VisualRandomLong() % 3), &gCoord, NORMAL_CHANNEL_RATE, 1.5);
 
 
 			/* REMEMBER POW TYPE UNTIL ANIM IS READY TO CREATE BULLET */
@@ -472,7 +472,7 @@ boom:
 
 		if ((particleGroup == -1) || (!VerifyParticleGroupMagicNum(particleGroup, magicNum)))
 		{
-			theNode->ParticleMagicNum = magicNum = MyRandomLong();			// generate a random magic num
+			theNode->ParticleMagicNum = magicNum = VisualRandomLong();			// generate a random magic num
 
 			groupDef.magicNum				= magicNum;
 			groupDef.type					= PARTICLE_TYPE_FALLINGSPARKS;
@@ -501,20 +501,20 @@ boom:
 
 			for (i = 0; i < 8; i++)
 			{
-				p.x = x + RandomFloat2() * 20.0;
-				p.y = y + RandomFloat() * 60.0f;
-				p.z = z + RandomFloat2() * 20.0f;
+				p.x = x + VisualRandomFloat2() * 20.0;
+				p.y = y + VisualRandomFloat() * 60.0f;
+				p.z = z + VisualRandomFloat2() * 20.0f;
 
-				d.x = RandomFloat2() * 20.0f;
-				d.y = RandomFloat2() * 10.0f;
-				d.z = RandomFloat2() * 20.0f;
+				d.x = VisualRandomFloat2() * 20.0f;
+				d.y = VisualRandomFloat2() * 10.0f;
+				d.z = VisualRandomFloat2() * 20.0f;
 
 				newParticleDef.groupNum		= particleGroup;
 				newParticleDef.where		= &p;
 				newParticleDef.delta		= &d;
-				newParticleDef.scale		= RandomFloat() + 1.0f;
-				newParticleDef.rotZ			= RandomFloat() * 10.0f;
-				newParticleDef.rotDZ		= RandomFloat2();
+				newParticleDef.scale		= VisualRandomFloat() + 1.0f;
+				newParticleDef.rotZ			= VisualRandomFloat() * 10.0f;
+				newParticleDef.rotDZ		= VisualRandomFloat2();
 				newParticleDef.alpha		= 1.0;
 				if (AddParticleToGroup(&newParticleDef))
 				{
@@ -626,8 +626,8 @@ ObjNode	*newObj;
 		.flags		= STATUS_BIT_NOZWRITES|STATUS_BIT_NOLIGHTING|STATUS_BIT_NOTEXTUREWRAP,
 		.slot		= SLOT_OF_DUMB+9,
 		.moveCall	= MoveOilSpill,
-		.rot		= RandomFloat() * PI2,
-		.scale		= 3.0f + RandomFloat() * 2.0f
+		.rot		= VisualRandomFloat() * PI2,
+		.scale		= 3.0f + VisualRandomFloat() * 2.0f
 	};
 	newObj = MakeNewDisplayGroupObject(&def);
 
@@ -1030,7 +1030,7 @@ float		dist;
 
 			if ((particleGroup == -1) || (!VerifyParticleGroupMagicNum(particleGroup, magicNum)))
 			{
-				theNode->ParticleMagicNum = magicNum = MyRandomLong();			// generate a random magic num
+				theNode->ParticleMagicNum = magicNum = VisualRandomLong();			// generate a random magic num
 
 				groupDef.magicNum				= magicNum;
 				groupDef.type					= PARTICLE_TYPE_FALLINGSPARKS;
@@ -1059,20 +1059,20 @@ float		dist;
 
 				for (i = 0; i < 8; i++)
 				{
-					p.x = x + RandomFloat2() * 30.0;
-					p.y = y + RandomFloat2() * 80.0f;
-					p.z = z + RandomFloat2() * 30.0f;
+					p.x = x + VisualRandomFloat2() * 30.0;
+					p.y = y + VisualRandomFloat2() * 80.0f;
+					p.z = z + VisualRandomFloat2() * 30.0f;
 
-					d.x = RandomFloat2() * 30.0f;
-					d.y = RandomFloat2() * 20.0f;
-					d.z = RandomFloat2() * 30.0f;
+					d.x = VisualRandomFloat2() * 30.0f;
+					d.y = VisualRandomFloat2() * 20.0f;
+					d.z = VisualRandomFloat2() * 30.0f;
 
 					newParticleDef.groupNum		= particleGroup;
 					newParticleDef.where		= &p;
 					newParticleDef.delta		= &d;
-					newParticleDef.scale		= RandomFloat() + 1.0f;
-					newParticleDef.rotZ			= RandomFloat() * 10.0f;
-					newParticleDef.rotDZ		= RandomFloat2();
+					newParticleDef.scale		= VisualRandomFloat() + 1.0f;
+					newParticleDef.rotZ			= VisualRandomFloat() * 10.0f;
+					newParticleDef.rotDZ		= VisualRandomFloat2();
 					newParticleDef.alpha		= 1.0;
 					if (AddParticleToGroup(&newParticleDef))
 					{
@@ -1117,22 +1117,22 @@ ObjNode					*whoThrew;
 	{
 		for (i = 0; i < 200; i++)
 		{
-			pt.x = where->x + RandomFloat2() * 60.0f;
-			pt.y = where->y + 60.0 + RandomFloat2() * 60.0f;
-			pt.z = where->z + RandomFloat2() * 60.0f;
+			pt.x = where->x + VisualRandomFloat2() * 60.0f;
+			pt.y = where->y + 60.0 + VisualRandomFloat2() * 60.0f;
+			pt.z = where->z + VisualRandomFloat2() * 60.0f;
 
-			d.y = RandomFloat2() * 800.0f;
-			d.x = RandomFloat2() * 800.0f;
-			d.z = RandomFloat2() * 800.0f;
+			d.y = VisualRandomFloat2() * 800.0f;
+			d.x = VisualRandomFloat2() * 800.0f;
+			d.z = VisualRandomFloat2() * 800.0f;
 
 
 			newParticleDef.groupNum		= pg;
 			newParticleDef.where		= &pt;
 			newParticleDef.delta		= &d;
-			newParticleDef.scale		= RandomFloat() + 1.5f;
+			newParticleDef.scale		= VisualRandomFloat() + 1.5f;
 			newParticleDef.rotZ			= 0;
 			newParticleDef.rotDZ		= 0;
-			newParticleDef.alpha		= FULL_ALPHA + (RandomFloat() * .3f);
+			newParticleDef.alpha		= FULL_ALPHA + (VisualRandomFloat() * .3f);
 			AddParticleToGroup(&newParticleDef);
 		}
 	}
@@ -1158,22 +1158,22 @@ ObjNode					*whoThrew;
 	{
 		for (i = 0; i < 200; i++)
 		{
-			pt.x = where->x + RandomFloat2() * 60.0f;
-			pt.y = where->y + 60.0 + RandomFloat2() * 60.0f;
-			pt.z = where->z + RandomFloat2() * 60.0f;
+			pt.x = where->x + VisualRandomFloat2() * 60.0f;
+			pt.y = where->y + 60.0 + VisualRandomFloat2() * 60.0f;
+			pt.z = where->z + VisualRandomFloat2() * 60.0f;
 
-			d.y = RandomFloat2() * 1000.0f;
-			d.x = RandomFloat2() * 1000.0f;
-			d.z = RandomFloat2() * 1000.0f;
+			d.y = VisualRandomFloat2() * 1000.0f;
+			d.x = VisualRandomFloat2() * 1000.0f;
+			d.z = VisualRandomFloat2() * 1000.0f;
 
 
 			newParticleDef.groupNum		= pg;
 			newParticleDef.where		= &pt;
 			newParticleDef.delta		= &d;
-			newParticleDef.scale		= RandomFloat() + 1.5f;
+			newParticleDef.scale		= VisualRandomFloat() + 1.5f;
 			newParticleDef.rotZ			= 0;
 			newParticleDef.rotDZ		= 30.0;
-			newParticleDef.alpha		= FULL_ALPHA + (RandomFloat() * .3f);
+			newParticleDef.alpha		= FULL_ALPHA + (VisualRandomFloat() * .3f);
 			AddParticleToGroup(&newParticleDef);
 		}
 	}
@@ -1349,7 +1349,7 @@ boom:
 
 		if ((particleGroup == -1) || (!VerifyParticleGroupMagicNum(particleGroup, magicNum)))
 		{
-			theNode->ParticleMagicNum = magicNum = MyRandomLong();			// generate a random magic num
+			theNode->ParticleMagicNum = magicNum = VisualRandomLong();			// generate a random magic num
 
 			groupDef.magicNum				= magicNum;
 			groupDef.type					= PARTICLE_TYPE_FALLINGSPARKS;
@@ -1378,20 +1378,20 @@ boom:
 
 			for (i = 0; i < 4; i++)
 			{
-				p.x = x + RandomFloat2() * 20.0;
-				p.y = y + RandomFloat2() * 20.0f;
-				p.z = z + RandomFloat2() * 20.0f;
+				p.x = x + VisualRandomFloat2() * 20.0;
+				p.y = y + VisualRandomFloat2() * 20.0f;
+				p.z = z + VisualRandomFloat2() * 20.0f;
 
-				d.x = RandomFloat2() * 20.0f;
-				d.y = RandomFloat2() * 20.0f;
-				d.z = RandomFloat2() * 20.0f;
+				d.x = VisualRandomFloat2() * 20.0f;
+				d.y = VisualRandomFloat2() * 20.0f;
+				d.z = VisualRandomFloat2() * 20.0f;
 
 				newParticleDef.groupNum		= particleGroup;
 				newParticleDef.where		= &p;
 				newParticleDef.delta		= &d;
-				newParticleDef.scale		= RandomFloat() + 1.0f;
-				newParticleDef.rotZ			= RandomFloat() * 4.0f;
-				newParticleDef.rotDZ		= RandomFloat2();
+				newParticleDef.scale		= VisualRandomFloat() + 1.0f;
+				newParticleDef.rotZ			= VisualRandomFloat() * 4.0f;
+				newParticleDef.rotDZ		= VisualRandomFloat2();
 				newParticleDef.alpha		= 1.0;
 				if (AddParticleToGroup(&newParticleDef))
 				{
@@ -1435,22 +1435,22 @@ ObjNode					*whoThrew;
 	{
 		for (int i = 0; i < 230; i++)
 		{
-			pt.x = where->x + RandomFloat2() * 60.0f;
-			pt.y = where->y + 60.0f + RandomFloat2() * 60.0f;
-			pt.z = where->z + RandomFloat2() * 60.0f;
+			pt.x = where->x + VisualRandomFloat2() * 60.0f;
+			pt.y = where->y + 60.0f + VisualRandomFloat2() * 60.0f;
+			pt.z = where->z + VisualRandomFloat2() * 60.0f;
 
-			d.y = RandomFloat2() * 800.0f;
-			d.x = RandomFloat2() * 800.0f;
-			d.z = RandomFloat2() * 800.0f;
+			d.y = VisualRandomFloat2() * 800.0f;
+			d.x = VisualRandomFloat2() * 800.0f;
+			d.z = VisualRandomFloat2() * 800.0f;
 
 
 			newParticleDef.groupNum		= pg;
 			newParticleDef.where		= &pt;
 			newParticleDef.delta		= &d;
-			newParticleDef.scale		= RandomFloat() + 1.5f;
+			newParticleDef.scale		= VisualRandomFloat() + 1.5f;
 			newParticleDef.rotZ			= 0;
 			newParticleDef.rotDZ		= 0;
-			newParticleDef.alpha		= FULL_ALPHA + (RandomFloat() * .3f);
+			newParticleDef.alpha		= FULL_ALPHA + (VisualRandomFloat() * .3f);
 			AddParticleToGroup(&newParticleDef);
 		}
 	}
@@ -1476,22 +1476,22 @@ ObjNode					*whoThrew;
 	{
 		for (int i = 0; i < 230; i++)
 		{
-			pt.x = where->x + RandomFloat2() * 60.0f;
-			pt.y = where->y + 60.0f + RandomFloat2() * 60.0f;
-			pt.z = where->z + RandomFloat2() * 60.0f;
+			pt.x = where->x + VisualRandomFloat2() * 60.0f;
+			pt.y = where->y + 60.0f + VisualRandomFloat2() * 60.0f;
+			pt.z = where->z + VisualRandomFloat2() * 60.0f;
 
-			d.y = RandomFloat2() * 1000.0f;
-			d.x = RandomFloat2() * 1000.0f;
-			d.z = RandomFloat2() * 1000.0f;
+			d.y = VisualRandomFloat2() * 1000.0f;
+			d.x = VisualRandomFloat2() * 1000.0f;
+			d.z = VisualRandomFloat2() * 1000.0f;
 
 
 			newParticleDef.groupNum		= pg;
 			newParticleDef.where		= &pt;
 			newParticleDef.delta		= &d;
-			newParticleDef.scale		= RandomFloat() + 1.5f;
+			newParticleDef.scale		= VisualRandomFloat() + 1.5f;
 			newParticleDef.rotZ			= 0;
 			newParticleDef.rotDZ		= 30.0;
-			newParticleDef.alpha		= FULL_ALPHA + (RandomFloat() * .3f);
+			newParticleDef.alpha		= FULL_ALPHA + (VisualRandomFloat() * .3f);
 			AddParticleToGroup(&newParticleDef);
 		}
 	}
@@ -1706,9 +1706,9 @@ ObjNode					*whoThrew;
 	{
 		for (i = 0; i < 100; i++)
 		{
-			pt.x = where->x + RandomFloat2() * 160.0f;
-			pt.y = where->y + RandomFloat2() * 160.0f;
-			pt.z = where->z + RandomFloat2() * 160.0f;
+			pt.x = where->x + VisualRandomFloat2() * 160.0f;
+			pt.y = where->y + VisualRandomFloat2() * 160.0f;
+			pt.z = where->z + VisualRandomFloat2() * 160.0f;
 
 			d.y = 800;
 			d.x = 0;
@@ -1718,10 +1718,10 @@ ObjNode					*whoThrew;
 			newParticleDef.groupNum		= pg;
 			newParticleDef.where		= &pt;
 			newParticleDef.delta		= &d;
-			newParticleDef.scale		= RandomFloat() + 1.5f;
+			newParticleDef.scale		= VisualRandomFloat() + 1.5f;
 			newParticleDef.rotZ			= 0;
 			newParticleDef.rotDZ		= 0;
-			newParticleDef.alpha		= FULL_ALPHA + (RandomFloat() * .3f);
+			newParticleDef.alpha		= FULL_ALPHA + (VisualRandomFloat() * .3f);
 			AddParticleToGroup(&newParticleDef);
 		}
 	}
@@ -1747,22 +1747,22 @@ ObjNode					*whoThrew;
 	{
 		for (i = 0; i < 200; i++)
 		{
-			pt.x = where->x + RandomFloat2() * 60.0f;
-			pt.y = where->y + RandomFloat2() * 60.0f;
-			pt.z = where->z + RandomFloat2() * 60.0f;
+			pt.x = where->x + VisualRandomFloat2() * 60.0f;
+			pt.y = where->y + VisualRandomFloat2() * 60.0f;
+			pt.z = where->z + VisualRandomFloat2() * 60.0f;
 
-			d.y = RandomFloat2() * 500.0f;
-			d.x = RandomFloat2() * 500.0f;
-			d.z = RandomFloat2() * 500.0f;
+			d.y = VisualRandomFloat2() * 500.0f;
+			d.x = VisualRandomFloat2() * 500.0f;
+			d.z = VisualRandomFloat2() * 500.0f;
 
 
 			newParticleDef.groupNum		= pg;
 			newParticleDef.where		= &pt;
 			newParticleDef.delta		= &d;
-			newParticleDef.scale		= RandomFloat() + 1.5f;
+			newParticleDef.scale		= VisualRandomFloat() + 1.5f;
 			newParticleDef.rotZ			= 0;
 			newParticleDef.rotDZ		= 0;
-			newParticleDef.alpha		= FULL_ALPHA + (RandomFloat() * .3f);
+			newParticleDef.alpha		= FULL_ALPHA + (VisualRandomFloat() * .3f);
 			AddParticleToGroup(&newParticleDef);
 		}
 	}
@@ -1857,8 +1857,8 @@ Boolean DoTrig_LandMine(ObjNode *theNode, ObjNode *whoNode, Byte sideBits)
 
 		/* MAKE CAR SPIN WILDLY */
 
-	whoNode->DeltaRot.y = RandomFloat2() * 20.0f;
-	whoNode->DeltaRot.z = RandomFloat2() * 10.0f;
+	whoNode->DeltaRot.y = VisualRandomFloat2() * 20.0f;
+	whoNode->DeltaRot.z = VisualRandomFloat2() * 10.0f;
 
 
 		/* MAKE EXPLOSION */

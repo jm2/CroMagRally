@@ -347,7 +347,7 @@ Boolean	isSolid = itemPtr->parm[3] & 1;
 		.slot		= isSolid ? 642 : SLOT_OF_DUMB,
 		.moveCall 	= MoveStaticObject,
 		.rot 		= 0,
-		.scale 		= 1.0 + RandomFloat() * .3f,
+		.scale 		= 1.0 + VisualRandomFloat() * .3f,
 	};
 
 	if (itemPtr->parm[3] & (1<<1))											// see if bump up
@@ -835,12 +835,12 @@ ObjNode	*newObj;
 	NewObjectDefinitionType def =
 	{
 		.group 		= MODEL_GROUP_LEVELSPECIFIC,
-		.type 		= SCANDINAVIA_ObjType_Stump1 + (MyRandomLong() & 0x3),
+		.type 		= SCANDINAVIA_ObjType_Stump1 + (VisualRandomLong() & 0x3),
 		.coord		= {x,0,z},
 		.flags 		= gAutoFadeStatusBits,
 		.slot 		= 400,
 		.moveCall 	= MoveStaticObject,
-		.rot 		= RandomFloat() * PI2,
+		.rot 		= VisualRandomFloat() * PI2,
 		.scale 		= 1.0,
 	};
 	def.coord.y 	= GetMinTerrainY(x,z, def.group, def.type, 1.0),
@@ -981,7 +981,7 @@ ObjNode	*newObj;
 		.flags 		= gAutoFadeStatusBits,
 		.slot 		= 10,
 		.moveCall 	= MoveStaticObject,
-		.rot 		= RandomFloat() * PI2,
+		.rot 		= VisualRandomFloat() * PI2,
 		.scale 		= 1.0,
 	};
 	newObj = MakeNewDisplayGroupObject(&def);
@@ -1413,7 +1413,7 @@ ObjNode	*newObj;
 		.flags 		= 0,
 		.slot 		= 200,
 		.moveCall 	= MoveStaticObject,
-		.rot 		= RandomFloat() * PI2,
+		.rot 		= VisualRandomFloat() * PI2,
 		.scale 		= 1.0,
 	};
 	newObj = MakeNewDisplayGroupObject(&def);
@@ -1459,7 +1459,7 @@ ObjNode	*newObj;
 
 	newObj->TerrainItemPtr = itemPtr;								// keep ptr to item list
 
-	newObj->Skeleton->AnimSpeed = 1.3f + RandomFloat();
+	newObj->Skeleton->AnimSpeed = 1.3f + VisualRandomFloat();
 
 			/* SET COLLISION STUFF */
 
@@ -1677,7 +1677,7 @@ OGLPoint3D			p;
 			if ((particleGroup == -1) || (!VerifyParticleGroupMagicNum(particleGroup, magicNum)))
 			{
 
-				theNode->SmokeParticleMagic = magicNum = MyRandomLong();			// generate a random magic num
+				theNode->SmokeParticleMagic = magicNum = VisualRandomLong();			// generate a random magic num
 
 				groupDef.magicNum				= magicNum;
 				groupDef.type					= PARTICLE_TYPE_FALLINGSPARKS;
@@ -1697,20 +1697,20 @@ OGLPoint3D			p;
 			{
 				for (i = 0; i < 5; i++)
 				{
-					p.x = x + RandomFloat2() * 400.0f;
-					p.y = top + RandomFloat() * 150.0f;
-					p.z = z + RandomFloat2() * 400.0f;
+					p.x = x + VisualRandomFloat2() * 400.0f;
+					p.y = top + VisualRandomFloat() * 150.0f;
+					p.z = z + VisualRandomFloat2() * 400.0f;
 
-					d.x = RandomFloat2() * 200.0f;
-					d.y = 200.0f + RandomFloat() * 500.0f;
-					d.z = RandomFloat2() * 200.0f;
+					d.x = VisualRandomFloat2() * 200.0f;
+					d.y = 200.0f + VisualRandomFloat() * 500.0f;
+					d.z = VisualRandomFloat2() * 200.0f;
 
 					newParticleDef.groupNum		= particleGroup;
 					newParticleDef.where		= &p;
 					newParticleDef.delta		= &d;
-					newParticleDef.scale		= RandomFloat() + 1.0f;
-					newParticleDef.rotZ			= RandomFloat() * PI2;
-					newParticleDef.rotDZ		= RandomFloat2();
+					newParticleDef.scale		= VisualRandomFloat() + 1.0f;
+					newParticleDef.rotZ			= VisualRandomFloat() * PI2;
+					newParticleDef.rotDZ		= VisualRandomFloat2();
 					newParticleDef.alpha		= .8;
 					if (AddParticleToGroup(&newParticleDef))
 					{
@@ -1894,7 +1894,7 @@ ObjNode	*newObj;
 		.flags 		= gAutoFadeStatusBits|STATUS_BIT_CLIPALPHA,
 		.slot 		= 70,
 		.moveCall 	= MoveStaticObject,
-		.rot 		= RandomFloat() * PI2,
+		.rot 		= VisualRandomFloat() * PI2,
 		.scale 		= 20.0,
 	};
 	newObj = MakeNewSkeletonObject(&def);
@@ -1903,7 +1903,7 @@ ObjNode	*newObj;
 
 	newObj->TerrainItemPtr = itemPtr;								// keep ptr to item list
 
-	newObj->Skeleton->AnimSpeed = 1.0f + RandomFloat() * .5f;
+	newObj->Skeleton->AnimSpeed = 1.0f + VisualRandomFloat() * .5f;
 
 			/* SET COLLISION STUFF */
 

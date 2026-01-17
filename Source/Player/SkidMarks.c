@@ -420,7 +420,7 @@ int		particleGroup,magicNum;
 	{
 		NewParticleGroupDefType	groupDef;
 
-		gPlayerInfo[p].skidSmokeMagicNum = magicNum = MyRandomLong();			// generate a random magic num
+		gPlayerInfo[p].skidSmokeMagicNum = magicNum = VisualRandomLong();			// generate a random magic num
 
 		groupDef.magicNum				= magicNum;
 		groupDef.type					= PARTICLE_TYPE_FALLINGSPARKS;
@@ -442,16 +442,16 @@ int		particleGroup,magicNum;
 		OGLVector3D			smokeDelta;
 
 
-		smokeDelta.x = gDelta.x * RandomFloat() * .3f;
-		smokeDelta.y = 100.0f + RandomFloat() * 200.0f;
-		smokeDelta.z = gDelta.z * RandomFloat() * .3f;
+		smokeDelta.x = gDelta.x * VisualRandomFloat() * .3f;
+		smokeDelta.y = 100.0f + VisualRandomFloat() * 200.0f;
+		smokeDelta.z = gDelta.z * VisualRandomFloat() * .3f;
 
 		newParticleDef.groupNum		= particleGroup;
 		newParticleDef.where		= coord;
 		newParticleDef.delta		= &smokeDelta;
-		newParticleDef.scale		= RandomFloat() + 1.0f;
-		newParticleDef.rotZ			= RandomFloat() * PI2;
-		newParticleDef.rotDZ		= (RandomFloat()-.5f) * 4.0f;
+		newParticleDef.scale		= VisualRandomFloat() + 1.0f;
+		newParticleDef.rotZ			= VisualRandomFloat() * PI2;
+		newParticleDef.rotDZ		= (VisualRandomFloat()-.5f) * 4.0f;
 		newParticleDef.alpha		= FULL_ALPHA;
 		AddParticleToGroup(&newParticleDef);
 	}

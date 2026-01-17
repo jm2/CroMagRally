@@ -250,7 +250,7 @@ int				particleGroup,magicNum;
 		{
 			NewParticleGroupDefType	groupDef;
 
-			baseObj->ParticleMagicNum = magicNum = MyRandomLong();			// generate a random magic num
+			baseObj->ParticleMagicNum = magicNum = VisualRandomLong();			// generate a random magic num
 
 			groupDef.magicNum				= magicNum;
 			groupDef.type					= PARTICLE_TYPE_FALLINGSPARKS;
@@ -274,20 +274,20 @@ int				particleGroup,magicNum;
 
 			for (i = 0; i < 5; i++)
 			{
-				p.x = x + RandomFloat2() * 150.0f;
-				p.y = baseObj->Coord.y + RandomFloat() * 500.0f;
-				p.z = z + RandomFloat2() * 150.0f;
+				p.x = x + VisualRandomFloat2() * 150.0f;
+				p.y = baseObj->Coord.y + VisualRandomFloat() * 500.0f;
+				p.z = z + VisualRandomFloat2() * 150.0f;
 
-				d.x = RandomFloat2() * 500.0f;
-				d.y = RandomFloat() * 300.0f;
-				d.z = RandomFloat2() * 500.0f;
+				d.x = VisualRandomFloat2() * 500.0f;
+				d.y = VisualRandomFloat() * 300.0f;
+				d.z = VisualRandomFloat2() * 500.0f;
 
 				newParticleDef.groupNum		= particleGroup;
 				newParticleDef.where		= &p;
 				newParticleDef.delta		= &d;
-				newParticleDef.scale		= RandomFloat() + 1.0f;
-				newParticleDef.rotZ			= RandomFloat() * PI2;
-				newParticleDef.rotDZ		= (RandomFloat()-.5f) * 2.0f;
+				newParticleDef.scale		= VisualRandomFloat() + 1.0f;
+				newParticleDef.rotZ			= VisualRandomFloat() * PI2;
+				newParticleDef.rotDZ		= (VisualRandomFloat()-.5f) * 2.0f;
 				newParticleDef.alpha		= 1.0;
 				if (AddParticleToGroup(&newParticleDef))
 				{
@@ -724,12 +724,12 @@ float			speed;
 			/* SET IN MOTION */
 			/*****************/
 
-		speed = 8000.0f + RandomFloat() * 1000.0f;
+		speed = 8000.0f + VisualRandomFloat() * 1000.0f;
 
-		OGLMatrix4x4_SetRotate_Y(&m, theNode->Rot.y + (RandomFloat2() * .3f));
+		OGLMatrix4x4_SetRotate_Y(&m, theNode->Rot.y + (VisualRandomFloat2() * .3f));
 		OGLVector3D_Transform(&throwVector,	&m, &newObj->Delta);
 
-		newObj->Delta.y += RandomFloat() * .1f;
+		newObj->Delta.y += VisualRandomFloat() * .1f;
 
 		newObj->Delta.x *= speed;															// give it speed
 		newObj->Delta.y *= speed;
@@ -844,7 +844,7 @@ short	p;
 		{
 			NewParticleGroupDefType	groupDef;
 
-			theNode->ParticleMagicNum = magicNum = MyRandomLong();			// generate a random magic num
+			theNode->ParticleMagicNum = magicNum = VisualRandomLong();			// generate a random magic num
 
 			groupDef.magicNum				= magicNum;
 			groupDef.type					= PARTICLE_TYPE_FALLINGSPARKS;
@@ -874,18 +874,18 @@ short	p;
 
 			for (i = 0; i < 3; i++)
 			{
-				pt.x = x + RandomFloat2() * 100.0f;
-				pt.y = y + RandomFloat2() * 100.0f;
-				pt.z = z + RandomFloat2() * 100.0f;
+				pt.x = x + VisualRandomFloat2() * 100.0f;
+				pt.y = y + VisualRandomFloat2() * 100.0f;
+				pt.z = z + VisualRandomFloat2() * 100.0f;
 
 				d.x = sin(r) * 700.0f;
-				d.y = RandomFloat2() * 100.0f;
+				d.y = VisualRandomFloat2() * 100.0f;
 				d.z = cos(r) * 700.0f;
 
 				newParticleDef.groupNum		= particleGroup;
 				newParticleDef.where		= &pt;
 				newParticleDef.delta		= &d;
-				newParticleDef.scale		= RandomFloat() + 1.0f;
+				newParticleDef.scale		= VisualRandomFloat() + 1.0f;
 				newParticleDef.rotZ			= 0;
 				newParticleDef.rotDZ		= 0;
 				newParticleDef.alpha		= 1.0;
@@ -945,9 +945,9 @@ OGLPoint3D			pt;
 
 		/* CALC VECTOR FROM GODDESS TO PLAYER */
 
-	boltVector.x = (gPlayerInfo[playerNum].coord.x + RandomFloat2() * 300.0f) - x;
+	boltVector.x = (gPlayerInfo[playerNum].coord.x + VisualRandomFloat2() * 300.0f) - x;
 	boltVector.y = gPlayerInfo[playerNum].coord.y - y;
-	boltVector.z = (gPlayerInfo[playerNum].coord.z + RandomFloat2() * 300.0f) - z;
+	boltVector.z = (gPlayerInfo[playerNum].coord.z + VisualRandomFloat2() * 300.0f) - z;
 
 	boltVector.x /= (float)(numSegments-1);							// divide vector length for multiple segments
 	boltVector.y /= (float)(numSegments-1);
@@ -969,9 +969,9 @@ OGLPoint3D			pt;
 		y += boltVector.y;
 		z += boltVector.z;
 
-		endPoints[i].x = x + RandomFloat2() * 100.0f;			// randomize it
-		endPoints[i].y = y + RandomFloat2() * 100.0f;
-		endPoints[i].z = z + RandomFloat2() * 100.0f;
+		endPoints[i].x = x + VisualRandomFloat2() * 100.0f;			// randomize it
+		endPoints[i].y = y + VisualRandomFloat2() * 100.0f;
+		endPoints[i].z = z + VisualRandomFloat2() * 100.0f;
 	}
 
 
@@ -1012,15 +1012,15 @@ OGLPoint3D			pt;
 
 		for (p = 0; p < particlesPerSegment; p++)
 		{
-			d.x = RandomFloat2() * 40.0f;
-			d.y = RandomFloat2() * 40.0f;
-			d.z = RandomFloat2() * 40.0f;
+			d.x = VisualRandomFloat2() * 40.0f;
+			d.y = VisualRandomFloat2() * 40.0f;
+			d.z = VisualRandomFloat2() * 40.0f;
 
 
 			newParticleDef.groupNum		= particleGroup;
 			newParticleDef.where		= &pt;
 			newParticleDef.delta		= &d;
-			newParticleDef.scale		= RandomFloat() + 1.0f;
+			newParticleDef.scale		= VisualRandomFloat() + 1.0f;
 			newParticleDef.rotZ			= 0;
 			newParticleDef.rotDZ		= 0;
 			newParticleDef.alpha		= 1.0;
@@ -1188,10 +1188,10 @@ NewParticleDefType		newParticleDef;
 
 	speed = dist * .9f;
 
-	OGLMatrix4x4_SetRotate_Y(&m2, theNode->Rot.y + (RandomFloat2() * .1f));
+	OGLMatrix4x4_SetRotate_Y(&m2, theNode->Rot.y + (VisualRandomFloat2() * .1f));
 	OGLVector3D_Transform(&throwVector,	&m2, &delta);
 
-	newObj->Delta.y += RandomFloat() * .1f;
+	newObj->Delta.y += VisualRandomFloat() * .1f;
 
 	newObj->Delta.x = delta.x * speed;															// give it speed
 	newObj->Delta.y = delta.y * speed;
@@ -1223,19 +1223,19 @@ NewParticleDefType		newParticleDef;
 	{
 		for (i = 0; i < 50; i++)
 		{
-			pt.x = nozPt.x + RandomFloat2() * 130.0f;
-			pt.y = y + RandomFloat() * 40.0f;
-			pt.z = nozPt.y + RandomFloat2() * 130.0f;
+			pt.x = nozPt.x + VisualRandomFloat2() * 130.0f;
+			pt.y = y + VisualRandomFloat() * 40.0f;
+			pt.z = nozPt.y + VisualRandomFloat2() * 130.0f;
 
-			delta.x = dx + RandomFloat2() * 200.0f;
-			delta.y = dy + RandomFloat2() * 200.0f;
-			delta.z = dz + RandomFloat2() * 200.0f;
+			delta.x = dx + VisualRandomFloat2() * 200.0f;
+			delta.y = dy + VisualRandomFloat2() * 200.0f;
+			delta.z = dz + VisualRandomFloat2() * 200.0f;
 
 
 			newParticleDef.groupNum		= pg;
 			newParticleDef.where		= &pt;
 			newParticleDef.delta		= &delta;
-			newParticleDef.scale		= RandomFloat() + 1.0f;
+			newParticleDef.scale		= VisualRandomFloat() + 1.0f;
 			newParticleDef.rotZ			= 0;
 			newParticleDef.rotDZ		= 15.0;
 			newParticleDef.alpha		= FULL_ALPHA;
@@ -1416,7 +1416,7 @@ ObjNode	*newObj;
 	SetObjectCollisionBounds(newObj, 200, -200, -150, 150, 150, -150);
 
 	newObj->TimeSinceBolt = 0;
-	newObj->CapsuleBob = RandomFloat();
+	newObj->CapsuleBob = VisualRandomFloat();
 
 	return(true);													// item was added
 }
@@ -1490,9 +1490,9 @@ OGLPoint3D			pt;
 
 		/* CALC VECTOR FROM CAPSULE TO PLAYER */
 
-	boltVector.x = (gPlayerInfo[playerNum].coord.x + RandomFloat2() * 300.0f) - x;
+	boltVector.x = (gPlayerInfo[playerNum].coord.x + VisualRandomFloat2() * 300.0f) - x;
 	boltVector.y = gPlayerInfo[playerNum].coord.y - y;
-	boltVector.z = (gPlayerInfo[playerNum].coord.z + RandomFloat2() * 300.0f) - z;
+	boltVector.z = (gPlayerInfo[playerNum].coord.z + VisualRandomFloat2() * 300.0f) - z;
 
 	boltVector.x /= (float)(numSegments-1);							// divide vector length for multiple segments
 	boltVector.y /= (float)(numSegments-1);
@@ -1514,9 +1514,9 @@ OGLPoint3D			pt;
 		y += boltVector.y;
 		z += boltVector.z;
 
-		endPoints[i].x = x + RandomFloat2() * 100.0f;			// randomize it
-		endPoints[i].y = y + RandomFloat2() * 100.0f;
-		endPoints[i].z = z + RandomFloat2() * 100.0f;
+		endPoints[i].x = x + VisualRandomFloat2() * 100.0f;			// randomize it
+		endPoints[i].y = y + VisualRandomFloat2() * 100.0f;
+		endPoints[i].z = z + VisualRandomFloat2() * 100.0f;
 	}
 
 
@@ -1557,15 +1557,15 @@ OGLPoint3D			pt;
 
 		for (p = 0; p < particlesPerSegment; p++)
 		{
-			d.x = RandomFloat2() * 20.0f;
-			d.y = RandomFloat2() * 20.0f;
-			d.z = RandomFloat2() * 20.0f;
+			d.x = VisualRandomFloat2() * 20.0f;
+			d.y = VisualRandomFloat2() * 20.0f;
+			d.z = VisualRandomFloat2() * 20.0f;
 
 
 			newParticleDef.groupNum		= particleGroup;
 			newParticleDef.where		= &pt;
 			newParticleDef.delta		= &d;
-			newParticleDef.scale		= RandomFloat() + 1.0f;
+			newParticleDef.scale		= VisualRandomFloat() + 1.0f;
 			newParticleDef.rotZ			= 0;
 			newParticleDef.rotDZ		= 0;
 			newParticleDef.alpha		= 1.0;
@@ -1609,9 +1609,9 @@ OGLPoint3D			pt;
 
 		for (i = 0; i < 100; i++)
 		{
-			pt.x = x + RandomFloat2() * 160.0f;
-			pt.y = y + RandomFloat2() * 160.0f;
-			pt.z = z + RandomFloat2() * 160.0f;
+			pt.x = x + VisualRandomFloat2() * 160.0f;
+			pt.y = y + VisualRandomFloat2() * 160.0f;
+			pt.z = z + VisualRandomFloat2() * 160.0f;
 
 			d.y = 500;
 			d.x = 0;
@@ -1621,10 +1621,10 @@ OGLPoint3D			pt;
 			newParticleDef.groupNum		= particleGroup;
 			newParticleDef.where		= &pt;
 			newParticleDef.delta		= &d;
-			newParticleDef.scale		= RandomFloat() + 1.5f;
+			newParticleDef.scale		= VisualRandomFloat() + 1.5f;
 			newParticleDef.rotZ			= 0;
 			newParticleDef.rotDZ		= 0;
-			newParticleDef.alpha		= FULL_ALPHA + (RandomFloat() * .3f);
+			newParticleDef.alpha		= FULL_ALPHA + (VisualRandomFloat() * .3f);
 			AddParticleToGroup(&newParticleDef);
 		}
 	}
@@ -1909,7 +1909,7 @@ static void MoveDragon(ObjNode *theNode)
 			{
 				NewParticleGroupDefType	groupDef;
 
-				theNode->ParticleMagicNum = magicNum = MyRandomLong();			// generate a random magic num
+				theNode->ParticleMagicNum = magicNum = VisualRandomLong();			// generate a random magic num
 
 				groupDef.magicNum				= magicNum;
 				groupDef.type					= PARTICLE_TYPE_FALLINGSPARKS;
@@ -1931,16 +1931,16 @@ static void MoveDragon(ObjNode *theNode)
 
 				for (i = 0; i < 8; i++)
 				{
-					d.x += RandomFloat2() * 300.0f;
-					d.y += RandomFloat2() * 300.0f;
-					d.z += RandomFloat2() * 300.0f;
+					d.x += VisualRandomFloat2() * 300.0f;
+					d.y += VisualRandomFloat2() * 300.0f;
+					d.z += VisualRandomFloat2() * 300.0f;
 
 					newParticleDef.groupNum		= particleGroup;
 					newParticleDef.where		= &p;
 					newParticleDef.delta		= &d;
-					newParticleDef.scale		= RandomFloat() + 1.0f;
-					newParticleDef.rotZ			= RandomFloat() * PI2;
-					newParticleDef.rotDZ		= RandomFloat2() * 2.0f;
+					newParticleDef.scale		= VisualRandomFloat() + 1.0f;
+					newParticleDef.rotZ			= VisualRandomFloat() * PI2;
+					newParticleDef.rotDZ		= VisualRandomFloat2() * 2.0f;
 					newParticleDef.alpha		= 1.0;
 					if (AddParticleToGroup(&newParticleDef))
 					{

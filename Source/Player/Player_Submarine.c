@@ -605,7 +605,7 @@ static float    sideForce[MAX_PLAYERS] = {0};       // Persistent sideways force
 		float sidewaysforce_update = 1.0f; // How often the sub has its x-axis direction reassigned while stuck
         if ((int)(stuckTimer[player] * sidewaysforce_update) != (int)((stuckTimer[player] - fps) * sidewaysforce_update)) // Update sideways force every second
         {
-            sideForce[player] = (MyRandomLong() & 1) ? 1.0f : -1.0f; // randomly assign either full left or full right directional movement
+            sideForce[player] = (VisualRandomLong() & 1) ? 1.0f : -1.0f; // randomly assign either full left or full right directional movement
         }
 
 		// Try to get unstuck 
