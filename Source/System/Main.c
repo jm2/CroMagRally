@@ -19,6 +19,7 @@
 #endif
 #include <stddef.h>
 #include <unistd.h>
+#include <stdio.h>
 
 int			gTargetFPS = 60;
 Boolean		gUseRedundancy = false;
