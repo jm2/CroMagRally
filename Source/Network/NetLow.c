@@ -665,7 +665,7 @@ static NSpMessageHeader* PollSocket(sockfd_t sockfd, bool* outBrokenPipe)
 		goto bye;
 	}
 
-	if (header->messageLen > kNSpMaxPayloadLength
+	if (header->messageLen > kNSpMaxMessageLength
 		|| header->messageLen < sizeof(NSpMessageHeader))
 	{
 		printf("%s: invalid message length %u\n", __func__, header->messageLen);

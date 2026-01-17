@@ -18,7 +18,7 @@ typedef int sockfd_t;
 
 #define MAX_CLIENTS MAX_LOCAL_PLAYERS
 #define kNSpPlayerNameLength 32
-#define kNSpMaxPayloadLength 256
+#define kNSpMaxPayloadLength 1024
 #define kNSpMaxMessageLength (kNSpMaxPayloadLength + sizeof(NSpMessageHeader))
 
 #if _DEBUG							// in debug builds, messages may have extra debug info
