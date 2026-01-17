@@ -18,7 +18,9 @@
 #include <SDL3/SDL_system.h>
 #endif
 #include <stddef.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 #include <stdio.h>
 
 int			gTargetFPS = 0;  // 0 = uncapped (vsync), set during network game setup
@@ -153,6 +155,8 @@ OSErr		iErr;
 	LoadScoreboardFile();
 
 	SetDefaultPhysics();								// set all physics to defaults
+	
+	InitLocalRNG();										// seed local visual RNG
 }
 
 

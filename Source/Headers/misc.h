@@ -7,27 +7,31 @@
 void	DoAlert(const char* format, ...);
 POMME_NORETURN void DoFatalAlert(const char* format, ...);
 POMME_NORETURN void CleanQuit(void);
-extern	void SetMyRandomSeed(unsigned long seed);
-uint32_t GetRandomSeed(void);
-extern	uint32_t MyRandomLong(void);
-extern	uint32_t VisualRandomLong(void);
-extern	void	 InitVisualRandomSeed(void);
+// RNG Functions replaced by RNG.h
+#include "RNG.h"
+
+// Legacy/Mapped RNG Prototypes
+extern uint32_t MyRandomLong(void);
+extern uint32_t VisualRandomLong(void);
+extern uint32_t GetRandomSeed(void);
+extern void SetMyRandomSeed(unsigned long seed);
 Handle	AllocHandle(long size);
 void *AllocPtr(long size);
 void *AllocPtrClear(long size);
 void *ReallocPtr(void* initialPtr, long newSize);
 void SafeDisposePtr(void* ptr);
 extern	void InitMyRandomSeed(void);
+
 int PositiveModulo(int value, unsigned int m);
 void InitPrefsFolder(bool createIt);
 extern	float RandomFloat(void);
-extern	float VisualRandomFloat(void);
+extern	float VisualRandomFloat(void); // Now maps to LocalRNG
 uint16_t	RandomRange(unsigned short min, unsigned short max);
 extern	void ShowSystemErr_NonFatal(long err);
 void CalcFramesPerSecond(void);
 Boolean IsPowerOf2(int num);
 float RandomFloat2(void);
-float VisualRandomFloat2(void);
+float VisualRandomFloat2(void); // Now maps to LocalRNG
 void MyFlushEvents(void);
 size_t snprintfcat(char* buf, size_t bufSize, char const* fmt, ...);
 void AdvanceTextCursor(int snprintfReturnCode, char** cursor, size_t* remainingSize);

@@ -300,7 +300,7 @@ void SetPhysicsForVehicleType(short playerNum)
 				/* SPEED  */
 
 	if (gTrackNum == TRACK_NUM_ATLANTIS)				// rigged speed in subs
-		info->maxSpeed = MAX_SUBMARINE_SPEED + VisualRandomFloat()*200.0f;
+		info->maxSpeed = MAX_SUBMARINE_SPEED + RandomFloat()*200.0f;
 	else
 		info->maxSpeed = 3000.0f + speed * 3000.0f;
 

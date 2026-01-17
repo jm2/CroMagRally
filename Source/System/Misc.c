@@ -131,80 +131,35 @@ static Boolean	beenHere = false;
 
 uint32_t GetRandomSeed(void)
 {
-	return seed0;
+	return (uint32_t)gSimRNG.state;
 }
 
 /******************** MY RANDOM LONG **********************/
 //
-// My own random number generator that returns a LONG
-//
-// NOTE: call this instead of MyRandomShort if the value is going to be
-//		masked or if it just doesnt matter since this version is quicker
-//		without the 0xffff at the end.
-//
-
-//
-// My own random number generator that returns a 32-bit integer.
-// Rewritten to be safe on 64-bit systems (enforcing 32-bit wrap-around behavior).
-// Used for deterministic gameplay sync.
+// Mapped to SimRandom (Synced)
 //
 uint32_t MyRandomLong(void)
 {
-	// Original Pangea Macro:
-	// seed2 ^= (((seed1 ^= (seed2>>5)*1568397607UL)>>7)+
-	//           (seed0 = (seed0+1)*3141592621UL))*2435386481UL;
-
-	// 1. Update seed1
-	// (seed1 ^= (seed2>>5)*1568397607UL)
-	uint32_t a = (seed2 >> 5) * 1568397607U;
-	seed1 ^= a;
-	
-	// 2. Calculate first term using new seed1
-	// ... >> 7
-	uint32_t term1 = seed1 >> 7;
-	
-	// 3. Update seed0 and get second term
-	// (seed0 = (seed0+1)*3141592621UL)
-	seed0 = (seed0 + 1) * 3141592621U;
-	uint32_t term2 = seed0;
-	
-	// 4. Combine terms
-	uint32_t sum = term1 + term2;
-	
-	// 5. Multiply result
-	uint32_t product = sum * 2435386481U;
-	
-	// 6. Update seed2
-	seed2 ^= product;
-	
-	return seed2;
+	return SimRandom();
 }
+
 
 
 /******************** VISUAL RANDOM LONG **********************/
 //
-// Separate RNG for visual effects that don't need network sync.
-// This prevents high-FPS clients from consuming more gameplay RNG calls 
-// than low-FPS clients (which causes desync).
+// Mapped to LocalRandom (Unsynced)
 //
-
-static uint32_t vSeed = 0x12345678;
-
 uint32_t VisualRandomLong(void)
 {
-	// Simple Xorshift or LCG would suffice, let's reuse a similar robust algo
-	// but with a separate state variable.
-	vSeed ^= (vSeed << 13);
-	vSeed ^= (vSeed >> 17);
-	vSeed ^= (vSeed << 5);
-	return vSeed;
+	return LocalRandom();
 }
 
-// Ensure visual seed is somewhat random on startup
+// Ensure visual seed is somewhat random on startup (Deprecated/Mapped)
 void InitVisualRandomSeed(void)
 {
-	vSeed = (uint32_t)time(NULL);
+	// LocalRNG initialized in LocalRandom init or Main
 }
+
 
 
 /************************* RANDOM RANGE *************************/
@@ -214,15 +169,12 @@ void InitVisualRandomSeed(void)
 
 uint16_t	RandomRange(unsigned short min, unsigned short max)
 {
-uint16_t		qdRdm;											// treat return value as 0-65536
-uint32_t		range, t;
-
-	qdRdm = MyRandomLong();
-	range = max+1 - min;
-	t = (qdRdm * range)>>16;	 							// now 0 <= t <= range
-
-	return( t+min );
+	// 64-bit widen multiply for uniform range
+	uint32_t r = SimRandom();
+	uint32_t range = max - min + 1;
+	return (uint16_t)(((uint64_t)r * range) >> 32) + min;
 }
+
 
 
 
@@ -233,16 +185,8 @@ uint32_t		range, t;
 
 float RandomFloat(void)
 {
-unsigned long	r;
-float	f;
-
-	r = MyRandomLong() & 0xfff;
-	if (r == 0)
-		return(0);
-
-	f = (float)r;							// convert to float
-	f = f * (1.0f/(float)0xfff);			// get # between 0..1
-	return(f);
+	// 0x1.0p-24f is 1.0 / 2^24
+	return (float)(SimRandom() >> 8) * 0x1.0p-24f;
 }
 
 
@@ -253,36 +197,25 @@ float	f;
 
 float RandomFloat2(void)
 {
-unsigned long	r;
-float	f;
-
-	r = MyRandomLong() & 0xfff;
-	if (r == 0)
-		return(0);
-
-	f = (float)r;							// convert to float
-	f = f * (2.0f/(float)0xfff);			// get # between 0..2
-	f -= 1.0f;								// get -1..+1
-	return(f);
+	float f = RandomFloat();
+	return (f * 2.0f) - 1.0f;
 }
 
 
 /************** VISUAL RANDOM FLOATS ********************/
+// Mapped to LocalRandom
 
 float VisualRandomFloat(void)
 {
-	uint32_t r = VisualRandomLong() & 0xfff;
-	if (r == 0) return 0.0f;
-	return (float)r * (1.0f / (float)0xfff);
+	return (float)(LocalRandom() >> 8) * 0x1.0p-24f;
 }
 
 float VisualRandomFloat2(void)
 {
-	uint32_t r = VisualRandomLong() & 0xfff;
-	if (r == 0) return 0.0f;
-	float f = (float)r * (2.0f / (float)0xfff); // 0..2
-	return f - 1.0f;                             // -1..1
+	float f = VisualRandomFloat();
+	return (f * 2.0f) - 1.0f;
 }
+
 
 
 
@@ -290,20 +223,16 @@ float VisualRandomFloat2(void)
 
 void SetMyRandomSeed(unsigned long seed)
 {
-	seed0 = seed;
-	seed1 = 0;
-	seed2 = 0;
-
+	InitSimRNG((uint64_t)seed);
 }
 
 /**************** INIT MY RANDOM SEED *******************/
 
 void InitMyRandomSeed(void)
 {
-	seed0 = 0x2a80ce30;
-	seed1 = 0;
-	seed2 = 0;
+	InitSimRNG(0x2a80ce30);
 }
+
 
 
 /**************** POSITIVE MODULO *******************/
