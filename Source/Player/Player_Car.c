@@ -1982,7 +1982,7 @@ short		p2 = car2->PlayerNum;
 
 				/* SEE IF HIT HARD */
 
-		float impactFactor = (relSpeed - 1200.0f) / 200.0f;
+		float impactFactor = (relSpeed - 1150.0f) / 50.0f;
 		if (impactFactor > 1.0f) impactFactor = 1.0f;
 
 		if (impactFactor > 0.0f)
@@ -1996,11 +1996,11 @@ short		p2 = car2->PlayerNum;
 			// sin(relSpeed) provides a "random-looking" but convergent value.
 			float noiseBase = relSpeed * 0.02f;
 			
-			car1->DeltaRot.x = sinf(noiseBase + car1->PlayerNum) * 3.0f * impactFactor;
-			car1->DeltaRot.z = cosf(noiseBase + car1->PlayerNum) * 3.0f * impactFactor;
+			car1->DeltaRot.x = sinf(noiseBase + car1->PlayerNum) * 1.5f * impactFactor;
+			car1->DeltaRot.z = cosf(noiseBase + car1->PlayerNum) * 1.5f * impactFactor;
 			
-			car2->DeltaRot.x = sinf(noiseBase + car2->PlayerNum + 1.5f) * 3.0f * impactFactor;
-			car2->DeltaRot.z = cosf(noiseBase + car2->PlayerNum + 1.5f) * 3.0f * impactFactor;
+			car2->DeltaRot.x = sinf(noiseBase + car2->PlayerNum + 1.5f) * 1.5f * impactFactor;
+			car2->DeltaRot.z = cosf(noiseBase + car2->PlayerNum + 1.5f) * 1.5f * impactFactor;
 
 					/* SET SKID INFO */
 

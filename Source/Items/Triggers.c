@@ -887,7 +887,7 @@ float	speed;
 		theNode->Delta.z = gDelta.z * .3f;
 
 		// Continuous physics ramp to prevent soft desync
-		float impactFactor = (speed - 2000.0f) / 200.0f;
+		float impactFactor = (speed - 1950.0f) / 50.0f;
 		if (impactFactor > 1.0f) impactFactor = 1.0f;
 		if (impactFactor < 0.0f) impactFactor = 0.0f; // Should be impossible given if(), but safe
 
@@ -896,14 +896,14 @@ float	speed;
 		float noise = speed * 0.05f + whoNode->PlayerNum; 
 
 		speed *= .0015f;
-		theNode->DeltaRot.x = sinf(noise) * speed * impactFactor; 
-		theNode->DeltaRot.z = cosf(noise) * speed * impactFactor;
-		theNode->DeltaRot.y = sinf(noise + 1.0f) * speed * 0.5f * impactFactor; 
+		theNode->DeltaRot.x = sinf(noise) * speed * 0.5f * impactFactor; 
+		theNode->DeltaRot.z = cosf(noise) * speed * 0.5f * impactFactor;
+		theNode->DeltaRot.y = sinf(noise + 1.0f) * speed * 0.25f * impactFactor; 
 
 			/* MAKE CAR SPIN WILDLY */
 
-		whoNode->DeltaRot.y = sinf(noise + 2.0f) * 10.0f * impactFactor;
-		whoNode->DeltaRot.z = cosf(noise + 2.0f) * 5.0f * impactFactor;
+		whoNode->DeltaRot.y = sinf(noise + 2.0f) * 5.0f * impactFactor;
+		whoNode->DeltaRot.z = cosf(noise + 2.0f) * 2.5f * impactFactor;
 
 		gDelta.y += 1000.0f * impactFactor;				// pop up the guy who hit the cactus
 		
@@ -977,7 +977,7 @@ static Boolean DoTrig_SnoMan(ObjNode *theNode, ObjNode *whoNode, Byte sideBits)
 	if (whoNode->Speed3D > 2000.0f)
 	{
 		// Continuous physics ramp
-		float impactFactor = (whoNode->Speed3D - 2000.0f) / 200.0f;
+		float impactFactor = (whoNode->Speed3D - 1950.0f) / 50.0f;
 		if (impactFactor > 1.0f) impactFactor = 1.0f;
 		if (impactFactor < 0.0f) impactFactor = 0.0f;
 
@@ -1131,7 +1131,7 @@ static Boolean DoTrig_CampFire(ObjNode *theNode, ObjNode *whoNode, Byte sideBits
 	if (whoNode->Speed3D > 2000.0f)
 	{
 		// Continuous physics ramp
-		float impactFactor = (whoNode->Speed3D - 2000.0f) / 200.0f;
+		float impactFactor = (whoNode->Speed3D - 1950.0f) / 50.0f;
 		if (impactFactor > 1.0f) impactFactor = 1.0f;
 		if (impactFactor < 0.0f) impactFactor = 0.0f;
 
@@ -1139,8 +1139,8 @@ static Boolean DoTrig_CampFire(ObjNode *theNode, ObjNode *whoNode, Byte sideBits
 
 		// Use state-based continuous chaos
 		float noise = whoNode->Speed3D * 0.05f + whoNode->PlayerNum;
-		whoNode->DeltaRot.y = sinf(noise) * 10.0f * impactFactor;
-		whoNode->DeltaRot.z = cosf(noise) * 5.0f * impactFactor;
+		whoNode->DeltaRot.y = sinf(noise) * 5.0f * impactFactor;
+		whoNode->DeltaRot.z = cosf(noise) * 2.5f * impactFactor;
 
 
 			/* MAKE EXPLOSION */
