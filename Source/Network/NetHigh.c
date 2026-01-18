@@ -811,9 +811,7 @@ short							i;
 	gHostOutMess.fpsFrac		= gFramesPerSecondFrac;					// fps frac
 	gHostOutMess.randomSeed		= MyRandomLong();						// send the host's current random value for sync verification
 
-#if _DEBUG
 	gHostOutMess.simTick		= gSimulationFrame;
-#endif
 
 	for (i = 0; i < MAX_PLAYERS; i++)								// control bits
 	{
@@ -826,12 +824,16 @@ short							i;
 		else
 			gHostOutMess.pauseState[i] = gPlayerInfo[i].net.pauseState;
 
-#if _DEBUG
-		if (!gPlayerInfo[i].headObj)
-			gHostOutMess.playerPositionCheck[i] = (OGLPoint3D) {0,0,0};
+		if (!gPlayerInfo[i].objNode)
+		{
+			gHostOutMess.syncPos[i] = (OGLPoint3D) {0,0,0};
+			gHostOutMess.syncRotY[i] = 0.0f;
+		}
 		else
-			gHostOutMess.playerPositionCheck[i] = gPlayerInfo[i].coord;
-#endif
+		{
+			gHostOutMess.syncPos[i] = gPlayerInfo[i].objNode->Coord;
+			gHostOutMess.syncRotY[i] = gPlayerInfo[i].objNode->Rot.y;
+		}
 	}
 
 			/* SEND IT */
@@ -868,12 +870,8 @@ static Boolean Client_InGame_HandleHostControlInfoMessage(NetHostControlInfoMess
 	gFramesPerSecond 		= mess->fps;
 	gFramesPerSecondFrac 	= mess->fpsFrac;
 
-#if _DEBUG
-	if (mess->simTick != gSimulationFrame)
-	{
-		DoFatalAlert("Sim tick mismatch! mine=%u host=%u", mess->simTick, gSimulationFrame);
-	}
-#endif
+	// In Variable Time Step mode, simTick will diverge. Do NOT assert.
+	// But we can use it to log drift if needed.
 
 	if (MyRandomLong() != mess->randomSeed)				// verify that host's random # is in sync with ours!
 	{
@@ -888,14 +886,25 @@ static Boolean Client_InGame_HandleHostControlInfoMessage(NetHostControlInfoMess
 		gPlayerInfo[i].analogSteering	= mess->analogSteering[i];
 		gPlayerInfo[i].net.pauseState	= mess->pauseState[i];
 
-#if _DEBUG
-		if (gPlayerInfo[i].headObj)
+		// SYNC POSITION & ROTATION (Rubber Banding)
+		// Pull client state towards Auth Host state.
+		if (gPlayerInfo[i].objNode)
 		{
-			GAME_ASSERT_MESSAGE(
-					0 == memcmp(&mess->playerPositionCheck[i], &gPlayerInfo[i].coord, sizeof(OGLPoint3D)),
-					"Player positions got out of sync!");
+			ObjNode *car = gPlayerInfo[i].objNode;
+			const float kSyncFactor = 0.2f;
+			const float kPI = 3.14159265f;
+			const float kPI2 = 6.28318530f;
+
+			car->Coord.x += (mess->syncPos[i].x - car->Coord.x) * kSyncFactor;
+			car->Coord.y += (mess->syncPos[i].y - car->Coord.y) * kSyncFactor;
+			car->Coord.z += (mess->syncPos[i].z - car->Coord.z) * kSyncFactor;
+
+			float rotDiff = mess->syncRotY[i] - car->Rot.y;
+			while (rotDiff <= -kPI) rotDiff += kPI2;
+			while (rotDiff > kPI) rotDiff -= kPI2;
+			
+			car->Rot.y += rotDiff * kSyncFactor;
 		}
-#endif
 	}
 
 	return true;

@@ -886,14 +886,30 @@ float	speed;
 		theNode->Delta.x = gDelta.x * .3f;
 		theNode->Delta.z = gDelta.z * .3f;
 
-		speed *= .0015f;
-		theNode->DeltaRot.x = VisualRandomFloat2() * speed;		// set spinning
-		theNode->DeltaRot.z = VisualRandomFloat2() * speed;
-		theNode->DeltaRot.y = VisualRandomFloat2() * speed * .5f;
+		// Continuous physics ramp to prevent soft desync
+		float impactFactor = (speed - 2000.0f) / 200.0f;
+		if (impactFactor > 1.0f) impactFactor = 1.0f;
+		if (impactFactor < 0.0f) impactFactor = 0.0f; // Should be impossible given if(), but safe
 
-		gDelta.y += 1000.0f;				// pop up the guy who hit the cactus
-		gDelta.x *= .5f;					// slow
-		gDelta.z *= .5f;
+		// Use state-based continuous chaos instead of frame-based RNG
+		// gSimulationFrame divergence causes soft desync in variable time step.
+		float noise = speed * 0.05f + whoNode->PlayerNum; 
+
+		speed *= .0015f;
+		theNode->DeltaRot.x = sinf(noise) * speed * impactFactor; 
+		theNode->DeltaRot.z = cosf(noise) * speed * impactFactor;
+		theNode->DeltaRot.y = sinf(noise + 1.0f) * speed * 0.5f * impactFactor; 
+
+			/* MAKE CAR SPIN WILDLY */
+
+		whoNode->DeltaRot.y = sinf(noise + 2.0f) * 10.0f * impactFactor;
+		whoNode->DeltaRot.z = cosf(noise + 2.0f) * 5.0f * impactFactor;
+
+		gDelta.y += 1000.0f * impactFactor;				// pop up the guy who hit the cactus
+		
+		float slowFactor = 1.0f - (0.5f * impactFactor);
+		gDelta.x *= slowFactor;					// slow
+		gDelta.z *= slowFactor;
 		return(false);
 	}
 
@@ -960,13 +976,21 @@ static Boolean DoTrig_SnoMan(ObjNode *theNode, ObjNode *whoNode, Byte sideBits)
 
 	if (whoNode->Speed3D > 2000.0f)
 	{
+		// Continuous physics ramp
+		float impactFactor = (whoNode->Speed3D - 2000.0f) / 200.0f;
+		if (impactFactor > 1.0f) impactFactor = 1.0f;
+		if (impactFactor < 0.0f) impactFactor = 0.0f;
+
 		ExplodeSnoMan(theNode);
 		theNode->TerrainItemPtr	= nil;				// dont ever come back
 		DeleteObject(theNode);
 
-		gDelta.y += 1000.0f;				// pop up the guy who hit the it
-		gDelta.x *= .2f;					// slow
-		gDelta.z *= .2f;
+		gDelta.y += 1000.0f * impactFactor;			// pop up the guy who hit the it
+		
+		// Ramp the slow-down effect: 1.0 (no slow) -> 0.2 (full slow)
+		float slowFactor = 1.0f - (0.8f * impactFactor);
+		gDelta.x *= slowFactor;
+		gDelta.z *= slowFactor;
 
 		return(false);
 	}
@@ -1106,11 +1130,17 @@ static Boolean DoTrig_CampFire(ObjNode *theNode, ObjNode *whoNode, Byte sideBits
 
 	if (whoNode->Speed3D > 2000.0f)
 	{
+		// Continuous physics ramp
+		float impactFactor = (whoNode->Speed3D - 2000.0f) / 200.0f;
+		if (impactFactor > 1.0f) impactFactor = 1.0f;
+		if (impactFactor < 0.0f) impactFactor = 0.0f;
 
 			/* MAKE CAR SPIN WILDLY */
 
-		whoNode->DeltaRot.y = VisualRandomFloat2() * 20.0f;
-		whoNode->DeltaRot.z = VisualRandomFloat2() * 10.0f;
+		// Use state-based continuous chaos
+		float noise = whoNode->Speed3D * 0.05f + whoNode->PlayerNum;
+		whoNode->DeltaRot.y = sinf(noise) * 10.0f * impactFactor;
+		whoNode->DeltaRot.z = cosf(noise) * 5.0f * impactFactor;
 
 
 			/* MAKE EXPLOSION */
@@ -1128,9 +1158,11 @@ static Boolean DoTrig_CampFire(ObjNode *theNode, ObjNode *whoNode, Byte sideBits
 		theNode->TerrainItemPtr = nil;							// dont come back
 		DeleteObject(theNode);
 
-		gDelta.y += 1300.0f;				// pop up the guy who hit the it
-		gDelta.x *= .3f;					// slow
-		gDelta.z *= .3f;
+		gDelta.y += 1300.0f * impactFactor;				// pop up the guy who hit the it
+		
+		float slowFactor = 1.0f - (0.7f * impactFactor);
+		gDelta.x *= slowFactor;					// slow
+		gDelta.z *= slowFactor;
 
 		return(false);
 	}

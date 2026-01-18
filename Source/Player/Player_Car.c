@@ -1723,37 +1723,6 @@ Boolean		wasInWater;
 				VehicleHitVehicle(vehicle, hitObj);
 			}
 
-				/**********************/
-				/* SEE IF LIQUID PATCH */
-				/**********************/
-				//
-				// Give other solid items priority over the water by checking
-				// if the bottom collision bit is set.  This way jumping on lily pads
-				// will be more reliable.
-				//
-
-			else
-			if ((ctype & CTYPE_LIQUID) && (!(sides&CBITS_BOTTOM)))	// only check for water if no bottom collision
-			{
-				if (GetTerrainY(gCoord.x, gCoord.z) < hitObj->Coord.y)		// make sure didnt hit liquid thru solid floor
-				{
-					gPlayerInfo[playerNum].onWater = true;
-					gPlayerInfo[playerNum].waterY = hitObj->CollisionBoxes[0].top;
-
-					vehicle->Rot.z = vehicle->Rot.x = 0;				// flatt on water
-					vehicle->DeltaRot.x = vehicle->DeltaRot.z = 0;
-
-					gDelta.y = 0;
-					gCoord.y = hitObj->CollisionBoxes[0].top;
-
-					if (hitObj->Kind == LIQUID_WATER)					// splash if water
-					{
-						if (!wasInWater)
-							MakeSplash(gCoord.x, gPlayerInfo[playerNum].waterY, gCoord.z);
-					}
-				}
-			}
-
 			/*************************************/
 			/* MAKE CRASH-THUD IF HIT SOLID HARD */
 			/*************************************/
@@ -2013,22 +1982,31 @@ short		p2 = car2->PlayerNum;
 
 				/* SEE IF HIT HARD */
 
-		if (relSpeed > 1200.0f)
+		float impactFactor = (relSpeed - 1200.0f) / 200.0f;
+		if (impactFactor > 1.0f) impactFactor = 1.0f;
+
+		if (impactFactor > 0.0f)
 		{
-			car1->DeltaRot.y = PI2 * (1.0f- dot) * .1f;
-			car2->DeltaRot.y = -PI2 * (1.0f - dot) * .1f;
+			// Scale effects by impactFactor to avoid binary "Soft Desync" at threshold
+			car1->DeltaRot.y = PI2 * (1.0f- dot) * .1f * impactFactor;
+			car2->DeltaRot.y = -PI2 * (1.0f - dot) * .1f * impactFactor;
 
-			car1->DeltaRot.x = (VisualRandomFloat()-.5f) * 3.0f;				// send other axes into wild spin
-			car1->DeltaRot.z = (VisualRandomFloat()-.5f) * 3.0f;
-			car2->DeltaRot.x = (VisualRandomFloat()-.5f) * 3.0f;
-			car2->DeltaRot.z = (VisualRandomFloat()-.5f) * 3.0f;
-
+			// Use state-based continuous chaos instead of frame-based RNG.
+			// gSimulationFrame is not synced in variable time step, so it causes divergence.
+			// sin(relSpeed) provides a "random-looking" but convergent value.
+			float noiseBase = relSpeed * 0.02f;
+			
+			car1->DeltaRot.x = sinf(noiseBase + car1->PlayerNum) * 3.0f * impactFactor;
+			car1->DeltaRot.z = cosf(noiseBase + car1->PlayerNum) * 3.0f * impactFactor;
+			
+			car2->DeltaRot.x = sinf(noiseBase + car2->PlayerNum + 1.5f) * 3.0f * impactFactor;
+			car2->DeltaRot.z = cosf(noiseBase + car2->PlayerNum + 1.5f) * 3.0f * impactFactor;
 
 					/* SET SKID INFO */
 
-			gPlayerInfo[car1->PlayerNum].greasedTiresTimer = .5f;
+			gPlayerInfo[car1->PlayerNum].greasedTiresTimer = .5f * impactFactor;
 			gPlayerInfo[car1->PlayerNum].isPlaning = true;
-			gPlayerInfo[car2->PlayerNum].greasedTiresTimer = .5f;
+			gPlayerInfo[car2->PlayerNum].greasedTiresTimer = .5f * impactFactor;
 			gPlayerInfo[car2->PlayerNum].isPlaning = true;
 
 
@@ -2544,7 +2522,7 @@ short	bestFront,bestBack,bestShot;
 						gPlayerInfo[playerNum].controlBits_New |= (1L << kControlBit_ThrowBackward);
 					else
 						gPlayerInfo[playerNum].controlBits_New |= (1L << kControlBit_ThrowForward);
-					gPlayerInfo[playerNum].attackTimer = VisualRandomFloat() * 1.1f;
+					gPlayerInfo[playerNum].attackTimer = RandomFloat() * 1.1f;
 				}
 			}
 		}
@@ -2602,7 +2580,7 @@ short	targetP;
 			if (gPlayerInfo[playerNum].targetingTimer > 1.0f)						// see if we can fire!
 			{
 				gPlayerInfo[playerNum].controlBits_New |= (1L << kControlBit_ThrowForward);
-				gPlayerInfo[playerNum].attackTimer = VisualRandomFloat() * .7f;
+				gPlayerInfo[playerNum].attackTimer = RandomFloat() * .7f;
 			}
 		}
 		else
@@ -2624,7 +2602,7 @@ short	targetP;
 static void DoCPUPOWLogic_Mine(short playerNum)
 {
 	gPlayerInfo[playerNum].controlBits_New |= (1L << kControlBit_ThrowBackward);
-	gPlayerInfo[playerNum].attackTimer = VisualRandomFloat() * 2.0f;
+	gPlayerInfo[playerNum].attackTimer = RandomFloat() * 2.0f;
 }
 
 
@@ -2678,7 +2656,7 @@ Boolean	attackCPUCars, inFront;
 				else
 					gPlayerInfo[playerNum].controlBits_New |= (1L << kControlBit_ThrowBackward);
 
-				gPlayerInfo[playerNum].attackTimer = VisualRandomFloat() * .7f;
+				gPlayerInfo[playerNum].attackTimer = RandomFloat() * .7f;
 			}
 		}
 		else

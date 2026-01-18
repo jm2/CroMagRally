@@ -57,10 +57,9 @@ typedef struct
 	uint32_t			frameCounter;
 	uint8_t				pauseState[MAX_PLAYERS];
 
-#if _DEBUG
 	uint32_t			simTick;
-	OGLPoint3D			playerPositionCheck[MAX_PLAYERS];		// additional error checking in debug mode
-#endif
+	OGLPoint3D			syncPos[MAX_PLAYERS];			// Authoritative position from Host
+	float				syncRotY[MAX_PLAYERS];			// Authoritative Y-Rotation (Heading)
 }NetHostControlInfoMessageType;
 
 

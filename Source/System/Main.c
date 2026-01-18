@@ -1007,7 +1007,11 @@ static void PlayArea(void)
 	//
 	if (gIsNetworkClient && gUseRedundancy)
 	{
-		for (int i = 0; i < 30; i++) // 30 frames = ~500ms buffer
+		int framesToBuffer = 30;
+		if (gTargetFPS > 0)
+			framesToBuffer = (30 * gTargetFPS) / 60;
+
+		for (int i = 0; i < framesToBuffer; i++) // Scaled buffer to ~500ms equivalent
 		{
 			ClientSend_ControlInfoToHost();
 		}
@@ -1018,7 +1022,7 @@ static void PlayArea(void)
 	
 	while(true)
 	{
-		uint64_t startTick = SDL_GetTicks();
+		uint64_t startTick = SDL_GetPerformanceCounter();
 
 		//
 		// 1. INPUT & NETWORK SYNC
@@ -1091,11 +1095,18 @@ static void PlayArea(void)
 		//
 		if (gNetGameInProgress && gTargetFPS > 0)
 		{
-			uint64_t elapsed = SDL_GetTicks() - startTick;
-			uint64_t targetPeriod = 1000 / gTargetFPS;
-			if (elapsed < targetPeriod)
+			uint64_t now = SDL_GetPerformanceCounter();
+			uint64_t freq = SDL_GetPerformanceFrequency();
+			double targetSecs = 1.0 / (double)gTargetFPS;
+			double elapsedSecs = (double)(now - startTick) / (double)freq;
+			
+			while (elapsedSecs < targetSecs)
 			{
-				SDL_Delay((uint32_t)(targetPeriod - elapsed));
+				if ((targetSecs - elapsedSecs) > 0.002) // Sleep if > 2ms remaining
+					SDL_Delay(1);
+				
+				now = SDL_GetPerformanceCounter();
+				elapsedSecs = (double)(now - startTick) / (double)freq;
 			}
 		}
 
