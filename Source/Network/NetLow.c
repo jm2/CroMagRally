@@ -626,66 +626,77 @@ static NSpMessageHeader* PollSocket(sockfd_t sockfd, bool* outBrokenPipe)
 		goto bye;
 	}
 
-	// if -1, probably EAGAIN since our sockets are non-blocking - no data available
-	if (recvRC == -1)
+	// if < 0, check for WouldBlock. If so, return NULL (no data yet).
+	if (recvRC < 0)
 	{
+		int err = GetSocketError();
+		if (err != kSocketError_WouldBlock)
+		{
+			printf("%s: error peeking header: %d\n", __func__, err);
+			// For non-blocking/poll, read errors other than EWOULDBLOCK are usually fatal
+			brokenPipe = true; 
+		}
 		goto bye;
 	}
 
-	// We have at least some data - now use RecvAll to get the full header reliably
-	recvRC = RecvAll(sockfd, messageBuf, sizeof(NSpMessageHeader));
-	if (recvRC == 0)
+	// If we got *some* data but not a full header, we must WAIT (return NULL)
+	// Do NOT consume it yet, or we risked blocking in RecvAll.
+	if (recvRC < (ssize_t)sizeof(NSpMessageHeader))
 	{
+		// Not enough for a full header yet. Return and try again next frame.
+		goto bye;
+	}
+
+	// If we are here, we have at least a full header in the buffer.
+	// We can safely peek at it to know the message length.
+	NSpMessageHeader* peekHeader = (NSpMessageHeader*) messageBuf;
+
+	if (peekHeader->version != kNSpCMRProtocol4CC)
+	{
+		printf("%s: bad protocol %08x\n", __func__, peekHeader->version);
+		brokenPipe = true; // Garbage on line? Close it.
+		goto bye;
+	}
+
+	if (peekHeader->messageLen > kNSpMaxMessageLength
+		|| peekHeader->messageLen < sizeof(NSpMessageHeader))
+	{
+		printf("%s: invalid message length %u\n", __func__, peekHeader->messageLen);
 		brokenPipe = true;
 		goto bye;
 	}
-	if (recvRC < 0)
+
+	// Now check if we have the FULL message (Header + Payload) available
+	// doing a second PEEK for the full length.
+	size_t fullMsgLen = peekHeader->messageLen;
+	if (fullMsgLen > sizeof(NSpMessageHeader))
 	{
-		printf("%s: error reading header: %d. Closing socket to prevent desync.\n", __func__, GetLastSocketError());
-		brokenPipe = true; // Treat read errors (timeout/partial) as fatal
-		goto bye;
-	}
+		recvRC = recv(
+			sockfd,
+			messageBuf,
+			fullMsgLen,
+			MSG_NOSIGNAL | MSG_PEEK
+		);
 
-	NSpMessageHeader* header = (NSpMessageHeader*) messageBuf;
-
-	if (header->version != kNSpCMRProtocol4CC)
-	{
-		printf("%s: bad protocol %08x\n", __func__, header->version);
-		goto bye;
-	}
-
-	if (header->messageLen > kNSpMaxPayloadLength
-		|| header->messageLen < sizeof(NSpMessageHeader))
-	{
-		printf("%s: invalid message length %u\n", __func__, header->messageLen);
-		goto bye;
-	}
-
-	ssize_t payloadLen = header->messageLen - sizeof(NSpMessageHeader);
-
-	// Read payload if there's more to the message than just the header
-	if (payloadLen > 0)
-	{
-		// Use RecvAll to ensure we get the complete payload (handles partial reads)
-		recvRC = RecvAll(sockfd, messageBuf + sizeof(NSpMessageHeader), payloadLen);
-
-		if (recvRC == 0)
+		if (recvRC < (ssize_t)fullMsgLen)
 		{
-			brokenPipe = true;
-			goto bye;
-		}
-
-		if (recvRC < 0)
-		{
-			printf("%s: error reading payload for message '%s': %d. Closing socket.\n", 
-				__func__, NSp4CCString(header->what), GetLastSocketError());
-			brokenPipe = true; // Treat read errors as fatal
+			// Not enough for the full payload yet. Return and try again.
 			goto bye;
 		}
 	}
 
-	char* returnBuf = AllocPtr(header->messageLen);
-	memcpy(returnBuf, messageBuf, header->messageLen);
+	// OK, we have the full message available in the socket buffer.
+	// Now we can consume it safely with RecvAll (it won't block).
+	recvRC = RecvAll(sockfd, messageBuf, fullMsgLen);
+	if (recvRC <= 0)
+	{
+		// Should not happen since we just peeked it, but handle error just in case
+		brokenPipe = true; 
+		goto bye;
+	}
+
+	char* returnBuf = AllocPtr(fullMsgLen);
+	memcpy(returnBuf, messageBuf, fullMsgLen);
 	outMessage = (NSpMessageHeader*) returnBuf;
 	printf("recv '%s' (%dB) #%d from P%d\n",
 		NSp4CCString(outMessage->what), outMessage->messageLen, outMessage->id, outMessage->from);
