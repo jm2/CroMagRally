@@ -56,8 +56,19 @@ static SDL_Gamepad *TryOpenGamepadFromJoystick(SDL_JoystickID joystickID);
 static SDL_Gamepad *TryOpenAnyUnusedGamepad(bool showMessage);
 static int GetGamepadSlotFromJoystick(SDL_JoystickID joystickID);
 
+// Touch Controls (enabled on all platforms, hidden until touch event)
 #if defined(__ANDROID__) || defined(__IOS__)
 static SDL_Sensor *gAccelerometer = NULL;
+#endif
+
+// Virtual joystick configuration (normalized screen coordinates)
+#define STICK_VISUAL_CENTER_X 0.27f   // 27% from left edge
+#define STICK_INPUT_CENTER_X 0.20f   // 27% from left edge
+#define STICK_VISUAL_CENTER_Y 0.85f // Visual position (near bottom)
+#define STICK_INPUT_CENTER_Y  0.65f // Input logical position (moved UP to match visual alignment)
+#define STICK_RADIUS_X 0.08f   // Horizontal radius
+#define STICK_RADIUS_Y 0.08f   // Vertical radius
+#define STICK_CLAIM_RADIUS 0.15f  // Touch claim radius around center
 
 typedef struct {
   SDL_FingerID id;
@@ -71,19 +82,19 @@ static SDL_JoystickID gVirtualJoystickID = 0;
 static SDL_Joystick *gVirtualJoystick = NULL;
 static bool gJoystickFingerActive = false;
 static SDL_FingerID gJoystickFingerID = 0;
+static bool gTouchControlsActive = false;  // Only true after real touch event
 
 typedef struct {
   float stickX, stickY;
   bool btnA, btnB, btnX, btnY, btnStart;
 } VirtualInputState;
 static VirtualInputState gVirtualInput = {0};
-#endif
 
 #pragma mark -
 /**********************/
 
-#if defined(__ANDROID__) || defined(__IOS__)
-static void InitMobileInput(void) {
+// Initialize virtual touch gamepad (all platforms)
+static void InitTouchInput(void) {
   // Check for stale static state (Android process reuse)
   if (gVirtualJoystickID != 0 && gVirtualJoystick != NULL) {
     if (SDL_GetJoystickFromID(gVirtualJoystickID) == NULL) {
@@ -119,11 +130,14 @@ static void InitMobileInput(void) {
       SDL_Log("Failed to add Virtual Gamepad: %s", SDL_GetError());
     }
   }
+}
+
+#if defined(__ANDROID__) || defined(__IOS__)
+static void InitMobileInput(void) {
+  InitTouchInput();
+  gTouchControlsActive = true;  // Always show touch controls on mobile
 
   if (!gAccelerometer) {
-    // Ensure touch events generate mouse events for menus
-    SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "1");
-
     int num_sensors = 0;
     SDL_SensorID *sensorIDs = SDL_GetSensors(&num_sensors);
     if (sensorIDs) {
@@ -137,21 +151,33 @@ static void InitMobileInput(void) {
       SDL_free(sensorIDs);
     }
   }
-
-  // SDL_memset(gFingers, 0, sizeof(gFingers)); // DO NOT WIPE FINGERS! Persist
-  // across frames.
 }
+#endif
 
 static void UpdateVirtualGamepad(void) {
   if (!gVirtualJoystick)
     return;
 
-  float stickX = 0, stickY = 0;
+  float targetStickX = 0, targetStickY = 0;
   bool btnA = false, btnB = false, btnX = false, btnY = false, btnStart = false;
 
-  // ALWAYS process touch input to populate gVirtualInput for Input Injection.
-  // This ensures touch works even when gUserPrefersGamepad is true (BT
-  // controller present).
+  // Validate joystick finger - if it's marked active but the finger isn't found,
+  // reset it (fixes stuck joystick bug)
+  if (gJoystickFingerActive) {
+    bool fingerFound = false;
+    for (int i = 0; i < MAX_TOUCH_FINGERS; i++) {
+      if (gFingers[i].active && gFingers[i].id == gJoystickFingerID) {
+        fingerFound = true;
+        break;
+      }
+    }
+    if (!fingerFound) {
+      gJoystickFingerActive = false;
+      gJoystickFingerID = 0;
+    }
+  }
+
+  // Process touch input to populate gVirtualInput for Input Injection.
   for (int i = 0; i < MAX_TOUCH_FINGERS; i++) {
     if (!gFingers[i].active)
       continue;
@@ -163,44 +189,46 @@ static void UpdateVirtualGamepad(void) {
     bool isJoystickFinger = false;
     if (gJoystickFingerActive && gJoystickFingerID == gFingers[i].id) {
       isJoystickFinger = true;
-    } else if (!gJoystickFingerActive && x < 0.4f && y > 0.4f) {
-      // New claim!
-      gJoystickFingerActive = true;
-      gJoystickFingerID = gFingers[i].id;
-      isJoystickFinger = true;
-      SDL_Log("STICK CLAIM: Finger=%lu at (%.2f, %.2f)",
-              (unsigned long)gFingers[i].id, x, y);
+    } else if (!gJoystickFingerActive) {
+      // Check if finger is within claim radius of joystick center
+      float dx = x - STICK_INPUT_CENTER_X;
+      float dy = y - STICK_INPUT_CENTER_Y;
+      float dist = SDL_sqrtf(dx * dx + dy * dy);
+      if (dist < STICK_CLAIM_RADIUS) {
+        // New claim!
+        gJoystickFingerActive = true;
+        gJoystickFingerID = gFingers[i].id;
+        isJoystickFinger = true;
+        SDL_Log("STICK CLAIM: Finger=%lu at (%.2f, %.2f)",
+                (unsigned long)gFingers[i].id, x, y);
+      }
     }
 
     if (isJoystickFinger) {
-      float dx = (x - 0.27f) / 0.15f;
-      float dy = (y - 0.85f) / 0.15f;
-      if (dx < -1)
-        dx = -1;
-      if (dx > 1)
-        dx = 1;
-      if (dy < -1)
-        dy = -1;
-      if (dy > 1)
-        dy = 1;
-      stickX = dx;
-      stickY = dy;
-      SDL_Log("STICK: Finger=%lu X=%.2f Y=%.2f -> dX=%.2f dY=%.2f",
-              (unsigned long)gFingers[i].id, x, y, stickX, stickY);
+      // Calculate normalized stick deflection with separate X/Y radii
+      float dx = (x - STICK_INPUT_CENTER_X) / STICK_RADIUS_X;
+      float dy = (y - STICK_INPUT_CENTER_Y) / STICK_RADIUS_Y;
+      // Clamp each axis to [-1, 1] independently
+      if (dx < -1.0f) dx = -1.0f;
+      if (dx > 1.0f) dx = 1.0f;
+      if (dy < -1.0f) dy = -1.0f;
+      if (dy > 1.0f) dy = 1.0f;
+      targetStickX = dx;
+      targetStickY = dy;
     }
-    // Right side: Buttons (center: 0.85, 0.75, radius roughly 0.2)
-    else if (x > 0.6f && y > 0.4f) {
+    // Right side: Buttons (center: 0.85, 0.75, radius roughly 0.15)
+    else if (x > 0.6f && y > 0.5f) {
       float dx = x - 0.85f;
-      float dy = y - 0.75f;
+      float dy = y - 0.78f;
       float distSq = dx * dx + dy * dy;
-      if (distSq < 0.2f * 0.2f) {
-        if (dy > 0.02f)
+      if (distSq < 0.18f * 0.18f) {
+        if (dy > 0.03f)
           btnA = true;
-        else if (dx > 0.02f)
+        else if (dx > 0.03f)
           btnB = true;
-        else if (dx < -0.02f)
+        else if (dx < -0.03f)
           btnX = true;
-        else if (dy < -0.02f)
+        else if (dy < -0.03f)
           btnY = true;
       }
     }
@@ -211,8 +239,49 @@ static void UpdateVirtualGamepad(void) {
   }
 
   // Update Global Virtual Input State (for Injection into Player 1)
-  gVirtualInput.stickX = stickX;
-  gVirtualInput.stickY = stickY;
+  // Smoothing
+  if (gJoystickFingerActive) {
+    gVirtualInput.stickX = gVirtualInput.stickX * 0.5f + targetStickX * 0.5f;
+    gVirtualInput.stickY = gVirtualInput.stickY * 0.5f + targetStickY * 0.5f;
+    
+    // Snap close-to-zero values to clean up final rest
+    if (SDL_fabs(gVirtualInput.stickX) < 0.01f) gVirtualInput.stickX = 0;
+    if (SDL_fabs(gVirtualInput.stickY) < 0.01f) gVirtualInput.stickY = 0;
+    
+    // Auto-repeat for menu navigation (when not in game)
+    // Simulates repeated presses when holding the stick up/down
+    if (!gIsInGame) {
+      static uint32_t sStickHoldStartTime = 0;
+      static bool sStickHeld = false;
+      
+      if (SDL_fabs(targetStickY) > 0.5f) {
+        uint32_t now = SDL_GetTicks();
+        if (!sStickHeld) {
+          sStickHeld = true;
+          sStickHoldStartTime = now;
+        } else {
+          uint32_t heldTime = now - sStickHoldStartTime;
+          // Initial delay 400ms
+          if (heldTime > 400) {
+            uint32_t repeatTime = heldTime - 400;
+            // Accelerate: Slow repeat (250ms) for first 1s, then Fast (100ms)
+            uint32_t rate = (repeatTime > 1000) ? 100 : 250;
+            
+            // Create a 50ms "gap" (return to 0) to trigger a new press event
+            if ((repeatTime % rate) < 50) {
+              gVirtualInput.stickY = 0;
+            }
+          }
+        }
+      } else {
+        sStickHeld = false;
+      }
+    }
+  } else {
+    gVirtualInput.stickX = 0;
+    gVirtualInput.stickY = 0;
+  }
+  
   gVirtualInput.btnA = btnA;
   gVirtualInput.btnB = btnB;
   gVirtualInput.btnX = btnX;
@@ -223,9 +292,9 @@ static void UpdateVirtualGamepad(void) {
   // This prevents the virtual device from conflicting with the physical one.
   if (!gUserPrefersGamepad) {
     SDL_SetJoystickVirtualAxis(gVirtualJoystick, SDL_GAMEPAD_AXIS_LEFTX,
-                               (int16_t)(stickX * 32767));
+                               (int16_t)(gVirtualInput.stickX * 32767));
     SDL_SetJoystickVirtualAxis(gVirtualJoystick, SDL_GAMEPAD_AXIS_LEFTY,
-                               (int16_t)(stickY * 32767));
+                               (int16_t)(gVirtualInput.stickY * 32767));
     SDL_SetJoystickVirtualButton(gVirtualJoystick, SDL_GAMEPAD_BUTTON_SOUTH,
                                  btnA);
     SDL_SetJoystickVirtualButton(gVirtualJoystick, SDL_GAMEPAD_BUTTON_EAST,
@@ -238,7 +307,6 @@ static void UpdateVirtualGamepad(void) {
                                  btnStart);
   }
 }
-#endif
 
 static inline void UpdateKeyState(KeyState *state, bool downNow) {
   switch (*state) // look at prev state
@@ -364,7 +432,6 @@ static void UpdateGamepadSpecificInputNeeds(int gamepadNum) {
           actuation = 1;
         }
 
-#if defined(__ANDROID__) || defined(__IOS__)
         // Inject Virtual Gamepad Button
         if (gamepadNum == 0 && !gUserPrefersGamepad) {
           if ((pb->id == SDL_GAMEPAD_BUTTON_SOUTH && gVirtualInput.btnA) ||
@@ -375,7 +442,6 @@ static void UpdateGamepadSpecificInputNeeds(int gamepadNum) {
             actuation = 1;
           }
         }
-#endif
       } else if (type == kInputTypeAxisPlus || type == kInputTypeAxisMinus) {
         float value;
         int16_t axis = SDL_GetGamepadAxis(sdlGamepad, pb->id);
@@ -386,7 +452,6 @@ static void UpdateGamepadSpecificInputNeeds(int gamepadNum) {
         else
           value = axis * (1.0f / -32768.0f);
 
-#if defined(__ANDROID__) || defined(__IOS__)
         // Inject Virtual Gamepad Axis
         if (gamepadNum == 0 && !gUserPrefersGamepad) {
           if (pb->id == SDL_GAMEPAD_AXIS_LEFTX) {
@@ -403,7 +468,6 @@ static void UpdateGamepadSpecificInputNeeds(int gamepadNum) {
               value = SDL_max(value, -v);
           }
         }
-#endif
 
         // Avoid magnitude bump when thumbstick is pushed past dead zone:
         // Bring magnitude from [kJoystickDeadZoneFrac, 1.0] to [0.0, 1.0].
@@ -427,27 +491,6 @@ static void UpdateGamepadSpecificInputNeeds(int gamepadNum) {
 
 #pragma mark -
 
-#if defined(__ANDROID__) || defined(__IOS__)
-static void SimulateKey(SDL_Scancode key, bool down) {
-  SDL_Event event;
-  SDL_memset(&event, 0, sizeof(event));
-  event.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
-  event.key.scancode = key;
-  event.key.down = down; // SDL3 uses 'bool down'
-  SDL_PushEvent(&event);
-}
-
-static SDL_Scancode GetMenuKeyFromTouch(float x, float y) {
-  if (y < 0.25f)
-    return SDL_SCANCODE_UP;
-  if (y > 0.75f)
-    return SDL_SCANCODE_DOWN;
-  if (x < 0.2f)
-    return SDL_SCANCODE_ESCAPE;
-  return SDL_SCANCODE_RETURN;
-}
-#endif
-
 /**********************/
 /* PUBLIC FUNCTIONS   */
 /**********************/
@@ -457,6 +500,8 @@ void DoSDLMaintenance(void) {
   gMouseMotionNow = false;
   int mouseWheelDelta = 0;
 
+  // Initialize touch input on all platforms
+  InitTouchInput();
 #if defined(__ANDROID__) || defined(__IOS__)
   InitMobileInput();
 #endif
@@ -473,9 +518,14 @@ void DoSDLMaintenance(void) {
       CleanQuit(); // throws Pomme::QuitRequest
       return;
 
-#if defined(__ANDROID__) || defined(__IOS__)
+    // Touch input handling (all platforms - hidden until activated by real touch)
     case SDL_EVENT_FINGER_DOWN:
     case SDL_EVENT_FINGER_MOTION: {
+      // Only activate touch controls from real touch events (not mouse-simulated)
+      // SDL_TOUCH_MOUSEID is used for mouse events emulating touch
+      if (event.tfinger.touchID != SDL_TOUCH_MOUSEID) {
+        gTouchControlsActive = true;  // Show touch controls
+      }
       gUserPrefersGamepad = false; // Touch Reactivation
       for (int i = 0; i < MAX_TOUCH_FINGERS; i++) {
         if (!gFingers[i].active || gFingers[i].id == event.tfinger.fingerID) {
@@ -485,14 +535,6 @@ void DoSDLMaintenance(void) {
           gFingers[i].active = true;
           break;
         }
-      }
-      UpdateVirtualGamepad();
-
-      // Menu navigation (only if not handled by gamepad logic? or let both
-      // work)
-      if (event.type == SDL_EVENT_FINGER_DOWN && !gIsInGame) {
-        SimulateKey(GetMenuKeyFromTouch(event.tfinger.x, event.tfinger.y),
-                    true);
       }
       break;
     }
@@ -509,15 +551,8 @@ void DoSDLMaintenance(void) {
           break;
         }
       }
-      UpdateVirtualGamepad();
-
-      if (!gIsInGame) {
-        SimulateKey(GetMenuKeyFromTouch(event.tfinger.x, event.tfinger.y),
-                    false);
-      }
       break;
     }
-#endif
 
     case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
       CleanQuit(); // throws Pomme::QuitRequest
@@ -581,6 +616,9 @@ void DoSDLMaintenance(void) {
     }
     }
   }
+
+  // Update virtual gamepad every frame (handles smoothing/auto-repeat)
+  UpdateVirtualGamepad();
 
   // Refresh the state of each individual keyboard key
   UpdateRawKeyboardStates();
@@ -1157,14 +1195,14 @@ void ResetDefaultMouseBindings(void) {
   }
 }
 
-#if defined(__ANDROID__) || defined(__IOS__)
+// Virtual gamepad rendering (all platforms, shown when touch is activated)
 void DrawVirtualGamepad(void) {
   // Check if assets are loaded and if we are in the overlay pass
   if (gAtlases[SPRITE_GROUP_GAMEPAD] == NULL || !gDrawingOverlayPane)
     return;
 
-  // Hide if user prefers physical gamepad
-  if (gUserPrefersGamepad)
+  // Hide if touch controls not activated or user prefers physical gamepad
+  if (!gTouchControlsActive || gUserPrefersGamepad)
     return;
 
   int paneNum = GetOverlayPaneNumber();
@@ -1197,17 +1235,24 @@ void DrawVirtualGamepad(void) {
   bool btnY = gVirtualInput.btnY;
   bool btnStart = gVirtualInput.btnStart;
 
-  // Stick (centered at normalized 0.27, 0.85)
-  float sx = (-0.5f + 0.27f) * lw;
-  float sy = (-0.5f + 0.85f) * lh;
+  // Stick position using STICK_* constants for consistency with input logic
+  // Convert normalized coordinates to screen space (centered projection)
+  float sx = (-0.5f + STICK_VISUAL_CENTER_X) * lw;
+  float sy = (-0.5f + STICK_VISUAL_CENTER_Y) * lh;
+  
+  // Calculate visual nub displacement using separate X/Y radii for proper scaling
+  float nubOffsetX = STICK_RADIUS_X * lw;
+  float nubOffsetY = STICK_RADIUS_Y * lh;
+  
   DrawSprite2(SPRITE_GROUP_GAMEPAD, GAMEPAD_SObjType_StickBase, sx, sy, 0.3f,
               0.3f, 0, flags);
-  DrawSprite2(SPRITE_GROUP_GAMEPAD, GAMEPAD_SObjType_StickNub, sx + stickX * 40,
-              sy + stickY * 40, 0.4f, 0.4f, 0, flags);
+  DrawSprite2(SPRITE_GROUP_GAMEPAD, GAMEPAD_SObjType_StickNub, 
+              sx + stickX * nubOffsetX,
+              sy + stickY * nubOffsetY, 0.4f, 0.4f, 0, flags);
 
-  // Buttons (centered at normalized 0.85, 0.75)
+  // Buttons (centered at normalized 0.85, 0.78)
   float bx = (-0.5f + 0.85f) * lw;
-  float by = (-0.5f + 0.75f) * lh;
+  float by = (-0.5f + 0.78f) * lh;
   float bsp = 55.0f;
 
   gGlobalColorFilter =
@@ -1242,6 +1287,3 @@ void DrawVirtualGamepad(void) {
   glDepthMask(GL_TRUE);
   OGL_PopState();
 }
-#else
-void DrawVirtualGamepad(void) {}
-#endif
