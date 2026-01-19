@@ -1723,6 +1723,37 @@ Boolean		wasInWater;
 				VehicleHitVehicle(vehicle, hitObj);
 			}
 
+				/**********************/
+				/* SEE IF LIQUID PATCH */
+				/**********************/
+				//
+				// Give other solid items priority over the water by checking
+				// if the bottom collision bit is set.  This way jumping on lily pads
+				// will be more reliable.
+				//
+
+			else
+			if ((ctype & CTYPE_LIQUID) && (!(sides&CBITS_BOTTOM)))	// only check for water if no bottom collision
+			{
+				if (GetTerrainY(gCoord.x, gCoord.z) < hitObj->Coord.y)		// make sure didnt hit liquid thru solid floor
+				{
+					gPlayerInfo[playerNum].onWater = true;
+					gPlayerInfo[playerNum].waterY = hitObj->CollisionBoxes[0].top;
+
+					vehicle->Rot.z = vehicle->Rot.x = 0;				// flatt on water
+					vehicle->DeltaRot.x = vehicle->DeltaRot.z = 0;
+
+					gDelta.y = 0;
+					gCoord.y = hitObj->CollisionBoxes[0].top;
+
+					if (hitObj->Kind == LIQUID_WATER)					// splash if water
+					{
+						if (!wasInWater)
+							MakeSplash(gCoord.x, gPlayerInfo[playerNum].waterY, gCoord.z);
+					}
+				}
+			}
+
 			/*************************************/
 			/* MAKE CRASH-THUD IF HIT SOLID HARD */
 			/*************************************/
