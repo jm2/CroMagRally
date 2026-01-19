@@ -398,7 +398,7 @@ void SetPlayerParmsFromTileAttributes(short playerNum, uint16_t flags)
 		gPlayerInfo[playerNum].groundTraction = .05f;
 		gPlayerInfo[playerNum].groundFriction = .05f;
 		gPlayerInfo[playerNum].groundSteering = .2f;
-		gPlayerInfo[playerNum].groundAcceleration = .3;
+		gPlayerInfo[playerNum].groundAcceleration = .5;
 		gPlayerInfo[playerNum].noSkids			= true;
 		gPlayerInfo[playerNum].dragDebrisTexture = -1;
 		gPlayerInfo[playerNum].alwaysDoDrag 	= false;

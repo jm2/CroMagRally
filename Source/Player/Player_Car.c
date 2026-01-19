@@ -90,7 +90,7 @@ static void UpdateFlaming(short p);
 #define	DELTA_SUBDIV			40.0f				// smaller == more subdivisions per frame
 
 
-#define	WATER_FRICTION			1600.0f
+#define	WATER_FRICTION			1000.0f
 
 
 #define	ENGINE_VOLUME			0.4f
