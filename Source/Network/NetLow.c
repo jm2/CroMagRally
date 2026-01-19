@@ -323,27 +323,56 @@ static struct in_addr GetSubnetBroadcastAddress(void)
 	if (getifaddrs(&iflist) != 0)
 		return broadcastAddr;
 
-	for (ifa = iflist; ifa != NULL; ifa = ifa->ifa_next)
+	// Two-pass approach: first look for WiFi/Ethernet, then fall back to other interfaces
+	// en0 = WiFi, en1/en2/en3 = USB/Thunderbolt Ethernet adapters
+	const char* preferredInterfaces[] = { "en0", "en1", "en2", "en3", NULL };
+	
+	for (int pass = 0; pass < 2; pass++)
 	{
-		if (ifa->ifa_addr == NULL || ifa->ifa_addr->sa_family != AF_INET)
-			continue;
+		for (ifa = iflist; ifa != NULL; ifa = ifa->ifa_next)
+		{
+			if (ifa->ifa_addr == NULL || ifa->ifa_addr->sa_family != AF_INET)
+				continue;
 
-		// Skip loopback
-		if (strcmp(ifa->ifa_name, "lo0") == 0)
-			continue;
+			// Skip loopback
+			if (strcmp(ifa->ifa_name, "lo0") == 0)
+				continue;
 
-		// Get IP and netmask
-		struct sockaddr_in *addr = (struct sockaddr_in *)ifa->ifa_addr;
-		struct sockaddr_in *netmask = (struct sockaddr_in *)ifa->ifa_netmask;
+			// Skip cellular interfaces (pdp_ip*)
+			if (strncmp(ifa->ifa_name, "pdp_ip", 6) == 0)
+				continue;
 
-		if (addr->sin_addr.s_addr == INADDR_ANY)
-			continue;
+			// Pass 0: only accept preferred interfaces
+			// Pass 1: accept any remaining interface
+			if (pass == 0)
+			{
+				bool isPreferred = false;
+				for (int i = 0; preferredInterfaces[i] != NULL; i++)
+				{
+					if (strcmp(ifa->ifa_name, preferredInterfaces[i]) == 0)
+					{
+						isPreferred = true;
+						break;
+					}
+				}
+				if (!isPreferred)
+					continue;
+			}
 
-		// Compute broadcast = IP | ~netmask
-		broadcastAddr.s_addr = addr->sin_addr.s_addr | ~netmask->sin_addr.s_addr;
-		printf("Using subnet broadcast: %s (from %s)\n",
-			inet_ntoa(broadcastAddr), ifa->ifa_name);
-		break;
+			// Get IP and netmask
+			struct sockaddr_in *addr = (struct sockaddr_in *)ifa->ifa_addr;
+			struct sockaddr_in *netmask = (struct sockaddr_in *)ifa->ifa_netmask;
+
+			if (addr->sin_addr.s_addr == INADDR_ANY)
+				continue;
+
+			// Compute broadcast = IP | ~netmask
+			broadcastAddr.s_addr = addr->sin_addr.s_addr | ~netmask->sin_addr.s_addr;
+			printf("Using subnet broadcast: %s (from %s)\n",
+				inet_ntoa(broadcastAddr), ifa->ifa_name);
+			freeifaddrs(iflist);
+			return broadcastAddr;
+		}
 	}
 
 	freeifaddrs(iflist);
