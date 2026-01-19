@@ -276,11 +276,7 @@ void OGL_SetupGameView(OGLSetupInputType *setupDefPtr) {
   OGL_CreateLights(&setupDefPtr->lights);
   OGL_CheckError();
 
-#if defined(__IOS__)
-  SDL_GL_SetSwapInterval(0); // Uncap FPS on iOS
-#else
   SDL_GL_SetSwapInterval(1); // gCommandLine.vsync);
-#endif
 
   /* PASS BACK INFO */
 
