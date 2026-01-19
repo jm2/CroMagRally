@@ -1605,45 +1605,66 @@ static int SendOnSocket(sockfd_t sockfd, NSpMessageHeader* header)
 		return kNSpRC_InvalidSocket;
 	}
 
-	// Retry loop for EWOULDBLOCK - important for slow WiFi clients where
-	// the send buffer may fill up temporarily
-	const int maxRetries = 10;
-	const int retryDelayMs = 10;
+	const char* dataPtr = (const char*)header;
+	size_t remaining = header->messageLen;
+	size_t totalSent = 0;
 
-	for (int attempt = 0; attempt < maxRetries; attempt++)
+	// Retry loop for EWOULDBLOCK - important for slow WiFi clients where
+	// the send buffer may fill up temporarily.
+	// We use a high retry count because we MUST send the whole message or connection state will de-sync.
+	const int maxRetries = 100;
+	const int retryDelayMs = 2; // Short delay to avoid hanging the game loop too long
+	int retries = 0;
+
+	while (remaining > 0)
 	{
-		ssize_t sendRC = send(
+		ssize_t sent = send(
 			sockfd,
-			(char*) header,
-			header->messageLen,
+			dataPtr + totalSent,
+			remaining,
 			MSG_NOSIGNAL
 		);
 
-		if (sendRC >= 0)
+		if (sent > 0)
 		{
-			printf("send '%s' (%dB) #%d -> %d\n",
-				NSp4CCString(header->what), header->messageLen, header->id, (int) sockfd);
-			return kNSpRC_OK;
+			totalSent += sent;
+			remaining -= sent;
+			retries = 0; // Reset retries on progress
+			
+			// Optional: log progress if it was a partial send
+			// if (remaining > 0) printf("Partial send: %zd/%u\n", totalSent, header->messageLen);
 		}
-
-		int err = GetSocketError();
-		if (err == kSocketError_WouldBlock)
+		else if (sent == 0)
 		{
-			// Buffer full, wait briefly and retry
-			if (attempt < maxRetries - 1)
+			// Connection closed by peer?
+			printf("%s: connection closed on socket %d\n", __func__, (int)sockfd);
+			return kNSpRC_SendFailed;
+		}
+		else // sent < 0
+		{
+			int err = GetSocketError();
+			if (err == kSocketError_WouldBlock)
 			{
+				retries++;
+				if (retries >= maxRetries)
+				{
+					printf("%s: timeout sending message on socket %d\n", __func__, (int)sockfd);
+					return kNSpRC_SendFailed;
+				}
 				SDL_Delay(retryDelayMs);
-				continue;
 			}
-			// Fall through to failure after max retries
+			else
+			{
+				printf("%s: error sending message on socket %d: %d\n", __func__, (int)sockfd, err);
+				return kNSpRC_SendFailed;
+			}
 		}
-
-		// Non-retryable error or max retries exceeded
-		break;
 	}
 
-	printf("%s: error sending message on socket %d after retries\n", __func__, (int) sockfd);
-	return kNSpRC_SendFailed;
+	printf("send '%s' (%dB) #%d -> %d\n",
+		NSp4CCString(header->what), header->messageLen, header->id, (int) sockfd);
+
+	return kNSpRC_OK;
 }
 
 // Attempts to send a message.
