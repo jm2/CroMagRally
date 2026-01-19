@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include "Pomme.h"
+
 #define	MAX_PLAYERS			6
 #define	MAX_LOCAL_PLAYERS	4
 

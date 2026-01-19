@@ -1276,7 +1276,7 @@ Boolean								abort = false;
 //
 int Net_GetConnectionHint(void)
 {
-#if defined(__APPLE__)
+#if defined(__APPLE__) && !defined(__IOS__)
 	// macOS Implementation using SystemConfiguration
 	int isWifi = 0;
 	CFArrayRef interfaces = SCNetworkInterfaceCopyAll();
@@ -1297,6 +1297,9 @@ int Net_GetConnectionHint(void)
 		CFRelease(interfaces);
 	}
 	return isWifi;
+
+#elif defined(__IOS__)
+    return 1; // Assume WiFi/Wireless for now
 
 #elif defined(_WIN32)
 	// Windows Implementation using wlanapi

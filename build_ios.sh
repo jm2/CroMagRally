@@ -1,0 +1,56 @@
+#!/bin/bash
+set -e
+
+# iOS Build Script for Cro-Mag Rally
+# Usage: ./build_ios.sh [device|simulator]
+
+TARGET=${1:-simulator}
+
+echo "=== Building Cro-Mag Rally for iOS ($TARGET) ==="
+
+# Configuration
+if [ "$TARGET" == "device" ]; then
+    BUILD_DIR="build-ios-device"
+    SDK="iphoneos"
+    ARCHS="arm64"
+else
+    BUILD_DIR="build-ios-simulator"
+    SDK="iphonesimulator"
+    # Build for both Intel and Apple Silicon Macs
+    ARCHS="x86_64;arm64"
+fi
+
+# Step 1: Configure with CMake
+if [ ! -d "$BUILD_DIR" ]; then
+    echo "=== Configuring CMake for iOS ($SDK) ==="
+    cmake -G Xcode \
+        -S . \
+        -B "$BUILD_DIR" \
+        -DCMAKE_SYSTEM_NAME=iOS \
+        -DCMAKE_OSX_SYSROOT="$SDK" \
+        -DCMAKE_OSX_ARCHITECTURES="$ARCHS" \
+        -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
+        -DBUILD_SDL_FROM_SOURCE=ON \
+        -DSDL_STATIC=ON \
+        -DSDL_SHARED=OFF
+fi
+
+# Step 2: Build
+echo "=== Building with Xcode ==="
+cmake --build "$BUILD_DIR" --config Release
+
+echo "=== Build complete! ==="
+
+if [ "$TARGET" == "simulator" ]; then
+    echo "App bundle: $BUILD_DIR/Release-iphonesimulator/CroMagRally.app"
+    echo ""
+    echo "To run in simulator:"
+    echo "  xcrun simctl boot 'iPhone 15 Pro'"
+    echo "  xcrun simctl install booted $BUILD_DIR/Release-iphonesimulator/CroMagRally.app"
+    echo "  xcrun simctl launch booted io.jor.cromagrally"
+else
+    echo "App bundle: $BUILD_DIR/Release-iphoneos/CroMagRally.app"
+    echo ""
+    echo "To install on device, open in Xcode:"
+    echo "  open $BUILD_DIR/CroMagRally.xcodeproj"
+fi

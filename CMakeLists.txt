@@ -12,8 +12,14 @@ set(GAME_SRCDIR				"${CMAKE_SOURCE_DIR}/Source")
 set(CMAKE_CXX_STANDARD		20)
 set(CMAKE_C_STANDARD		17)
 
-set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "Minimum OS X deployment version")  # Sync with LSMinimumSystemVersion in SDL3.framework's Info.plist
-set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Target macOS architectures")
+# Platform-specific deployment targets
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+	set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING "Minimum iOS deployment version")
+	set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "Target iOS architectures")
+else()
+	set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "Minimum OS X deployment version")
+	set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Target macOS architectures")
+endif()
 
 project(${GAME_TARGET}
 	VERSION ${GAME_VERSION}
@@ -62,29 +68,31 @@ add_compile_definitions(POMME_CASE_SENSITIVE_FSSPEC=1)
 # FIND SDL
 #------------------------------------------------------------------------------
 
-# If SDL3_DIR wasn't specified, discover if the user put some prebuilt SDL3
-# package in the 'extern' directory
-if(NOT DEFINED SDL3_DIR)
-	if(APPLE)
-		set(_sdl3_maybe "${CMAKE_SOURCE_DIR}/extern/SDL3.framework/Resources/CMake")
-	elseif(WIN32)
-		set(_sdl3_maybe "${CMAKE_SOURCE_DIR}/extern/SDL3/cmake")
-	endif()
-
-	if(DEFINED _sdl3_maybe AND EXISTS "${_sdl3_maybe}")
-		set(SDL3_DIR "${_sdl3_maybe}")
-		message("Looking for SDL3 in: ${_sdl3_maybe}")
-	else()
-		message("Couldn't find pre-built SDL3 package in: ${_sdl3_maybe}")
-	endif()
-	unset(_sdl3_maybe)
-endif()
-
 if(NOT BUILD_SDL_FROM_SOURCE)
+	# If SDL3_DIR wasn't specified, discover if the user put some prebuilt SDL3
+	# package in the 'extern' directory
+	if(NOT DEFINED SDL3_DIR)
+		if(APPLE)
+			set(_sdl3_maybe "${CMAKE_SOURCE_DIR}/extern/SDL3.framework/Resources/CMake")
+		elseif(WIN32)
+			set(_sdl3_maybe "${CMAKE_SOURCE_DIR}/extern/SDL3/cmake")
+		endif()
+	
+		if(DEFINED _sdl3_maybe AND EXISTS "${_sdl3_maybe}")
+			set(SDL3_DIR "${_sdl3_maybe}")
+			message("Looking for SDL3 in: ${_sdl3_maybe}")
+		else()
+			message("Couldn't find pre-built SDL3 package in: ${_sdl3_maybe}")
+		endif()
+		unset(_sdl3_maybe)
+	endif()
+
 	find_package(SDL3 CONFIG REQUIRED)
 	message("Found pre-built SDL3")
 else()
-	if(NOT DEFINED SDL3_DIR)
+	# Build from source
+	# Force SDL3 to use the vendored source path if not specified
+	if(NOT DEFINED SDL3_DIR OR SDL3_DIR MATCHES "SDL3.framework")
 		set(SDL3_DIR "${CMAKE_SOURCE_DIR}/extern/SDL")
 	endif()
 	message("Building SDL3 from source: " ${SDL3_DIR})
@@ -97,21 +105,28 @@ endif()
 
 add_subdirectory(extern/Pomme)
 
-if(ANDROID)
-	# Configure gl4es
-	set(ANDROID ON CACHE BOOL "" FORCE)
+if(ANDROID OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
+	# Configure gl4es for mobile (OpenGL ES 2.0)
 	set(STATICLIB ON CACHE BOOL "" FORCE)
 	set(DEFAULT_ES 2 CACHE STRING "" FORCE)
 	set(NO_GBM ON CACHE BOOL "" FORCE)
 	set(NOX11 ON CACHE BOOL "" FORCE)
-	set(USE_ANDROID_LOG ON CACHE BOOL "" FORCE)
 	set(NO_INIT_CONSTRUCTOR ON CACHE BOOL "" FORCE)
+	set(NOEGL ON CACHE BOOL "" FORCE)
 	
-	# We are building gl4es as a static lib to link into our shared lib
+	if(ANDROID)
+		set(ANDROID ON CACHE BOOL "" FORCE)
+		set(USE_ANDROID_LOG ON CACHE BOOL "" FORCE)
+	elseif(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+		set(IOS ON CACHE BOOL "" FORCE)
+		add_compile_definitions(__IOS__)
+	endif()
+	
+	# Build gl4es as a static lib
 	add_subdirectory(extern/gl4es)
 endif()
 
-if(NOT ANDROID)
+if(NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
 	find_package(OpenGL REQUIRED)
 endif()
 
@@ -144,7 +159,7 @@ else()
 endif()
 
 target_include_directories(${GAME_TARGET} PRIVATE ${GAME_SRCDIR}/Headers)
-if(ANDROID)
+if(ANDROID OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
 	target_include_directories(${GAME_TARGET} PRIVATE extern/gl4es/include)
 endif()
 
@@ -238,7 +253,7 @@ endif()
 
 # Link core dependencies
 target_link_libraries(${GAME_TARGET} PRIVATE Pomme)
-if(NOT ANDROID)
+if(NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
 	target_link_libraries(${GAME_TARGET} PRIVATE OpenGL::GL)
 endif()
 
@@ -247,13 +262,32 @@ if(WIN32)
 endif()
 
 # Add required frameworks for KillMacMouseAcceleration and WiFi Detection
-if(APPLE)
+if(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
 	target_link_libraries(${GAME_TARGET} PRIVATE "-framework Foundation" "-framework IOKit" "-framework SystemConfiguration")
 endif()
 
+# iOS-specific frameworks and libraries
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+	target_link_libraries(${GAME_TARGET} PRIVATE
+		"-framework Foundation"
+		"-framework UIKit"
+		"-framework OpenGLES"
+		"-framework QuartzCore"
+		"-framework CoreMotion"
+		"-framework GameController"
+		"-framework AudioToolbox"
+		"-framework AVFoundation"
+		"-framework CoreAudio"
+		"-framework CoreGraphics"
+		"-framework Metal"
+	)
+	# Link gl4es static library
+	target_link_libraries(${GAME_TARGET} PRIVATE GL)
+endif()
+
 if(ANDROID)
-	# Link gl4es (target GL)
-	target_link_libraries(${GAME_TARGET} PRIVATE log android EGL OpenSLES GL dl)
+	# Link gl4es static library
+	target_link_libraries(${GAME_TARGET} PRIVATE log android OpenSLES GL dl)
 endif()
 
 #------------------------------------------------------------------------------
@@ -301,31 +335,64 @@ set_target_properties(${GAME_TARGET} PROPERTIES
 	# Don't bother with universal builds when we're working on the debug version
 	XCODE_ATTRIBUTE_ONLY_ACTIVE_ARCH[variant=Debug] "YES"
 
-	XCODE_EMBED_FRAMEWORKS							"extern/SDL3.framework"
-	XCODE_EMBED_FRAMEWORKS_CODE_SIGN_ON_COPY		"YES"		# frameworks must be signed by the same developer as the binary
-	XCODE_EMBED_FRAMEWORKS_REMOVE_HEADERS_ON_COPY	"YES"		# not strictly necessary, but that's cleaner
 	XCODE_ATTRIBUTE_COPY_PHASE_STRIP[variant=Debug]	"NO"		# avoid "skipping copy phase strip" warning while working on Debug config
-
-	# The following is to pass notarization requirements
-	XCODE_ATTRIBUTE_ENABLE_HARDENED_RUNTIME			"YES"
-	XCODE_ATTRIBUTE_CODE_SIGN_INJECT_BASE_ENTITLEMENTS "NO"
-	XCODE_ATTRIBUTE_OTHER_CODE_SIGN_FLAGS			"--options=runtime --timestamp"
 )
+
+# Embed SDL3 framework only if not statically linked (must be outside set_target_properties)
+if(NOT SDL_STATIC)
+	set_target_properties(${GAME_TARGET} PROPERTIES
+		XCODE_EMBED_FRAMEWORKS "extern/SDL3.framework"
+		XCODE_EMBED_FRAMEWORKS_CODE_SIGN_ON_COPY "YES"
+		XCODE_EMBED_FRAMEWORKS_REMOVE_HEADERS_ON_COPY "YES"
+	)
+endif()
+
+# iOS-specific bundle properties
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+	set_target_properties(${GAME_TARGET} PROPERTIES
+		MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/iOSBuild/CroMagRally/Info.plist"
+		XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"	# iPhone and iPad
+		XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "13.0"
+		XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "AppIcon"
+		XCODE_ATTRIBUTE_INFOPLIST_KEY_UILaunchStoryboardName "LaunchScreen"
+		XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER ${GAME_IDENTIFIER}
+	)
+	
+	# Add iOS resources to bundle
+	target_sources(${GAME_TARGET} PRIVATE
+		"${CMAKE_SOURCE_DIR}/iOSBuild/CroMagRally/LaunchScreen.storyboard"
+		"${CMAKE_SOURCE_DIR}/iOSBuild/CroMagRally/Assets.xcassets"
+		"${GAME_DATADIR}"
+	)
+	set_source_files_properties(
+		"${CMAKE_SOURCE_DIR}/iOSBuild/CroMagRally/LaunchScreen.storyboard"
+		"${CMAKE_SOURCE_DIR}/iOSBuild/CroMagRally/Assets.xcassets"
+		"${GAME_DATADIR}"
+		PROPERTIES MACOSX_PACKAGE_LOCATION "Resources"
+	)
+endif()
 
 #------------------------------------------------------------------------------
 # POST-BUILD (COPY ASSETS, ETC.)
 #------------------------------------------------------------------------------
 
 if(APPLE)
-	set(GAME_DATA_TARGET_LOCATION "$<TARGET_FILE_DIR:${GAME_TARGET}>/../Resources")
+	if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+		set(GAME_DATA_TARGET_LOCATION "$<TARGET_FILE_DIR:${GAME_TARGET}>")
+	else()
+		set(GAME_DATA_TARGET_LOCATION "$<TARGET_FILE_DIR:${GAME_TARGET}>/../Resources")
+	endif()
 else()
 	set(GAME_DATA_TARGET_LOCATION "$<TARGET_FILE_DIR:${GAME_TARGET}>/Data")
 endif()
 
-add_custom_command(TARGET ${GAME_TARGET} POST_BUILD
-	COMMAND ${CMAKE_COMMAND} -E copy_directory "${GAME_DATADIR}" "${GAME_DATA_TARGET_LOCATION}")
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+	add_custom_command(TARGET ${GAME_TARGET} POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E copy_directory "${GAME_DATADIR}" "${GAME_DATA_TARGET_LOCATION}")
+endif()
 
-if(APPLE)
+# macOS-specific post-build (skip for iOS)
+if(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
 	set(INFO_PLIST "${GAME_DATA_TARGET_LOCATION}/../Info.plist")
 
 	add_custom_command(TARGET ${GAME_TARGET} POST_BUILD

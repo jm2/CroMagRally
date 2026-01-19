@@ -6,116 +6,110 @@
 #include <SDL3/SDL_main.h>
 
 #include "Pomme.h"
-#include "PommeInit.h"
 #include "PommeFiles.h"
+#include "PommeInit.h"
 #include <sstream>
 #include <string>
 
-#if defined(__ANDROID__)
+#if defined(__ANDROID__) || defined(__IOS__)
 #include <gl4esinit.h>
 #endif
 
-extern "C"
-{
-	#include "game.h"
+extern "C" {
+#include "game.h"
 
-	SDL_Window* gSDLWindow = nullptr;
-	FSSpec gDataSpec;
-	CommandLineOptions gCommandLine;
-	int gCurrentAntialiasingLevel;
+SDL_Window *gSDLWindow = nullptr;
+FSSpec gDataSpec;
+CommandLineOptions gCommandLine;
+int gCurrentAntialiasingLevel;
 }
 
-static fs::path FindGameData(const char* executablePath)
-{
-	fs::path dataPath;
+static fs::path FindGameData(const char *executablePath) {
+  fs::path dataPath;
 
-	int attemptNum = 0;
+  int attemptNum = 0;
 
 #if defined(__ANDROID__)
-	char* prefPath = SDL_GetPrefPath("Pangea Software", "CroMagRally");
-	if (prefPath)
-	{
-		dataPath = fs::path(prefPath) / "Data";
-		SDL_free(prefPath);
-		goto verify; // Jump to verification (lexically_normal + check)
-	}
+  char *prefPath = SDL_GetPrefPath("Pangea Software", "CroMagRally");
+  if (prefPath) {
+    dataPath = fs::path(prefPath) / "Data";
+    SDL_free(prefPath);
+    goto verify; // Jump to verification (lexically_normal + check)
+  }
 #endif
 
 #if !(__APPLE__)
-	attemptNum++;		// skip macOS special case #0
+  attemptNum++; // skip macOS special case #0
 #endif
 
-	if (!executablePath)
-		attemptNum = 2;
+  if (!executablePath)
+    attemptNum = 2;
 
 tryAgain:
-	switch (attemptNum)
-	{
-		case 0:			// special case for macOS app bundles
-			dataPath = executablePath;
-			dataPath = dataPath.parent_path().parent_path() / "Resources";
-			break;
+  switch (attemptNum) {
+  case 0: // special case for macOS app bundles
+    dataPath = executablePath;
+#if defined(__IOS__)
+    dataPath = dataPath.parent_path() / "Data";
+#else
+    dataPath = dataPath.parent_path().parent_path() / "Resources";
+#endif
+    break;
 
-		case 1:
-			dataPath = executablePath;
-			dataPath = dataPath.parent_path() / "Data";
-			break;
+  case 1:
+    dataPath = executablePath;
+    dataPath = dataPath.parent_path() / "Data";
+    break;
 
-		case 2:
-			dataPath = "Data";
-			break;
+  case 2:
+    dataPath = "Data";
+    break;
 
-		default:
-			throw std::runtime_error("Couldn't find the Data folder.");
-	}
+  default:
+    throw std::runtime_error("Couldn't find the Data folder.");
+  }
 
 verify:
-	attemptNum++;
+  attemptNum++;
 
-	dataPath = dataPath.lexically_normal();
+  dataPath = dataPath.lexically_normal();
 
-	// Set data spec -- Lets the game know where to find its asset files
-	gDataSpec = Pomme::Files::HostPathToFSSpec(dataPath / "System");
+  // Set data spec -- Lets the game know where to find its asset files
+  gDataSpec = Pomme::Files::HostPathToFSSpec(dataPath / "System");
 
-	FSSpec someDataFileSpec;
-	OSErr iErr = FSMakeFSSpec(gDataSpec.vRefNum, gDataSpec.parID, ":System:gamecontrollerdb.txt", &someDataFileSpec);
-	if (iErr)
-	{
-		goto tryAgain;
-	}
+  FSSpec someDataFileSpec;
+  OSErr iErr = FSMakeFSSpec(gDataSpec.vRefNum, gDataSpec.parID,
+                            ":System:gamecontrollerdb.txt", &someDataFileSpec);
+  if (iErr) {
+    goto tryAgain;
+  }
 
-	return dataPath;
+  return dataPath;
 }
 
-static void ParseCommandLine(int argc, char** argv)
-{
-	SDL_memset(&gCommandLine, 0, sizeof(gCommandLine));
-	gCommandLine.vsync = 1;
+static void ParseCommandLine(int argc, char **argv) {
+  SDL_memset(&gCommandLine, 0, sizeof(gCommandLine));
+  gCommandLine.vsync = 1;
 
-	for (int i = 1; i < argc; i++)
-	{
-		std::string argument = argv[i];
+  for (int i = 1; i < argc; i++) {
+    std::string argument = argv[i];
 
-		if (argument == "--track")
-		{
-			GAME_ASSERT_MESSAGE(i + 1 < argc, "practice track # unspecified");
-			gCommandLine.bootToTrack = atoi(argv[i + 1]);
-			i += 1;
-		}
-		else if (argument == "--car")
-		{
-			GAME_ASSERT_MESSAGE(i + 1 < argc, "car # unspecified");
-			gCommandLine.car = atoi(argv[i + 1]);
-			i += 1;
-		}
-		else if (argument == "--stats")
-			gDebugMode = 1;
-		else if (argument == "--no-vsync")
-			gCommandLine.vsync = 0;
-		else if (argument == "--vsync")
-			gCommandLine.vsync = 1;
-		else if (argument == "--adaptive-vsync")
-			gCommandLine.vsync = -1;
+    if (argument == "--track") {
+      GAME_ASSERT_MESSAGE(i + 1 < argc, "practice track # unspecified");
+      gCommandLine.bootToTrack = atoi(argv[i + 1]);
+      i += 1;
+    } else if (argument == "--car") {
+      GAME_ASSERT_MESSAGE(i + 1 < argc, "car # unspecified");
+      gCommandLine.car = atoi(argv[i + 1]);
+      i += 1;
+    } else if (argument == "--stats")
+      gDebugMode = 1;
+    else if (argument == "--no-vsync")
+      gCommandLine.vsync = 0;
+    else if (argument == "--vsync")
+      gCommandLine.vsync = 1;
+    else if (argument == "--adaptive-vsync")
+      gCommandLine.vsync = -1;
 #if 0
 		else if (argument == "--fullscreen-resolution")
 		{
@@ -131,219 +125,244 @@ static void ParseCommandLine(int argc, char** argv)
 			i += 1;
 		}
 #endif
-	}
+  }
 }
 
-static void Boot(int argc, char** argv)
-{
-	SDL_SetAppMetadata(GAME_FULL_NAME, GAME_VERSION, GAME_IDENTIFIER);
+static void Boot(int argc, char **argv) {
+  SDL_SetAppMetadata(GAME_FULL_NAME, GAME_VERSION, GAME_IDENTIFIER);
 #if _DEBUG
-	SDL_SetLogPriorities(SDL_LOG_PRIORITY_VERBOSE);
+  SDL_SetLogPriorities(SDL_LOG_PRIORITY_VERBOSE);
 #else
-	SDL_SetLogPriorities(SDL_LOG_PRIORITY_INFO);
+  SDL_SetLogPriorities(SDL_LOG_PRIORITY_INFO);
 #endif
 
-	ParseCommandLine(argc, argv);
+  ParseCommandLine(argc, argv);
+
+  SDL_Log("Boot: Starting...");
+
+  // Start our "machine"
+  Pomme::Init();
+  SDL_Log("Boot: Pomme initialized");
+
+  // Find path to game data folder
+  const char *executablePath = argc > 0 ? argv[0] : NULL;
+  SDL_Log("Boot: Executable path: %s", executablePath ? executablePath : "NULL");
 
 #if defined(__ANDROID__)
-	// Manually initialize gl4es since we disabled the constructor to avoid hangs
-	initialize_gl4es();
+  // On Android, extract assets to internal storage because the game expects a
+  // real filesystem
+  const char *prefPath = SDL_GetPrefPath("Pangea Software", "CroMagRally");
+  if (prefPath) {
+    fs::path destDir = fs::path(prefPath) / "Data";
+
+    // Simple check: if Data/System/gamecontrollerdb.txt exists, assume we
+    // extracted already. A more robust check would use a version file.
+    if (!fs::exists(destDir / "System" / "gamecontrollerdb.txt")) {
+      SDL_Log("Extracting assets to %s...", destDir.c_str());
+      fs::create_directories(destDir);
+
+      // Read file list
+      size_t fileSize;
+      void *fileData = SDL_LoadFile("Data/files.txt", &fileSize);
+      if (fileData) {
+        std::string fileList((char *)fileData, fileSize);
+        SDL_free(fileData);
+
+        std::stringstream ss(fileList);
+        std::string line;
+        while (std::getline(ss, line)) {
+          if (line.empty())
+            continue;
+
+          // Remove \r if present
+          if (line.back() == '\r')
+            line.pop_back();
+
+          // line is like "Data/System/foo.dat"
+          // We want to read "line" from assets, and write to prefPath/line
+
+          // Create parent directories
+          fs::path filePath = fs::path(prefPath) / line;
+          fs::create_directories(filePath.parent_path());
+
+          // Copy
+          size_t dataSize;
+          void *data = SDL_LoadFile(line.c_str(), &dataSize);
+          if (data) {
+            SDL_SaveFile(
+                reinterpret_cast<const char *>(filePath.u8string().c_str()),
+                data, dataSize);
+            SDL_free(data);
+            SDL_Log("Extracting: %s", line.c_str());
+          } else {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "Failed to load asset: %s", line.c_str());
+          }
+        }
+      } else {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "Could not find Data/files.txt in assets!");
+      }
+    } else {
+      SDL_Log("Assets already extracted to %s", destDir.c_str());
+    }
+  }
 #endif
 
-	// Start our "machine"
-	Pomme::Init();
-
-	// Find path to game data folder
-	const char* executablePath = argc > 0 ? argv[0] : NULL;
-
+  fs::path dataPath = FindGameData(executablePath);
+  SDL_Log("Boot: Data path found: %s", dataPath. c_str());
 #if defined(__ANDROID__)
-	// On Android, extract assets to internal storage because the game expects a real filesystem
-	const char* prefPath = SDL_GetPrefPath("Pangea Software", "CroMagRally");
-	if (prefPath)
-	{
-		fs::path destDir = fs::path(prefPath) / "Data";
-		
-		// Simple check: if Data/System/gamecontrollerdb.txt exists, assume we extracted already.
-		// A more robust check would use a version file.
-		if (!fs::exists(destDir / "System" / "gamecontrollerdb.txt"))
-		{
-			SDL_Log("Extracting assets to %s...", destDir.c_str());
-			fs::create_directories(destDir);
-
-			// Read file list
-			size_t fileSize;
-			void* fileData = SDL_LoadFile("Data/files.txt", &fileSize);
-			if (fileData)
-			{
-				std::string fileList((char*)fileData, fileSize);
-				SDL_free(fileData);
-
-				std::stringstream ss(fileList);
-				std::string line;
-				while (std::getline(ss, line))
-				{
-					if (line.empty()) continue;
-					
-					// Remove \r if present
-					if (line.back() == '\r') line.pop_back();
-
-					// line is like "Data/System/foo.dat"
-					// We want to read "line" from assets, and write to prefPath/line
-
-					// Create parent directories
-					fs::path filePath = fs::path(prefPath) / line;
-					fs::create_directories(filePath.parent_path());
-
-					// Copy
-					size_t dataSize;
-					void* data = SDL_LoadFile(line.c_str(), &dataSize);
-					if (data)
-					{
-						SDL_SaveFile(reinterpret_cast<const char*>(filePath.u8string().c_str()), data, dataSize);
-						SDL_free(data);
-						SDL_Log("Extracting: %s", line.c_str());
-					}
-					else
-					{
-						SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to load asset: %s", line.c_str());
-					}
-				}
-			}
-			else
-			{
-				SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Could not find Data/files.txt in assets!");
-			}
-		}
-		else
-		{
-			SDL_Log("Assets already extracted to %s", destDir.c_str());
-		}
-	}
+  if (prefPath) {
+    dataPath = fs::path(prefPath) / "Data";
+  }
 #endif
 
-	fs::path dataPath = FindGameData(executablePath);
-#if defined(__ANDROID__)
-	if (prefPath)
-	{
-		dataPath = fs::path(prefPath) / "Data";
-	}
-#endif
-
-	// Load game prefs before starting
-	LoadPrefs();
+  // Load game prefs before starting
+  LoadPrefs();
+  SDL_Log("Boot: Prefs loaded");
 
 retryVideo:
-	// Initialize SDL video subsystem
-	if (!SDL_Init(SDL_INIT_VIDEO))
-	{
-		throw std::runtime_error("Couldn't initialize SDL video subsystem.");
-	}
+  // Initialize SDL video subsystem
+  if (!SDL_Init(SDL_INIT_VIDEO)) {
+    SDL_Log("Boot: SDL_Init(VIDEO) failed: %s", SDL_GetError());
+    throw std::runtime_error("Couldn't initialize SDL video subsystem.");
+  }
+  SDL_Log("Boot: SDL video initialized");
 
-	// Create window
-#if defined(__ANDROID__)
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
-	SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
-	SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
-	SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
-	SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 8);
-	SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24); // Critical for avoiding Z-fighting on Android
+  // Create window
+#if defined(__ANDROID__) || defined(__IOS__)
+  SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+  SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+  SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+  SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
+  SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
+  SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
+  SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 8);
+  SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE,
+                      24); // Critical for avoiding Z-fighting on mobile
 #else
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+  SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,
+                      SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+  SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+  SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
 #endif
 
-	gCurrentAntialiasingLevel = gGamePrefs.antialiasingLevel;
-	if (gCurrentAntialiasingLevel != 0)
-	{
-		SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
-		SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 1 << gCurrentAntialiasingLevel);
-	}
+  gCurrentAntialiasingLevel = gGamePrefs.antialiasingLevel;
+  if (gCurrentAntialiasingLevel != 0) {
+    SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
+    SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES,
+                        1 << gCurrentAntialiasingLevel);
+  }
 
-	gSDLWindow = SDL_CreateWindow(
-		GAME_FULL_NAME " " GAME_VERSION, 640, 480,
-		SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+  SDL_Log("Boot: Creating window...");
+  gSDLWindow = SDL_CreateWindow(GAME_FULL_NAME " " GAME_VERSION, 640, 480,
+                                SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE |
+                                    SDL_WINDOW_HIGH_PIXEL_DENSITY);
 
-	if (!gSDLWindow)
-	{
-		if (gCurrentAntialiasingLevel != 0)
-		{
-			SDL_Log("Couldn't create SDL window with the requested MSAA level. Retrying without MSAA...");
+  if (!gSDLWindow) {
+    SDL_Log("Boot: Window creation failed: %s", SDL_GetError());
+    if (gCurrentAntialiasingLevel != 0) {
+      SDL_Log("Couldn't create SDL window with the requested MSAA level. "
+              "Retrying without MSAA...");
 
-			// retry without MSAA
-			gGamePrefs.antialiasingLevel = 0;
-			SDL_QuitSubSystem(SDL_INIT_VIDEO);
-			goto retryVideo;
-		}
-		else
-		{
-			throw std::runtime_error("Couldn't create SDL window.");
-		}
-	}
+      // retry without MSAA
+      gGamePrefs.antialiasingLevel = 0;
+      SDL_QuitSubSystem(SDL_INIT_VIDEO);
+      goto retryVideo;
+    } else {
+      throw std::runtime_error("Couldn't create SDL window.");
+    }
+  }
+  SDL_Log("Boot: Window created");
 
-	// Init gamepad subsystem
-	SDL_Init(SDL_INIT_GAMEPAD);
-	auto gamecontrollerdbPath8 = (dataPath / "System" / "gamecontrollerdb.txt").u8string();
-	if (-1 == SDL_AddGamepadMappingsFromFile((const char*)gamecontrollerdbPath8.c_str()))
-	{
-		SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_WARNING, GAME_FULL_NAME, "Couldn't load gamecontrollerdb.txt!", gSDLWindow);
-	}
+  // Log Display Mode for FPS debugging
+  SDL_DisplayID displayID = SDL_GetDisplayForWindow(gSDLWindow);
+  if (displayID != 0) {
+    const SDL_DisplayMode *mode = SDL_GetDesktopDisplayMode(displayID);
+    if (mode) {
+      SDL_Log("Boot: Desktop Mode: %dx%d @ %.2fHz", mode->w, mode->h, mode->refresh_rate);
+    }
+  }
+
+#if defined(__ANDROID__) || defined(__IOS__)
+  // Initialize gl4es AFTER the OpenGL context is created
+  SDL_Log("Boot: Initializing gl4es...");
+  
+  // Get the GL context and make sure it's current (required for gl4es init)
+  SDL_GLContext glContext = SDL_GL_GetCurrentContext();
+  if (!glContext) {
+    glContext = SDL_GL_CreateContext(gSDLWindow);
+    if (glContext) {
+      SDL_GL_MakeCurrent(gSDLWindow, glContext);
+    } else {
+      SDL_Log("Boot: Failed to create GL context: %s", SDL_GetError());
+    }
+  }
+  
+  // For NOEGL builds, provide the GetProcAddress function
+  set_getprocaddress((void *(*)(const char *))SDL_GL_GetProcAddress);
+  
+  initialize_gl4es();
+#endif
+
+  // Init gamepad subsystem
+  SDL_Init(SDL_INIT_GAMEPAD);
+  auto gamecontrollerdbPath8 =
+      (dataPath / "System" / "gamecontrollerdb.txt").u8string();
+  SDL_Log("Boot: Loading gamepad db from: %s", gamecontrollerdbPath8.c_str());
+  if (-1 == SDL_AddGamepadMappingsFromFile(
+                (const char *)gamecontrollerdbPath8.c_str())) {
+    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_WARNING, GAME_FULL_NAME,
+                             "Couldn't load gamecontrollerdb.txt!", gSDLWindow);
+  }
+  SDL_Log("Boot: Done");
 }
 
-static void Shutdown()
-{
-	// Always restore the user's mouse acceleration before exiting.
-	// SetMacLinearMouse(false);
+static void Shutdown() {
+  // Always restore the user's mouse acceleration before exiting.
+  // SetMacLinearMouse(false);
 
-	Pomme::Shutdown();
+  Pomme::Shutdown();
 
-	if (gSDLWindow)
-	{
-		SDL_DestroyWindow(gSDLWindow);
-		gSDLWindow = NULL;
-	}
+  if (gSDLWindow) {
+    SDL_DestroyWindow(gSDLWindow);
+    gSDLWindow = NULL;
+  }
 
-	SDL_Quit();
+  SDL_Quit();
 }
 
-int main(int argc, char** argv)
-{
-	bool success = true;
-	std::string uncaught = "";
+int main(int argc, char **argv) {
+  bool success = true;
+  std::string uncaught = "";
 
-	try
-	{
-		Boot(argc, argv);
-		GameMain();
-	}
-	catch (Pomme::QuitRequest&)
-	{
-		// no-op, the game may throw this exception to shut us down cleanly
-	}
+  try {
+    Boot(argc, argv);
+    GameMain();
+  } catch (Pomme::QuitRequest &) {
+    // no-op, the game may throw this exception to shut us down cleanly
+  }
 #if !(_DEBUG)
-	// In release builds, catch anything that might be thrown by GameMain
-	// so we can show an error dialog to the user.
-	catch (std::exception& ex)		// Last-resort catch
-	{
-		success = false;
-		uncaught = ex.what();
-	}
-	catch (...)						// Last-resort catch
-	{
-		success = false;
-		uncaught = "unknown";
-	}
+  // In release builds, catch anything that might be thrown by GameMain
+  // so we can show an error dialog to the user.
+  catch (std::exception &ex) // Last-resort catch
+  {
+    success = false;
+    uncaught = ex.what();
+  } catch (...) // Last-resort catch
+  {
+    success = false;
+    uncaught = "unknown";
+  }
 #endif
 
-	Shutdown();
+  Shutdown();
 
-	if (!success)
-	{
-		SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Uncaught exception: %s", uncaught.c_str());
-		SDL_ShowSimpleMessageBox(0, GAME_FULL_NAME, uncaught.c_str(), nullptr);
-	}
+  if (!success) {
+    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Uncaught exception: %s",
+                 uncaught.c_str());
+    SDL_ShowSimpleMessageBox(0, GAME_FULL_NAME, uncaught.c_str(), nullptr);
+  }
 
-	return success ? 0 : 1;
+  return success ? 0 : 1;
 }
