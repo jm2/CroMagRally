@@ -886,30 +886,25 @@ float	speed;
 		theNode->Delta.x = gDelta.x * .3f;
 		theNode->Delta.z = gDelta.z * .3f;
 
-		// Continuous physics ramp to prevent soft desync
-		float impactFactor = (speed - 1950.0f) / 50.0f;
-		if (impactFactor > 1.0f) impactFactor = 1.0f;
-		if (impactFactor < 0.0f) impactFactor = 0.0f; // Should be impossible given if(), but safe
+	speed *= .0015f;
+	// Use ChaoticFloat (stateless) to avoid network desync
+	// Original logic was RandomFloat2() * speed.
+	// ChaoticFloat is [0..1]. (ChaoticFloat - 0.5) is [-0.5..0.5].
+	// Multiply by 2.0 to get [-1..1], then by speed.
+	theNode->DeltaRot.x = (ChaoticFloat(speed, 1) - 0.5f) * 2.0f * speed; 
+	theNode->DeltaRot.z = (ChaoticFloat(speed, 2) - 0.5f) * 2.0f * speed;
+	theNode->DeltaRot.y = (ChaoticFloat(speed, 3) - 0.5f) * speed; // (raw * .5 * 2 = raw) 
 
-		// Use state-based continuous chaos instead of frame-based RNG
-		// gSimulationFrame divergence causes soft desync in variable time step.
-		float noise = speed * 0.05f + whoNode->PlayerNum; 
+		/* MAKE CAR SPIN WILDLY */
 
-		speed *= .0015f;
-		theNode->DeltaRot.x = sinf(noise) * speed * 0.5f * impactFactor; 
-		theNode->DeltaRot.z = cosf(noise) * speed * 0.5f * impactFactor;
-		theNode->DeltaRot.y = sinf(noise + 1.0f) * speed * 0.25f * impactFactor; 
+	// ChaoticFloat for car spin
+	whoNode->DeltaRot.y = ChaoticFloat(whoNode->Speed3D, whoNode->PlayerNum) * 5.0f;
+	whoNode->DeltaRot.z = ChaoticFloat(whoNode->Speed3D, whoNode->PlayerNum+10) * 2.5f;
 
-			/* MAKE CAR SPIN WILDLY */
-
-		whoNode->DeltaRot.y = sinf(noise + 2.0f) * 5.0f * impactFactor;
-		whoNode->DeltaRot.z = cosf(noise + 2.0f) * 2.5f * impactFactor;
-
-		gDelta.y += 1000.0f * impactFactor;				// pop up the guy who hit the cactus
+		gDelta.y += 1000.0f;				// pop up the guy who hit the cactus
 		
-		float slowFactor = 1.0f - (0.5f * impactFactor);
-		gDelta.x *= slowFactor;					// slow
-		gDelta.z *= slowFactor;
+		gDelta.x *= .5f;					// slow
+		gDelta.z *= .5f;
 		return(false);
 	}
 
@@ -976,21 +971,14 @@ static Boolean DoTrig_SnoMan(ObjNode *theNode, ObjNode *whoNode, Byte sideBits)
 
 	if (whoNode->Speed3D > 2000.0f)
 	{
-		// Continuous physics ramp
-		float impactFactor = (whoNode->Speed3D - 1950.0f) / 50.0f;
-		if (impactFactor > 1.0f) impactFactor = 1.0f;
-		if (impactFactor < 0.0f) impactFactor = 0.0f;
-
 		ExplodeSnoMan(theNode);
 		theNode->TerrainItemPtr	= nil;				// dont ever come back
 		DeleteObject(theNode);
 
-		gDelta.y += 1000.0f * impactFactor;			// pop up the guy who hit the it
+		gDelta.y += 1000.0f;			// pop up the guy who hit the it
 		
-		// Ramp the slow-down effect: 1.0 (no slow) -> 0.2 (full slow)
-		float slowFactor = 1.0f - (0.8f * impactFactor);
-		gDelta.x *= slowFactor;
-		gDelta.z *= slowFactor;
+		gDelta.x *= .2f;
+		gDelta.z *= .2f;
 
 		return(false);
 	}
@@ -1130,17 +1118,14 @@ static Boolean DoTrig_CampFire(ObjNode *theNode, ObjNode *whoNode, Byte sideBits
 
 	if (whoNode->Speed3D > 2000.0f)
 	{
-		// Continuous physics ramp
-		float impactFactor = (whoNode->Speed3D - 1950.0f) / 50.0f;
-		if (impactFactor > 1.0f) impactFactor = 1.0f;
-		if (impactFactor < 0.0f) impactFactor = 0.0f;
+		/* MAKE CAR SPIN WILDLY */
+		// Legacy: VisualRandomFloat2() * 20.0f -> Range [-20..20]
+		// ChaoticFloat is [0..1]. (ChaoticFloat - 0.5) * 2 is [-1..1].
+		// So we need (ChaoticFloat - 0.5) * 2 * 20 = (ChaoticFloat - 0.5) * 40.
 
-			/* MAKE CAR SPIN WILDLY */
+		whoNode->DeltaRot.y = (ChaoticFloat(whoNode->Speed3D, whoNode->PlayerNum) - 0.5f) * 40.0f;
+		whoNode->DeltaRot.z = (ChaoticFloat(whoNode->Speed3D, whoNode->PlayerNum+10) - 0.5f) * 20.0f;
 
-		// Use state-based continuous chaos
-		float noise = whoNode->Speed3D * 0.05f + whoNode->PlayerNum;
-		whoNode->DeltaRot.y = sinf(noise) * 5.0f * impactFactor;
-		whoNode->DeltaRot.z = cosf(noise) * 2.5f * impactFactor;
 
 
 			/* MAKE EXPLOSION */
@@ -1158,11 +1143,9 @@ static Boolean DoTrig_CampFire(ObjNode *theNode, ObjNode *whoNode, Byte sideBits
 		theNode->TerrainItemPtr = nil;							// dont come back
 		DeleteObject(theNode);
 
-		gDelta.y += 1300.0f * impactFactor;				// pop up the guy who hit the it
-		
-		float slowFactor = 1.0f - (0.7f * impactFactor);
-		gDelta.x *= slowFactor;					// slow
-		gDelta.z *= slowFactor;
+		gDelta.y += 1300.0f;				// pop up the guy who hit the it
+		gDelta.x *= .3f;					// slow
+		gDelta.z *= .3f;
 
 		return(false);
 	}

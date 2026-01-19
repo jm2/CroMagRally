@@ -1982,32 +1982,25 @@ short		p2 = car2->PlayerNum;
 
 				/* SEE IF HIT HARD */
 
-		float impactFactor = (relSpeed - 1150.0f) / 50.0f;
-		if (impactFactor > 1.0f) impactFactor = 1.0f;
+	if (relSpeed > 1200.0f)
+	{
+		car1->DeltaRot.y = PI2 * (1.0f- dot) * .1f;
+		car2->DeltaRot.y = -PI2 * (1.0f - dot) * .1f;
 
-		if (impactFactor > 0.0f)
-		{
-			// Scale effects by impactFactor to avoid binary "Soft Desync" at threshold
-			car1->DeltaRot.y = PI2 * (1.0f- dot) * .1f * impactFactor;
-			car2->DeltaRot.y = -PI2 * (1.0f - dot) * .1f * impactFactor;
+		// Use ChaoticFloat (stateless) here to avoid advancing global SimRNG conditionally
+		// which causes desync on Android/ARM vs Intel due to float precision differences.
+		car1->DeltaRot.x = (ChaoticFloat(relSpeed, car1->PlayerNum) -.5f) * 3.0f;
+		car1->DeltaRot.z = (ChaoticFloat(relSpeed, car1->PlayerNum + 10) -.5f) * 3.0f;
+		
+		car2->DeltaRot.x = (ChaoticFloat(relSpeed, car2->PlayerNum) -.5f) * 3.0f;
+		car2->DeltaRot.z = (ChaoticFloat(relSpeed, car2->PlayerNum + 10) -.5f) * 3.0f;
 
-			// Use state-based continuous chaos instead of frame-based RNG.
-			// gSimulationFrame is not synced in variable time step, so it causes divergence.
-			// sin(relSpeed) provides a "random-looking" but convergent value.
-			float noiseBase = relSpeed * 0.02f;
-			
-			car1->DeltaRot.x = sinf(noiseBase + car1->PlayerNum) * 1.5f * impactFactor;
-			car1->DeltaRot.z = cosf(noiseBase + car1->PlayerNum) * 1.5f * impactFactor;
-			
-			car2->DeltaRot.x = sinf(noiseBase + car2->PlayerNum + 1.5f) * 1.5f * impactFactor;
-			car2->DeltaRot.z = cosf(noiseBase + car2->PlayerNum + 1.5f) * 1.5f * impactFactor;
+				/* SET SKID INFO */
 
-					/* SET SKID INFO */
-
-			gPlayerInfo[car1->PlayerNum].greasedTiresTimer = .5f * impactFactor;
-			gPlayerInfo[car1->PlayerNum].isPlaning = true;
-			gPlayerInfo[car2->PlayerNum].greasedTiresTimer = .5f * impactFactor;
-			gPlayerInfo[car2->PlayerNum].isPlaning = true;
+		gPlayerInfo[car1->PlayerNum].greasedTiresTimer = .5f;
+		gPlayerInfo[car1->PlayerNum].isPlaning = true;
+		gPlayerInfo[car2->PlayerNum].greasedTiresTimer = .5f;
+		gPlayerInfo[car2->PlayerNum].isPlaning = true;
 
 
 					/* MAKE IMPACT EXPLOSION */

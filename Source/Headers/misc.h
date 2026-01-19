@@ -25,6 +25,7 @@ extern	void InitMyRandomSeed(void);
 int PositiveModulo(int value, unsigned int m);
 void InitPrefsFolder(bool createIt);
 extern	float RandomFloat(void);
+extern	float ChaoticFloat(float seedVal, int modifier); // Stateless/Safe for sensitive physics
 extern	float VisualRandomFloat(void); // Now maps to LocalRNG
 uint16_t	RandomRange(unsigned short min, unsigned short max);
 extern	void ShowSystemErr_NonFatal(long err);

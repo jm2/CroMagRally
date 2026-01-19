@@ -98,6 +98,7 @@ extern int						gGameWindowWidth;
 extern int						gLoadTextureFlags;
 extern int						gNetPort;
 extern int						gNetSequenceError;
+extern uint32_t					gSimulationFrame;
 extern int						gNetSequenceState;
 extern int						gTargetFPS;
 extern Boolean					gUseRedundancy;

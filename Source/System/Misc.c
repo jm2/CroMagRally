@@ -235,6 +235,23 @@ void InitMyRandomSeed(void)
 
 
 
+/**************** STATIC CHAOS *******************/
+//
+// Generates a deterministic float [0..1] based on inputs NOT the global RNG state.
+// Safe to use in conditional physics logic without causing network desync.
+//
+float ChaoticFloat(float seedVal, int modifier)
+{
+	uint32_t h = (uint32_t)(seedVal * 10.0f);
+	h ^= gSimulationFrame; 			// Time varying
+	h += modifier;
+	h *= 0x85ebca6b;				
+	h ^= h >> 13;
+	h *= 0xc2b2ae35;
+	h ^= h >> 16;
+	return (h & 0xFFFFFF) * 0x1.0p-24f;
+}
+
 /**************** POSITIVE MODULO *******************/
 
 int PositiveModulo(int value, unsigned int m)
