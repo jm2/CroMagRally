@@ -21,11 +21,7 @@ typedef int sockfd_t;
 #define kNSpMaxPayloadLength 256
 #define kNSpMaxMessageLength (kNSpMaxPayloadLength + sizeof(NSpMessageHeader))
 
-#if _DEBUG							// in debug builds, messages may have extra debug info
-#define kNSpCMRProtocol4CC 'CMRd'
-#else
 #define kNSpCMRProtocol4CC 'CMR6'
-#endif
 
 typedef enum
 {
