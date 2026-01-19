@@ -352,7 +352,21 @@ void SafeDisposePtr(void *ptr)
 	Ptr p = ((Ptr)ptr) - PTRCOOKIE_SIZE;			// back up to pt to cookie
 
 	uint32_t* cookiePtr = (uint32_t *)p;
-	GAME_ASSERT(cookiePtr[0] == 'FACE');
+
+	// Check cookie with better error messages
+	if (cookiePtr[0] != 'FACE')
+	{
+		if (cookiePtr[0] == 'DEAD')
+		{
+			DoFatalAlert("SafeDisposePtr: DOUBLE FREE detected! Pointer already freed.");
+		}
+		else
+		{
+			DoFatalAlert("SafeDisposePtr: INVALID POINTER! Cookie=0x%08X (expected 'FACE'=0x%08X). Not allocated by AllocPtr?",
+			             cookiePtr[0], (uint32_t)'FACE');
+		}
+	}
+
 	gRAMAlloced -= cookiePtr[1];					// deduct ptr size from heap size
 
 	cookiePtr[0] = 'DEAD';							// zap cookie
