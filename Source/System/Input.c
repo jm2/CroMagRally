@@ -94,7 +94,8 @@ static VirtualInputState gVirtualInput = {0};
 /**********************/
 
 // Initialize virtual touch gamepad (all platforms)
-static void InitTouchInput(void) {
+// Initialize input data structures (reset stale state)
+static void InitTouchData(void) {
   // Check for stale static state (Android process reuse)
   if (gVirtualJoystickID != 0 && gVirtualJoystick != NULL) {
     if (SDL_GetJoystickFromID(gVirtualJoystickID) == NULL) {
@@ -108,33 +109,38 @@ static void InitTouchInput(void) {
         gFingers[i].active = false;
     }
   }
+}
 
-  if (!gVirtualJoystickID) {
-    SDL_Log("Initializing Virtual Gamepad...");
+// Create virtual joystick if not exists (Lazy Load)
+static void EnableVirtualJoystick(void) {
+  if (gVirtualJoystickID) return;
 
-    SDL_VirtualJoystickDesc desc;
-    SDL_INIT_INTERFACE(&desc);
-    desc.type = SDL_JOYSTICK_TYPE_GAMEPAD;
-    desc.naxes = 6;
-    desc.nbuttons = 15;
-    desc.nhats = 1;
-    desc.vendor_id = 0x1234;
-    desc.product_id = 0x5678;
-    desc.name = "Cro-Mag Virtual Gamepad";
+  SDL_Log("Initializing Virtual Gamepad...");
 
-    gVirtualJoystickID = SDL_AttachVirtualJoystick(&desc);
-    if (gVirtualJoystickID) {
-      gVirtualJoystick = SDL_OpenJoystick(gVirtualJoystickID);
-      SDL_Log("Virtual Gamepad added with ID %u", (uint32_t)gVirtualJoystickID);
-    } else {
-      SDL_Log("Failed to add Virtual Gamepad: %s", SDL_GetError());
-    }
+  SDL_VirtualJoystickDesc desc;
+  SDL_INIT_INTERFACE(&desc);
+  desc.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+  desc.naxes = 6;
+  desc.nbuttons = 15;
+  desc.nhats = 1;
+  desc.vendor_id = 0x1234;
+  desc.product_id = 0x5678;
+  desc.name = "Cro-Mag Virtual Gamepad";
+
+  gVirtualJoystickID = SDL_AttachVirtualJoystick(&desc);
+  if (gVirtualJoystickID) {
+    gVirtualJoystick = SDL_OpenJoystick(gVirtualJoystickID);
+    SDL_Log("Virtual Gamepad added with ID %u", (uint32_t)gVirtualJoystickID);
+    gTouchControlsActive = true; 
+  } else {
+    SDL_Log("Failed to add Virtual Gamepad: %s", SDL_GetError());
   }
 }
 
 #if defined(__ANDROID__) || defined(__IOS__)
 static void InitMobileInput(void) {
-  InitTouchInput();
+  InitTouchData();
+  EnableVirtualJoystick();
   gTouchControlsActive = true;  // Always show touch controls on mobile
 
   if (!gAccelerometer) {
@@ -500,8 +506,8 @@ void DoSDLMaintenance(void) {
   gMouseMotionNow = false;
   int mouseWheelDelta = 0;
 
-  // Initialize touch input on all platforms
-  InitTouchInput();
+  // Initialize touch input data (but don't create joystick yet on desktop)
+  InitTouchData();
 #if defined(__ANDROID__) || defined(__IOS__)
   InitMobileInput();
 #endif
@@ -523,8 +529,11 @@ void DoSDLMaintenance(void) {
     case SDL_EVENT_FINGER_MOTION: {
       // Only activate touch controls from real touch events (not mouse-simulated)
       // SDL_TOUCH_MOUSEID is used for mouse events emulating touch
-      if (event.tfinger.touchID != SDL_TOUCH_MOUSEID) {
-        gTouchControlsActive = true;  // Show touch controls
+      if (event.tfinger.touchID == SDL_TOUCH_MOUSEID) break;
+
+      if (!gTouchControlsActive) {
+         EnableVirtualJoystick(); // Lazy create
+         gTouchControlsActive = true;  // Show touch controls
       }
       gUserPrefersGamepad = false; // Touch Reactivation
       for (int i = 0; i < MAX_TOUCH_FINGERS; i++) {
@@ -594,10 +603,8 @@ void DoSDLMaintenance(void) {
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
     case SDL_EVENT_GAMEPAD_BUTTON_UP: {
       bool isVirtual = false;
-#if defined(__ANDROID__) || defined(__IOS__)
       if (event.gdevice.which == gVirtualJoystickID)
         isVirtual = true;
-#endif
       if (!isVirtual)
         gUserPrefersGamepad = true;
       break;
@@ -605,13 +612,13 @@ void DoSDLMaintenance(void) {
 
     case SDL_EVENT_GAMEPAD_AXIS_MOTION: {
       bool isVirtual = false;
-#if defined(__ANDROID__) || defined(__IOS__)
       if (event.gaxis.which == gVirtualJoystickID)
         isVirtual = true;
-#endif
+      
       if (!isVirtual &&
-          SDL_abs(event.gaxis.value) > 3000) // Deadzone check & ID check
+          SDL_abs(event.gaxis.value) > 3000) { // Deadzone check & ID check
         gUserPrefersGamepad = true;
+      }
       break;
     }
     }
@@ -1202,8 +1209,13 @@ void DrawVirtualGamepad(void) {
     return;
 
   // Hide if touch controls not activated or user prefers physical gamepad
-  if (!gTouchControlsActive || gUserPrefersGamepad)
+  if (!gTouchControlsActive || gUserPrefersGamepad) {
+    if (gTouchControlsActive && gUserPrefersGamepad) {
+       static int sLogThrottle = 0;
+       if (sLogThrottle++ < 10) SDL_Log("Draw Hiding: Active=%d PrefersPad=%d", gTouchControlsActive, gUserPrefersGamepad);
+    }
     return;
+  }
 
   int paneNum = GetOverlayPaneNumber();
   float lw = gGameView->panes[paneNum].logicalWidth;

@@ -827,10 +827,8 @@ void DrawObjects(void) {
       gGlobalColorFilter.r = gGlobalColorFilter.g = gGlobalColorFilter.b = 1.0;
 
   glEnable(GL_NORMALIZE);
-#if defined(__ANDROID__) || defined(__IOS__)
   if (gDrawingOverlayPane)
     DrawVirtualGamepad();
-#endif
 }
 
 /************************ DRAW COLLISION BOXES ****************************/
