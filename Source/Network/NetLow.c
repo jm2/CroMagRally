@@ -641,7 +641,8 @@ static NSpMessageHeader* PollSocket(sockfd_t sockfd, bool* outBrokenPipe)
 	}
 	if (recvRC < 0)
 	{
-		printf("%s: error reading header: %d\n", __func__, GetLastSocketError());
+		printf("%s: error reading header: %d. Closing socket to prevent desync.\n", __func__, GetLastSocketError());
+		brokenPipe = true; // Treat read errors (timeout/partial) as fatal
 		goto bye;
 	}
 
@@ -676,8 +677,9 @@ static NSpMessageHeader* PollSocket(sockfd_t sockfd, bool* outBrokenPipe)
 
 		if (recvRC < 0)
 		{
-			printf("%s: error reading payload for message '%s': %d\n", 
+			printf("%s: error reading payload for message '%s': %d. Closing socket.\n", 
 				__func__, NSp4CCString(header->what), GetLastSocketError());
+			brokenPipe = true; // Treat read errors as fatal
 			goto bye;
 		}
 	}
