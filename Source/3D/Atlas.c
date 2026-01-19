@@ -310,9 +310,6 @@ Atlas* Atlas_Load(const char* fontName, int flags)
 
 	char pathBuf[256];
 	SDL_snprintf(pathBuf, sizeof(pathBuf), ":Sprites:%s.png", fontName);
-#if _DEBUG
-	SDL_Log("Atlas_Load: %s", pathBuf);
-#endif
 
 	{
 		// Create font material

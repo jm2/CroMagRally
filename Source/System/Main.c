@@ -1738,8 +1738,6 @@ void GameMain(void)
 	jobject activity = (jobject)SDL_GetAndroidActivity();
 	if (env && activity)
 	{
-		SDL_Log("Attempting to acquire MulticastLock...");
-		
 		// Context.WIFI_SERVICE
 		jclass contextClass = (*env)->FindClass(env, "android/content/Context");
 		jfieldID wifiServiceField = (*env)->GetStaticFieldID(env, contextClass, "WIFI_SERVICE", "Ljava/lang/String;");
@@ -1767,8 +1765,6 @@ void GameMain(void)
 				// Create GlobalRef to keep lock active
 				static jobject globalLock = NULL;
 				globalLock = (*env)->NewGlobalRef(env, lock);
-
-				SDL_Log("MulticastLock acquired successfully!");
 			}
 			else
 			{

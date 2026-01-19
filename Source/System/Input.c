@@ -205,8 +205,6 @@ static void UpdateVirtualGamepad(void) {
         gJoystickFingerActive = true;
         gJoystickFingerID = gFingers[i].id;
         isJoystickFinger = true;
-        SDL_Log("STICK CLAIM: Finger=%lu at (%.2f, %.2f)",
-                (unsigned long)gFingers[i].id, x, y);
       }
     }
 
@@ -1253,7 +1251,6 @@ void DrawVirtualGamepad(void) {
   if (!gTouchControlsActive || gUserPrefersGamepad) {
     if (gTouchControlsActive && gUserPrefersGamepad) {
        static int sLogThrottle = 0;
-       if (sLogThrottle++ < 10) SDL_Log("Draw Hiding: Active=%d PrefersPad=%d", gTouchControlsActive, gUserPrefersGamepad);
     }
     return;
   }

@@ -164,9 +164,6 @@ bool CloseSocket(sockfd_t* sockfdPtr)
 #else
 	close(*sockfdPtr);
 #endif
-
-	printf("Closed socket %d.\n", *sockfdPtr);
-
 	*sockfdPtr = INVALID_SOCKET;
 
 	return true;
@@ -304,7 +301,6 @@ static sockfd_t CreateUDPBroadcastSocket(void)
 		goto fail;
 	}
 
-	printf("Created UDP socket %d.\n", (int) sockfd);
 	return sockfd;
 
 fail:
@@ -515,9 +511,6 @@ static sockfd_t CreateTCPSocket(bool bindIt)
 
 	freeaddrinfo(res);
 	res = NULL;
-
-	printf("Created TCP socket %d.\n", (int) sockfd);
-
 	return sockfd;
 
 fail:
@@ -698,8 +691,6 @@ static NSpMessageHeader* PollSocket(sockfd_t sockfd, bool* outBrokenPipe)
 	char* returnBuf = AllocPtr(fullMsgLen);
 	memcpy(returnBuf, messageBuf, fullMsgLen);
 	outMessage = (NSpMessageHeader*) returnBuf;
-	printf("recv '%s' (%dB) #%d from P%d\n",
-		NSp4CCString(outMessage->what), outMessage->messageLen, outMessage->id, outMessage->from);
 
 bye:
 	if (brokenPipe)

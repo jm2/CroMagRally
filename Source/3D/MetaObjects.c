@@ -1325,10 +1325,6 @@ Ptr				buffer;
 Ptr 			pictMapAddr;
 uint32_t		pictRowBytes;
 
-#if _DEBUG
-	SDL_Log("MO_GetTextureFromFile: %s", path);
-#endif
-
 		/*******************************/
 		/* CREATE TEXTURE PIXEL BUFFER */
 		/*******************************/

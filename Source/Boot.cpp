@@ -193,7 +193,6 @@ static void Boot(int argc, char **argv) {
                 reinterpret_cast<const char *>(filePath.u8string().c_str()),
                 data, dataSize);
             SDL_free(data);
-            SDL_Log("Extracting: %s", line.c_str());
           } else {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                         "Failed to load asset: %s", line.c_str());
