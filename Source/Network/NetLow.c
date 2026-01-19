@@ -17,6 +17,9 @@ typedef int socklen_t;
 #include <sys/socket.h>
 #include <unistd.h>
 #include <netinet/tcp.h>
+#if __APPLE__
+#include <ifaddrs.h>
+#endif
 #endif
 
 #include <errno.h>
@@ -308,6 +311,45 @@ fail:
 	return sockfd;
 }
 
+#if __IOS__
+// iOS 14.4+ blocks UDP broadcasts to INADDR_BROADCAST (255.255.255.255)
+// without the com.apple.developer.networking.multicast entitlement.
+// Compute subnet-directed broadcast address instead (e.g., 192.168.1.255).
+static struct in_addr GetSubnetBroadcastAddress(void)
+{
+	struct in_addr broadcastAddr = { .s_addr = INADDR_BROADCAST };
+	struct ifaddrs *iflist, *ifa;
+
+	if (getifaddrs(&iflist) != 0)
+		return broadcastAddr;
+
+	for (ifa = iflist; ifa != NULL; ifa = ifa->ifa_next)
+	{
+		if (ifa->ifa_addr == NULL || ifa->ifa_addr->sa_family != AF_INET)
+			continue;
+
+		// Skip loopback
+		if (strcmp(ifa->ifa_name, "lo0") == 0)
+			continue;
+
+		// Get IP and netmask
+		struct sockaddr_in *addr = (struct sockaddr_in *)ifa->ifa_addr;
+		struct sockaddr_in *netmask = (struct sockaddr_in *)ifa->ifa_netmask;
+
+		if (addr->sin_addr.s_addr == INADDR_ANY)
+			continue;
+
+		// Compute broadcast = IP | ~netmask
+		broadcastAddr.s_addr = addr->sin_addr.s_addr | ~netmask->sin_addr.s_addr;
+		printf("Using subnet broadcast: %s (from %s)\n",
+			inet_ntoa(broadcastAddr), ifa->ifa_name);
+		break;
+	}
+
+	freeifaddrs(iflist);
+	return broadcastAddr;
+}
+#endif
 
 
 #pragma mark - Join lobby
@@ -1567,11 +1609,21 @@ int NSpGame_AdvertiseTick(NSpGameReference gameRef, float dt)
 	const char* message = "JOIN MY CMR GAME";
 	size_t messageLength = strlen(message);
 
+	// iOS 14.4+ blocks INADDR_BROADCAST without multicast entitlement.
+	// Use subnet-directed broadcast instead on iOS.
+#if __IOS__
+	struct in_addr subnetBroadcast = GetSubnetBroadcastAddress();
+#endif
+
 	struct sockaddr_in broadcastAddr =
 	{
 		.sin_family = AF_INET,
 		.sin_port = htons(gNetPort),
+#if __IOS__
+		.sin_addr = subnetBroadcast,
+#else
 		.sin_addr.s_addr = INADDR_BROADCAST,
+#endif
 	};
 
 	ssize_t rc = sendto(
