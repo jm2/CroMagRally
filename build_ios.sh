@@ -20,6 +20,12 @@ else
     ARCHS="x86_64;arm64"
 fi
 
+# Step 0: Check dependencies
+if [ ! -d "extern/SDL" ]; then
+    echo "=== Cloning SDL3 ==="
+    git clone https://github.com/libsdl-org/SDL.git extern/SDL
+fi
+
 # Step 1: Configure with CMake
 if [ ! -d "$BUILD_DIR" ]; then
     echo "=== Configuring CMake for iOS ($SDK) ==="
