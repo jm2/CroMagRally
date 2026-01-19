@@ -812,6 +812,47 @@ OGLPolar2D GetNeedAxis2D(int negXID, int posXID, int negYID, int posYID)
 }
 #endif
 
+Boolean IsAnyNewInput(void)
+{
+	// Check any key press
+	for (int i = 0; i < SDL_SCANCODE_COUNT; i++)
+	{
+		if (GetNewKeyState(i))
+			return true;
+	}
+
+	// Check any mouse click
+	for (int i = 1; i < NUM_SUPPORTED_MOUSE_BUTTONS_PURESDL; i++)
+	{
+		if (GetNewClickState(i))
+			return true;
+	}
+
+	// Check any gamepad button
+	for (int i = 0; i < MAX_LOCAL_PLAYERS; i++)
+	{
+		if (gGamepads[i].open && gGamepads[i].sdlGamepad)
+		{
+			SDL_Gamepad* gamepad = gGamepads[i].sdlGamepad;
+			
+			for (int btn = 0; btn < SDL_GAMEPAD_BUTTON_COUNT; btn++)
+			{
+				if (SDL_GetGamepadButton(gamepad, btn))
+					return true;
+			}
+			
+			// Optional: Check axis movement (threshold > 0.5 to coincide with digital input feel)
+			for (int axis = 0; axis < SDL_GAMEPAD_AXIS_COUNT; axis++)
+			{
+				if (SDL_abs(SDL_GetGamepadAxis(gamepad, axis)) > 16000)
+					return true;
+			}
+		}
+	}
+
+	return false;
+}
+
 Boolean UserWantsOut(void) {
   // kNeed_UIConfirm (A button) only for splash screens, NOT during gameplay
   // (A button conflicts with Forward/Throw gameplay inputs)

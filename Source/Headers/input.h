@@ -116,6 +116,7 @@ Boolean GetNewNeedStateAnyP(int needID);
 OGLVector2D GetAnalogSteering(int playerID);
 
 Boolean UserWantsOut(void);
+Boolean IsAnyNewInput(void);
 Boolean IsCmdQPressed(void);
 Boolean IsCheatKeyComboDown(void);
 void InitControlBits(void);

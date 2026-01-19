@@ -1131,7 +1131,7 @@ static void PlayArea(void)
 
 			/* SEE IF PAUSED */
 
-		if (GetNewNeedStateAnyP(kNeed_UIPause) || IsCmdQPressed())
+		if (!gIsSelfRunningDemo && (GetNewNeedStateAnyP(kNeed_UIPause) || IsCmdQPressed()))
 		{
 			DoPaused();
 			schedulePause = false; // Prevent second pause invocation later in this frame
@@ -1181,7 +1181,7 @@ static void PlayArea(void)
 
 		if (gIsSelfRunningDemo)
 		{
-			if (UserWantsOut())											// stop SRD if any key is pressed
+			if (IsAnyNewInput())											// stop SRD if any key is pressed
 				break;
 
 			gSelfRunningDemoTimer -= gFramesPerSecondFrac;
