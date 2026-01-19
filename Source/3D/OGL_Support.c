@@ -897,7 +897,7 @@ GLuint OGL_TextureMap_Load(void *imageMemory, int width, int height,
   // Also, the emulator might not support GL_BGRA matches for src format either.
   // So we manually swizzle BGRA -> RGBA and pass GL_RGBA for everything.
 
-  if (srcFormat == GL_BGRA) {
+  if (srcFormat == GL_BGRA && dataType == GL_UNSIGNED_BYTE) {
     uint8_t *pixels = (uint8_t *)imageMemory;
     int numPixels = width * height;
     for (int i = 0; i < numPixels; i++) {
