@@ -297,7 +297,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "tvOS")
 		"-framework UIKit"
 		"-framework OpenGLES"
 		"-framework QuartzCore"
-		"-framework CoreMotion"
+
 		"-framework GameController"
 		"-framework AudioToolbox"
 		"-framework AVFoundation"
