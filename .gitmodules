@@ -3,4 +3,4 @@
 	url = https://github.com/jm2/Pomme
 [submodule "extern/gl4es"]
 	path = extern/gl4es
-	url = https://github.com/ptitSeb/gl4es.git
+	url = https://github.com/jm2/gl4es.git
