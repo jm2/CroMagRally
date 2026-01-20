@@ -37,7 +37,8 @@ if [ ! -d "$BUILD_DIR" ]; then
         -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
         -DBUILD_SDL_FROM_SOURCE=ON \
         -DSDL_STATIC=ON \
-        -DSDL_SHARED=OFF
+        -DSDL_SHARED=OFF \
+        -DSDL_OPENGLES=ON
 fi
 
 # Step 2: Build
