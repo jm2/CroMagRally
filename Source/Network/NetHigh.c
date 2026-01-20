@@ -17,7 +17,7 @@
 #include <stdio.h>
 #include <SDL3/SDL.h>
 
-#if defined(__APPLE__)
+#if defined(__APPLE__) && !defined(__IOS__)
 #include <SystemConfiguration/SystemConfiguration.h>
 #elif defined(_WIN32)
 #include <windows.h>
