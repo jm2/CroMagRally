@@ -1746,9 +1746,6 @@ static int SendOnSocket(sockfd_t sockfd, NSpMessageHeader* header)
 		}
 	}
 
-	printf("send '%s' (%dB) #%d -> %d\n",
-		NSp4CCString(header->what), header->messageLen, header->id, (int) sockfd);
-
 	return kNSpRC_OK;
 }
 
