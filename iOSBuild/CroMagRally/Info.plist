@@ -64,5 +64,12 @@
     <true/>
     <key>CFBundleIconName</key>
     <string>AppIcon</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Cro-Mag Rally uses local network access to discover and host multiplayer games with other players on your Wi-Fi network.</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_cmrally._udp</string>
+        <string>_cmrally._tcp</string>
+    </array>
 </dict>
 </plist>
