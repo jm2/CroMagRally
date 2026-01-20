@@ -11,7 +11,7 @@
 #include <sstream>
 #include <string>
 
-#if defined(__ANDROID__) || defined(__IOS__)
+#if defined(__ANDROID__) || defined(__IOS__) || defined(__TVOS__)
 #include <gl4esinit.h>
 #endif
 
@@ -49,7 +49,7 @@ tryAgain:
   switch (attemptNum) {
   case 0: // special case for macOS app bundles
     dataPath = executablePath;
-#if defined(__IOS__)
+#if defined(__IOS__) || defined(__TVOS__)
     dataPath = dataPath.parent_path() / "Data";
 #else
     dataPath = dataPath.parent_path().parent_path() / "Resources";
@@ -229,7 +229,7 @@ retryVideo:
   SDL_Log("Boot: SDL video initialized");
 
   // Create window
-#if defined(__ANDROID__) || defined(__IOS__)
+#if defined(__ANDROID__) || defined(__IOS__) || defined(__TVOS__)
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
@@ -283,7 +283,7 @@ retryVideo:
     }
   }
 
-#if defined(__ANDROID__) || defined(__IOS__)
+#if defined(__ANDROID__) || defined(__IOS__) || defined(__TVOS__)
   // Initialize gl4es AFTER the OpenGL context is created
   SDL_Log("Boot: Initializing gl4es...");
   

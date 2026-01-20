@@ -5,7 +5,7 @@
 #pragma once
 
 #include "main.h"
-#if defined(__IOS__) || defined(__ANDROID__)
+#if defined(__IOS__) || defined(__ANDROID__) || defined(__TVOS__)
 #include <GL/gl.h>
 #else
 #include <SDL3/SDL_opengl.h>

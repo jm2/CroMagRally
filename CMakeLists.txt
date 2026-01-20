@@ -16,6 +16,9 @@ set(CMAKE_C_STANDARD		17)
 if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
 	set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING "Minimum iOS deployment version")
 	set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "Target iOS architectures")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "tvOS")
+	set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING "Minimum tvOS deployment version")
+	set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "Target tvOS architectures")
 else()
 	set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "Minimum OS X deployment version")
 	set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Target macOS architectures")
@@ -105,7 +108,7 @@ endif()
 
 add_subdirectory(extern/Pomme)
 
-if(ANDROID OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
+if(ANDROID OR CMAKE_SYSTEM_NAME STREQUAL "iOS" OR CMAKE_SYSTEM_NAME STREQUAL "tvOS")
 	# Configure gl4es for mobile (OpenGL ES 2.0)
 	set(STATICLIB ON CACHE BOOL "" FORCE)
 	set(DEFAULT_ES 2 CACHE STRING "" FORCE)
@@ -120,13 +123,16 @@ if(ANDROID OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
 	elseif(CMAKE_SYSTEM_NAME STREQUAL "iOS")
 		set(IOS ON CACHE BOOL "" FORCE)
 		add_compile_definitions(__IOS__)
+	elseif(CMAKE_SYSTEM_NAME STREQUAL "tvOS")
+		set(TVOS ON CACHE BOOL "" FORCE)
+		add_compile_definitions(__TVOS__)
 	endif()
 	
 	# Build gl4es as a static lib
 	add_subdirectory(extern/gl4es)
 endif()
 
-if(NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+if(NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT CMAKE_SYSTEM_NAME STREQUAL "tvOS")
 	find_package(OpenGL REQUIRED)
 endif()
 
@@ -159,7 +165,7 @@ else()
 endif()
 
 target_include_directories(${GAME_TARGET} PRIVATE ${GAME_SRCDIR}/Headers)
-if(ANDROID OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
+if(ANDROID OR CMAKE_SYSTEM_NAME STREQUAL "iOS" OR CMAKE_SYSTEM_NAME STREQUAL "tvOS")
 	target_include_directories(${GAME_TARGET} PRIVATE extern/gl4es/include)
 endif()
 
@@ -253,7 +259,7 @@ endif()
 
 # Link core dependencies
 target_link_libraries(${GAME_TARGET} PRIVATE Pomme)
-if(NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+if(NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT CMAKE_SYSTEM_NAME STREQUAL "tvOS")
 	target_link_libraries(${GAME_TARGET} PRIVATE OpenGL::GL)
 endif()
 
@@ -262,12 +268,30 @@ if(WIN32)
 endif()
 
 # Add required frameworks for KillMacMouseAcceleration and WiFi Detection
-if(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+if(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT CMAKE_SYSTEM_NAME STREQUAL "tvOS")
 	target_link_libraries(${GAME_TARGET} PRIVATE "-framework Foundation" "-framework IOKit" "-framework SystemConfiguration")
 endif()
 
 # iOS-specific frameworks and libraries
 if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+	target_link_libraries(${GAME_TARGET} PRIVATE
+		"-framework Foundation"
+		"-framework UIKit"
+		"-framework OpenGLES"
+		"-framework QuartzCore"
+		"-framework CoreMotion"
+		"-framework GameController"
+		"-framework AudioToolbox"
+		"-framework AVFoundation"
+		"-framework CoreAudio"
+		"-framework CoreGraphics"
+		"-framework Metal"
+	)
+	# Link gl4es static library
+	target_link_libraries(${GAME_TARGET} PRIVATE GL)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "tvOS")
 	target_link_libraries(${GAME_TARGET} PRIVATE
 		"-framework Foundation"
 		"-framework UIKit"
@@ -372,12 +396,37 @@ if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
 	)
 endif()
 
+# tvOS-specific bundle properties
+if(CMAKE_SYSTEM_NAME STREQUAL "tvOS")
+	set_target_properties(${GAME_TARGET} PROPERTIES
+		MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/tvOSBuild/CroMagRally/Info.plist"
+		XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "3"	# Apple TV
+		XCODE_ATTRIBUTE_TVOS_DEPLOYMENT_TARGET "13.0"
+		XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "AppIcon"
+		XCODE_ATTRIBUTE_INFOPLIST_KEY_UILaunchStoryboardName "LaunchScreen"
+		XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER ${GAME_IDENTIFIER}
+	)
+	
+	# Add tvOS resources to bundle
+	target_sources(${GAME_TARGET} PRIVATE
+		"${CMAKE_SOURCE_DIR}/tvOSBuild/CroMagRally/LaunchScreen.storyboard"
+		"${CMAKE_SOURCE_DIR}/tvOSBuild/CroMagRally/Assets.xcassets"
+		"${GAME_DATADIR}"
+	)
+	set_source_files_properties(
+		"${CMAKE_SOURCE_DIR}/tvOSBuild/CroMagRally/LaunchScreen.storyboard"
+		"${CMAKE_SOURCE_DIR}/tvOSBuild/CroMagRally/Assets.xcassets"
+		"${GAME_DATADIR}"
+		PROPERTIES MACOSX_PACKAGE_LOCATION "Resources"
+	)
+endif()
+
 #------------------------------------------------------------------------------
 # POST-BUILD (COPY ASSETS, ETC.)
 #------------------------------------------------------------------------------
 
 if(APPLE)
-	if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+	if(CMAKE_SYSTEM_NAME STREQUAL "iOS" OR CMAKE_SYSTEM_NAME STREQUAL "tvOS")
 		set(GAME_DATA_TARGET_LOCATION "$<TARGET_FILE_DIR:${GAME_TARGET}>")
 	else()
 		set(GAME_DATA_TARGET_LOCATION "$<TARGET_FILE_DIR:${GAME_TARGET}>/../Resources")
@@ -386,13 +435,13 @@ else()
 	set(GAME_DATA_TARGET_LOCATION "$<TARGET_FILE_DIR:${GAME_TARGET}>/Data")
 endif()
 
-if(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT CMAKE_SYSTEM_NAME STREQUAL "tvOS")
 	add_custom_command(TARGET ${GAME_TARGET} POST_BUILD
 		COMMAND ${CMAKE_COMMAND} -E copy_directory "${GAME_DATADIR}" "${GAME_DATA_TARGET_LOCATION}")
 endif()
 
-# macOS-specific post-build (skip for iOS)
-if(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+# macOS-specific post-build (skip for iOS/tvOS)
+if(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT CMAKE_SYSTEM_NAME STREQUAL "tvOS")
 	set(INFO_PLIST "${GAME_DATA_TARGET_LOCATION}/../Info.plist")
 
 	add_custom_command(TARGET ${GAME_TARGET} POST_BUILD

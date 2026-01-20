@@ -220,7 +220,7 @@ void Exit2D(void) {}
 /******************** GET DEFAULT WINDOW SIZE *******************/
 
 void GetDefaultWindowSize(SDL_DisplayID display, int *width, int *height) {
-#if defined(__IOS__)
+#if defined(__IOS__) || defined(__TVOS__)
   SDL_Rect displayBounds;
   SDL_GetDisplayBounds(display, &displayBounds);
   *width = displayBounds.w;
@@ -278,7 +278,7 @@ void MoveToPreferredDisplay(void) {
 /*********************** SET FULLSCREEN MODE **********************/
 
 void SetFullscreenMode(bool enforceDisplayPref) {
-#if defined(__IOS__) || defined(__ANDROID__)
+#if defined(__IOS__) || defined(__ANDROID__) || defined(__TVOS__)
   // Mobile is always fullscreen
   SDL_SetWindowFullscreen(gSDLWindow, true);
   SDL_HideCursor();

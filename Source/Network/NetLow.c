@@ -311,7 +311,7 @@ fail:
 	return sockfd;
 }
 
-#if __IOS__
+#if __IOS__ || __TVOS__
 // iOS 14.4+ blocks UDP broadcasts to INADDR_BROADCAST (255.255.255.255)
 // without the com.apple.developer.networking.multicast entitlement.
 // Compute subnet-directed broadcast address instead (e.g., 192.168.1.255).
@@ -1640,7 +1640,7 @@ int NSpGame_AdvertiseTick(NSpGameReference gameRef, float dt)
 
 	// iOS 14.4+ blocks INADDR_BROADCAST without multicast entitlement.
 	// Use subnet-directed broadcast instead on iOS.
-#if __IOS__
+#if __IOS__ || __TVOS__
 	struct in_addr subnetBroadcast = GetSubnetBroadcastAddress();
 #endif
 
@@ -1648,7 +1648,7 @@ int NSpGame_AdvertiseTick(NSpGameReference gameRef, float dt)
 	{
 		.sin_family = AF_INET,
 		.sin_port = htons(gNetPort),
-#if __IOS__
+#if __IOS__ || __TVOS__
 		.sin_addr = subnetBroadcast,
 #else
 		.sin_addr.s_addr = INADDR_BROADCAST,

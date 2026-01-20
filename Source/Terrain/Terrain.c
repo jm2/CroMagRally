@@ -820,7 +820,7 @@ void DrawTerrain(void) {
 
         /* SUBMIT THE GEOMETRY */
 
-#if defined(__ANDROID__) || defined(__IOS__)
+#if defined(__ANDROID__) || defined(__IOS__) || defined(__TVOS__)
         // gl4es workaround: Camera Relative Rendering
         // Textures Enabled, Lighting/Culling Disabled for safety visibility
         {

@@ -93,7 +93,7 @@ int gNumTexturesAllocated = 0;
 //
 
 void OGL_Boot(void) {
-#if defined(__ANDROID__) || defined(__IOS__)
+#if defined(__ANDROID__) || defined(__IOS__) || defined(__TVOS__)
   while (glGetError() != GL_NO_ERROR)
     ; // Flush any SDL context creation errors
 #endif
@@ -428,7 +428,7 @@ static void OGL_SetStyles(OGLSetupInputType *setupDefPtr) {
 
   /* ENABLE ALPHA CHANNELS */
 
-#if defined(__ANDROID__) || defined(__IOS__)
+#if defined(__ANDROID__) || defined(__IOS__) || defined(__TVOS__)
   glEnable(GL_ALPHA_TEST);
   // Suppress potential 0x502 error from glAlphaFunc on some emulators/devices
   while (glGetError() != GL_NO_ERROR)
@@ -446,7 +446,7 @@ static void OGL_SetStyles(OGLSetupInputType *setupDefPtr) {
   glHint(GL_FOG_HINT, GL_FASTEST);
 
   if (styleDefPtr->useFog) {
-#if defined(__ANDROID__) || defined(__IOS__)
+#if defined(__ANDROID__) || defined(__IOS__) || defined(__TVOS__)
     glFogf(GL_FOG_MODE, (float)styleDefPtr->fogMode);
 #else
     glFogi(GL_FOG_MODE, styleDefPtr->fogMode);
@@ -888,7 +888,7 @@ GLuint OGL_TextureMap_Load(void *imageMemory, int width, int height,
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
 
-#if defined(__ANDROID__) || defined(__IOS__)
+#if defined(__ANDROID__) || defined(__IOS__) || defined(__TVOS__)
   // GLES 1.1 requires internalFormat to be GL_RGBA/GL_RGB/etc, NOT GL_BGRA.
   // Also, the emulator might not support GL_BGRA matches for src format either.
   // So we manually swizzle BGRA -> RGBA and pass GL_RGBA for everything.

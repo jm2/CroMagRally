@@ -17,7 +17,7 @@
 #include <stdio.h>
 #include <SDL3/SDL.h>
 
-#if defined(__APPLE__) && !defined(__IOS__)
+#if defined(__APPLE__) && !defined(__IOS__) && !defined(__TVOS__)
 #include <SystemConfiguration/SystemConfiguration.h>
 #elif defined(_WIN32)
 #include <windows.h>
@@ -1276,7 +1276,7 @@ Boolean								abort = false;
 //
 int Net_GetConnectionHint(void)
 {
-#if defined(__APPLE__) && !defined(__IOS__)
+#if defined(__APPLE__) && !defined(__IOS__) && !defined(__TVOS__)
 	// macOS Implementation using SystemConfiguration
 	int isWifi = 0;
 	CFArrayRef interfaces = SCNetworkInterfaceCopyAll();
@@ -1298,7 +1298,7 @@ int Net_GetConnectionHint(void)
 	}
 	return isWifi;
 
-#elif defined(__IOS__)
+#elif defined(__IOS__) || defined(__TVOS__)
     return 1; // Assume WiFi/Wireless for now
 
 #elif defined(_WIN32)

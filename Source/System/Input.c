@@ -57,7 +57,7 @@ static SDL_Gamepad *TryOpenAnyUnusedGamepad(bool showMessage);
 static int GetGamepadSlotFromJoystick(SDL_JoystickID joystickID);
 
 // Touch Controls (enabled on all platforms, hidden until touch event)
-#if defined(__ANDROID__) || defined(__IOS__)
+#if defined(__ANDROID__) || (defined(__IOS__) && !defined(__TVOS__))
 static SDL_Sensor *gAccelerometer = NULL;
 #endif
 
@@ -137,7 +137,7 @@ static void EnableVirtualJoystick(void) {
   }
 }
 
-#if defined(__ANDROID__) || defined(__IOS__)
+#if defined(__ANDROID__) || (defined(__IOS__) && !defined(__TVOS__))
 static void InitMobileInput(void) {
   InitTouchData();
   EnableVirtualJoystick();
@@ -506,7 +506,7 @@ void DoSDLMaintenance(void) {
 
   // Initialize touch input data (but don't create joystick yet on desktop)
   InitTouchData();
-#if defined(__ANDROID__) || defined(__IOS__)
+#if defined(__ANDROID__) || (defined(__IOS__) && !defined(__TVOS__))
   InitMobileInput();
 #endif
 
