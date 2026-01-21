@@ -61,14 +61,39 @@ static int GetGamepadSlotFromJoystick(SDL_JoystickID joystickID);
 static SDL_Sensor *gAccelerometer = NULL;
 #endif
 
+// Touch Debugging
+#define TOUCH_DEBUG_LINES 0
+
 // Virtual joystick configuration (normalized screen coordinates)
 #define STICK_VISUAL_CENTER_X 0.27f   // 27% from left edge
 #define STICK_INPUT_CENTER_X 0.20f   // 27% from left edge
 #define STICK_VISUAL_CENTER_Y 0.85f // Visual position (near bottom)
-#define STICK_INPUT_CENTER_Y  0.65f // Input logical position (moved UP to match visual alignment)
-#define STICK_RADIUS_X 0.08f   // Horizontal radius
-#define STICK_RADIUS_Y 0.08f   // Vertical radius
-#define STICK_CLAIM_RADIUS 0.15f  // Touch claim radius around center
+#define STICK_INPUT_CENTER_Y  0.68f // Input logical position (closer to visual 0.85)
+#define STICK_RADIUS_X 0.16f   // Horizontal radius (Increased for lower sensitivity)
+#define STICK_RADIUS_Y 0.16f   // Vertical radius (Increased for lower sensitivity)
+#define STICK_VISUAL_RADIUS_X 0.10f // Visual radius (Decoupled from input range)
+#define STICK_VISUAL_RADIUS_Y 0.10f // Visual radius (Decoupled from input range)
+#define STICK_CLAIM_RADIUS 0.20f  // Touch claim radius (Increased for better responsiveness)
+
+// Button layout configuration
+#define BUTTON_CENTER_X 0.85f
+#define BUTTON_CENTER_Y 0.78f
+#define BUTTON_TOUCH_RADIUS 0.18f
+// Button input tuning
+// Button input tuning
+// Visual spacing is +/- 55 pixels from center.
+#define BUTTON_DEADZONE_X 0.00f 
+#define BUTTON_DEADZONE_Y 0.00f
+#define BUTTON_INPUT_OFFSET_X -0.03f  // Shift touch area right to match visual
+#define BUTTON_INPUT_OFFSET_Y -0.06f  // Shift touch area down to match visual
+
+// Start Button layout
+#define START_BUTTON_CENTER_X 0.88f
+#define START_BUTTON_CENTER_Y 0.14f
+#define START_BUTTON_WIDTH 0.12f
+#define START_BUTTON_HEIGHT 0.12f
+#define START_BUTTON_INPUT_OFFSET_X -0.06f
+#define START_BUTTON_INPUT_OFFSET_Y -0.06f
 
 typedef struct {
   SDL_FingerID id;
@@ -86,6 +111,7 @@ static bool gTouchControlsActive = false;  // Only true after real touch event
 
 typedef struct {
   float stickX, stickY;
+  float visualStickX, visualStickY; // Separate visual state for menu bouncing fix
   bool btnA, btnB, btnX, btnY, btnStart;
 } VirtualInputState;
 static VirtualInputState gVirtualInput = {0};
@@ -95,6 +121,14 @@ static VirtualInputState gVirtualInput = {0};
 
 // Initialize virtual touch gamepad (all platforms)
 // Initialize input data structures (reset stale state)
+static void ResetTouchInput(void) {
+  gJoystickFingerActive = false;
+  gJoystickFingerID = 0;
+  for (int i = 0; i < MAX_TOUCH_FINGERS; i++) {
+    gFingers[i].active = false;
+  }
+}
+
 static void InitTouchData(void) {
   // Check for stale static state (Android process reuse)
   if (gVirtualJoystickID != 0 && gVirtualJoystick != NULL) {
@@ -102,11 +136,7 @@ static void InitTouchData(void) {
       SDL_Log("Detected stale Virtual Joystick ID! Resetting input state.");
       gVirtualJoystickID = 0;
       gVirtualJoystick = NULL;
-      gJoystickFingerActive = false;
-      gJoystickFingerID = 0;
-      // Wipe fingers to be safe
-      for (int i = 0; i < MAX_TOUCH_FINGERS; i++)
-        gFingers[i].active = false;
+      ResetTouchInput(); 
     }
   }
 }
@@ -140,8 +170,6 @@ static void EnableVirtualJoystick(void) {
 #if defined(__ANDROID__) || (defined(__IOS__) && !defined(__TVOS__))
 static void InitMobileInput(void) {
   InitTouchData();
-  EnableVirtualJoystick();
-  gTouchControlsActive = true;  // Always show touch controls on mobile
 
   if (!gAccelerometer) {
     int num_sensors = 0;
@@ -184,6 +212,10 @@ static void UpdateVirtualGamepad(void) {
   }
 
   // Process touch input to populate gVirtualInput for Input Injection.
+  int w, h;
+  SDL_GetWindowSize(gSDLWindow, &w, &h);
+  float aspect = (float)w / (float)h;
+
   for (int i = 0; i < MAX_TOUCH_FINGERS; i++) {
     if (!gFingers[i].active)
       continue;
@@ -197,22 +229,43 @@ static void UpdateVirtualGamepad(void) {
       isJoystickFinger = true;
     } else if (!gJoystickFingerActive) {
       // Check if finger is within claim radius of joystick center
-      float dx = x - STICK_INPUT_CENTER_X;
+      // CORRECTED: Apply aspect ratio to X distance for circular area in screen space
+      float dx = (x - STICK_INPUT_CENTER_X) * aspect;
       float dy = y - STICK_INPUT_CENTER_Y;
       float dist = SDL_sqrtf(dx * dx + dy * dy);
-      if (dist < STICK_CLAIM_RADIUS) {
+      if (dist < STICK_CLAIM_RADIUS) { // Radius defined in Y-normalized units (relative to height)
         // New claim!
         gJoystickFingerActive = true;
         gJoystickFingerID = gFingers[i].id;
         isJoystickFinger = true;
       }
     }
+    
+    // Validate joystick finger - if it's marked active but the finger isn't found,
+    // reset it (fixes stuck joystick bug)
+    // MOVED CHECK INSIDE LOOP? No, the check was at the top. Let's update the top check too.
 
     if (isJoystickFinger) {
-      // Calculate normalized stick deflection with separate X/Y radii
-      float dx = (x - STICK_INPUT_CENTER_X) / STICK_RADIUS_X;
-      float dy = (y - STICK_INPUT_CENTER_Y) / STICK_RADIUS_Y;
-      // Clamp each axis to [-1, 1] independently
+      // Calculate normalized stick deflection with aspect correction
+      // We want STICK_RADIUS_Y to represent the physical radius circle
+      float dx = (x - STICK_INPUT_CENTER_X) * aspect; 
+      float dy = y - STICK_INPUT_CENTER_Y;
+      
+      // Feature request: Reset to center if sliding out of claim area.
+      float dist = SDL_sqrtf(dx * dx + dy * dy);
+      if (dist > STICK_CLAIM_RADIUS) {
+         gJoystickFingerActive = false;
+         gJoystickFingerID = 0;
+         // Input will fall through to 0 on next frame logic (since active is false)
+         continue; 
+      }
+
+      // Normalize
+      dx /= STICK_RADIUS_Y; // Use Y radius for both for circular sensitivity
+      dy /= STICK_RADIUS_Y;
+
+      // Clamp each axis to [-1, 1] independently (or circular clamp?)
+      // Original logic clamped independently. Let's keep that but now inputs are circular-ish.
       if (dx < -1.0f) dx = -1.0f;
       if (dx > 1.0f) dx = 1.0f;
       if (dy < -1.0f) dy = -1.0f;
@@ -220,25 +273,52 @@ static void UpdateVirtualGamepad(void) {
       targetStickX = dx;
       targetStickY = dy;
     }
-    // Right side: Buttons (center: 0.85, 0.75, radius roughly 0.15)
+    // Right side: Buttons
     else if (x > 0.6f && y > 0.5f) {
-      float dx = x - 0.85f;
-      float dy = y - 0.78f;
+      // Use offset constants for tuning
+      float btnCenterX = BUTTON_CENTER_X + BUTTON_INPUT_OFFSET_X;
+      float btnCenterY = BUTTON_CENTER_Y + BUTTON_INPUT_OFFSET_Y;
+      
+      // Aspect correct the button distance check too?
+      // The button cluster is somewhat oval if we don't. 
+      // The limits (0.03) are hardcoded.
+      // Let's apply aspect to distance check for the "Outer Ring"
+      float dx = (x - btnCenterX) * aspect;
+      float dy = y - btnCenterY;
       float distSq = dx * dx + dy * dy;
-      if (distSq < 0.18f * 0.18f) {
-        if (dy > 0.03f)
-          btnA = true;
-        else if (dx > 0.03f)
-          btnB = true;
-        else if (dx < -0.03f)
-          btnX = true;
-        else if (dy < -0.03f)
-          btnY = true;
+      
+      // BUTTON_TOUCH_RADIUS is 0.18f.
+      if (distSq < BUTTON_TOUCH_RADIUS * BUTTON_TOUCH_RADIUS) {
+         // Re-calculate raw dx/dy for the internal quadrant checks 
+         // Note: if we aspect correct the outer ring, we should probably aspect correct the inner checks too 
+         // so the X split is physically consistent.
+         float rawDx = x - btnCenterX;
+         
+         // Quadrant check with Diagonal Split
+         // Aspect correct the X distance so the split is a true 45-degree X on screen.
+         bool vertical = SDL_fabs(dy) > SDL_fabs(rawDx * aspect);
+         
+         if (vertical) {
+            if (dy > BUTTON_DEADZONE_Y) btnA = true;
+            else if (dy < -BUTTON_DEADZONE_Y) btnY = true;
+         } else {
+            if (rawDx > BUTTON_DEADZONE_X) btnB = true;
+            else if (rawDx < -BUTTON_DEADZONE_X) btnX = true;
+         }
       }
     }
-    // Top Right: Start (Pause) - expanded area for easier activation
-    else if (x > 0.8f && y < 0.25f) {
-      btnStart = true;
+    // Top Right: Start (Pause) - Rectangular Check
+    else if (x > 0.8f && y < 0.35f) { // Coarse check
+       float startCenterX = START_BUTTON_CENTER_X + START_BUTTON_INPUT_OFFSET_X;
+       float startCenterY = START_BUTTON_CENTER_Y + START_BUTTON_INPUT_OFFSET_Y;
+       
+       float halfW = START_BUTTON_WIDTH / 2.0f;
+       float halfH = START_BUTTON_HEIGHT / 2.0f;
+       
+       if (SDL_fabs(x - startCenterX) < halfW &&
+           SDL_fabs(y - startCenterY) < halfH) {
+          btnStart = true;
+       }
     }
   }
 
@@ -251,6 +331,10 @@ static void UpdateVirtualGamepad(void) {
     // Snap close-to-zero values to clean up final rest
     if (SDL_fabs(gVirtualInput.stickX) < 0.01f) gVirtualInput.stickX = 0;
     if (SDL_fabs(gVirtualInput.stickY) < 0.01f) gVirtualInput.stickY = 0;
+    
+    // CAPTURE VISUAL STATE HERE BEFORE MENU REPEAT LOGIC
+    gVirtualInput.visualStickX = gVirtualInput.stickX;
+    gVirtualInput.visualStickY = gVirtualInput.stickY;
     
     // Auto-repeat for menu navigation (when not in game)
     // Simulates repeated presses when holding the stick up/down
@@ -284,6 +368,8 @@ static void UpdateVirtualGamepad(void) {
   } else {
     gVirtualInput.stickX = 0;
     gVirtualInput.stickY = 0;
+    gVirtualInput.visualStickX = 0;
+    gVirtualInput.visualStickY = 0;
   }
   
   gVirtualInput.btnA = btnA;
@@ -526,7 +612,6 @@ void DoSDLMaintenance(void) {
     case SDL_EVENT_FINGER_DOWN:
     case SDL_EVENT_FINGER_MOTION: {
       // Only activate touch controls from real touch events (not mouse-simulated)
-      // SDL_TOUCH_MOUSEID is used for mouse events emulating touch
       if (event.tfinger.touchID == SDL_TOUCH_MOUSEID) break;
 
       if (!gTouchControlsActive) {
@@ -534,14 +619,30 @@ void DoSDLMaintenance(void) {
          gTouchControlsActive = true;  // Show touch controls
       }
       gUserPrefersGamepad = false; // Touch Reactivation
+      
+      int foundSlot = -1;
+      // 1. Search for existing finger with this ID
       for (int i = 0; i < MAX_TOUCH_FINGERS; i++) {
-        if (!gFingers[i].active || gFingers[i].id == event.tfinger.fingerID) {
-          gFingers[i].id = event.tfinger.fingerID;
-          gFingers[i].x = event.tfinger.x;
-          gFingers[i].y = event.tfinger.y;
-          gFingers[i].active = true;
-          break;
-        }
+         if (gFingers[i].active && gFingers[i].id == event.tfinger.fingerID) {
+            foundSlot = i;
+            break;
+         }
+      }
+      // 2. If not found, search for empty slot
+      if (foundSlot == -1) {
+         for (int i = 0; i < MAX_TOUCH_FINGERS; i++) {
+            if (!gFingers[i].active) {
+               foundSlot = i;
+               break;
+            }
+         }
+      }
+      
+      if (foundSlot != -1) {
+          gFingers[foundSlot].id = event.tfinger.fingerID;
+          gFingers[foundSlot].x = event.tfinger.x;
+          gFingers[foundSlot].y = event.tfinger.y;
+          gFingers[foundSlot].active = true;
       }
       break;
     }
@@ -567,6 +668,13 @@ void DoSDLMaintenance(void) {
 
     case SDL_EVENT_WINDOW_RESIZED:
       // QD3D_OnWindowResized(event.window.data1, event.window.data2);
+      break;
+      
+    case SDL_EVENT_WINDOW_FOCUS_LOST:
+    case SDL_EVENT_WINDOW_MINIMIZED:
+    case SDL_EVENT_DID_ENTER_BACKGROUND:
+      // Reset touch state to prevents buttons/joystick getting stuck
+      ResetTouchInput();
       break;
 
     case SDL_EVENT_TEXT_INPUT:
@@ -1236,6 +1344,9 @@ void ResetDefaultMouseBindings(void) {
   }
 }
 
+// Debug helpers implemented inline below to avoid unused function warnings
+// (Cleaned up unused static functions)
+
 // Virtual gamepad rendering (all platforms, shown when touch is activated)
 void DrawVirtualGamepad(void) {
   // Check if assets are loaded and if we are in the overlay pass
@@ -1272,8 +1383,9 @@ void DrawVirtualGamepad(void) {
   unsigned long flags = kTextMeshKeepCurrentProjection;
 
   // Use gVirtualInput for visual feedback (synced with sticky joystick logic)
-  float stickX = gVirtualInput.stickX;
-  float stickY = gVirtualInput.stickY;
+  // Use VISUAL stick state to prevent bounces
+  float stickX = gVirtualInput.visualStickX;
+  float stickY = gVirtualInput.visualStickY;
   bool btnA = gVirtualInput.btnA;
   bool btnB = gVirtualInput.btnB;
   bool btnX = gVirtualInput.btnX;
@@ -1286,8 +1398,8 @@ void DrawVirtualGamepad(void) {
   float sy = (-0.5f + STICK_VISUAL_CENTER_Y) * lh;
   
   // Calculate visual nub displacement using separate X/Y radii for proper scaling
-  float nubOffsetX = STICK_RADIUS_X * lw;
-  float nubOffsetY = STICK_RADIUS_Y * lh;
+  float nubOffsetX = STICK_VISUAL_RADIUS_X * lw;
+  float nubOffsetY = STICK_VISUAL_RADIUS_Y * lh;
   
   DrawSprite2(SPRITE_GROUP_GAMEPAD, GAMEPAD_SObjType_StickBase, sx, sy, 0.3f,
               0.3f, 0, flags);
@@ -1295,9 +1407,9 @@ void DrawVirtualGamepad(void) {
               sx + stickX * nubOffsetX,
               sy + stickY * nubOffsetY, 0.4f, 0.4f, 0, flags);
 
-  // Buttons (centered at normalized 0.85, 0.78)
-  float bx = (-0.5f + 0.85f) * lw;
-  float by = (-0.5f + 0.78f) * lh;
+  // Buttons (centered at normalized BUTTON_CENTER_X, BUTTON_CENTER_Y)
+  float bx = (-0.5f + BUTTON_CENTER_X) * lw;
+  float by = (-0.5f + BUTTON_CENTER_Y) * lh;
   float bsp = 55.0f;
 
   gGlobalColorFilter =
@@ -1320,14 +1432,155 @@ void DrawVirtualGamepad(void) {
   DrawSprite2(SPRITE_GROUP_GAMEPAD, GAMEPAD_SObjType_ButtonY, bx, by - bsp,
               0.3f, 0.3f, 0, flags);
 
-  gGlobalColorFilter =
-      btnStart ? (OGLColorRGB){0.8f, 0.8f, 0.8f} : (OGLColorRGB){1, 1, 1};
-  // Start button: X aligned with Y button + offset right, Y at 0.15
-  DrawSprite2(SPRITE_GROUP_GAMEPAD, GAMEPAD_SObjType_ButtonStart, bx + 30,
-              (-0.5f + 0.15f) * lh, 0.3f, 0.3f, 0, flags);
+  // Start button: Fixed position
+  float startX = (-0.5f + START_BUTTON_CENTER_X) * lw;
+  float startY = (-0.5f + START_BUTTON_CENTER_Y) * lh;
+  
+  DrawSprite2(SPRITE_GROUP_GAMEPAD, GAMEPAD_SObjType_ButtonStart, startX,
+              startY, 0.3f, 0.3f, 0, flags);
 
   gGlobalColorFilter = (OGLColorRGB){1, 1, 1};
   gGlobalTransparency = 1.0f;
+
+#if TOUCH_DEBUG_LINES
+    // DEBUG: Draw Input Catchment Areas
+    // ---------------------------------
+    // Joystick Input Center (Screen Space)
+    float inputSx = (-0.5f + STICK_INPUT_CENTER_X) * lw;
+    float inputSy = (-0.5f + STICK_INPUT_CENTER_Y) * lh;
+    
+    // Joystick Claim Radius (Yellow) - Now Aspect Corrected (Circular on Screen)
+    glColor4f(1, 1, 0, 1);
+    glDisable(GL_TEXTURE_2D);
+    glBegin(GL_LINE_LOOP);
+    const int segments = 32;
+    for (int i = 0; i < segments; i++) {
+        float angle = 2.0f * 3.14159f * i / segments;
+        // STICK_CLAIM_RADIUS is normalized to Height (Y).
+        // To draw circle in pixels: r_px = radius * lh.
+        float r_px = STICK_CLAIM_RADIUS * lh;
+        glVertex2f(inputSx + r_px * SDL_cosf(angle), 
+                   inputSy + r_px * SDL_sinf(angle));
+    }
+    glEnd();
+    glEnable(GL_TEXTURE_2D);
+
+    // Joystick Output Range (Red) - STICK_RADIUS_Y * lh
+    glColor4f(1, 0, 0, 1);
+    glDisable(GL_TEXTURE_2D);
+    glBegin(GL_LINE_LOOP);
+    float outputR_px = STICK_RADIUS_Y * lh;
+    for (int i = 0; i < segments; i++) {
+        float angle = 2.0f * 3.14159f * i / segments;
+        glVertex2f(inputSx + outputR_px * SDL_cosf(angle), 
+                   inputSy + outputR_px * SDL_sinf(angle));
+    }
+    glEnd();
+    glEnable(GL_TEXTURE_2D);
+
+    // Button Areas (Green) - Outer Ring
+    glColor4f(0, 1, 0, 1);
+    float btnTouchX = (-0.5f + BUTTON_CENTER_X + BUTTON_INPUT_OFFSET_X) * lw;
+    float btnTouchY = (-0.5f + BUTTON_CENTER_Y + BUTTON_INPUT_OFFSET_Y) * lh;
+    
+    glDisable(GL_TEXTURE_2D);
+    glBegin(GL_LINE_LOOP);
+    float btnR_px = BUTTON_TOUCH_RADIUS * lh; // Assuming normalized to height now for circle
+    for (int i = 0; i < segments; i++) {
+        float angle = 2.0f * 3.14159f * i / segments;
+        glVertex2f(btnTouchX + btnR_px * SDL_cosf(angle), 
+                   btnTouchY + btnR_px * SDL_sinf(angle));
+    }
+    glEnd();
+    
+    // Button Deadzones (Red Lines)
+    glColor4f(1, 0, 0, 1);
+    glBegin(GL_LINES);
+    
+    float splitX = BUTTON_DEADZONE_X * lw;
+    float splitY = BUTTON_DEADZONE_Y * lh; 
+    
+    // Draw Center Deadzone Box (Collapsed to center if 0)
+    // Removed per user request - just X lines now.
+
+    // Draw Diagonal Separators (X-shape) extending to radius
+    // These visualize the 'vertical vs horizontal' decision boundary (abs(dy) > abs(dx))
+    // We draw them from the deadzone corners out to the circle edge roughly.
+    // 0.707 is cos/sin 45 deg.
+    float diagX = btnR_px * 0.707f;
+    float diagY = btnR_px * 0.707f; // Use circle aspect? btnR_px is already scaled by lh.
+
+    // If we assume a square aspect logic for the diagonal check (rawDx vs dy):
+    // rawDx = x - center; dy = y - center. x,y are normalized?
+    // Wait, rawDx is diff in normalized X units. dy is diff in normalized Y units.
+    // If aspect ratio is involved (e.g. 16:9), then dx units != dy units spatially!
+    // But the input logic compares raw normalized values: `abs(dy) > abs(rawDx)`.
+    // So visually, the slope is 1.0 in *normalized space*.
+    // In screen pixels: Px = Nx * lw. Py = Ny * lh.
+    // So slope in pixels = (dy*lh) / (dx*lw) = (1*lh) / (1*lw) = lh/lw = 1/aspect.
+    // So the line is NOT 45 degrees on screen. It points slightly flatter on wide screen.
+    // Let's draw that exactly.
+    
+    float cornerX = btnR_px * (lh/lw); // Just project out far enough? 
+    // Actually just use any point on the line y = x (normalized).
+    // Point A: (0,0) -> (btnTouchX, btnTouchY).
+    // Point B: (1,1) -> (btnTouchX + lw, btnTouchY + lh).
+    // But we want to clip to radius or just draw 'long enough'.
+    
+    float dEnd = btnR_px; 
+    // Draw true 45-degree diagonals (Squared X)
+    // In pixel space -> dx = dy.
+    // Normalized Y * lh = Pixel Y.
+    // Normalized X * lw = Pixel X.
+    // We want Pixel X = Pixel Y.
+    // So Normalized X * lw = Normalized Y * lh => NormX = NormY * (lh/lw) = NormY / aspect.
+    // Or simpler: just add the same pixel amount to CenterX_px and CenterY_px.
+    
+    float diagLen_px = btnR_px; // Length in pixels
+    
+    // Line 1: (+, +)
+    glVertex2f(btnTouchX, btnTouchY);
+    glVertex2f(btnTouchX + diagLen_px, btnTouchY + diagLen_px);
+    
+    // Line 2: (+, -)
+    glVertex2f(btnTouchX, btnTouchY);
+    glVertex2f(btnTouchX + diagLen_px, btnTouchY - diagLen_px);
+    
+    // Line 3: (-, +)
+    glVertex2f(btnTouchX, btnTouchY);
+    glVertex2f(btnTouchX - diagLen_px, btnTouchY + diagLen_px);
+    
+    // Line 4: (-, -)
+    glVertex2f(btnTouchX, btnTouchY);
+    glVertex2f(btnTouchX - diagLen_px, btnTouchY - diagLen_px);
+
+    glEnd();
+
+    glEnable(GL_TEXTURE_2D);
+    
+    // Start Button Area (Blue) - Rectangular
+    glColor4f(0, 0, 1, 1);
+    
+    glDisable(GL_TEXTURE_2D);
+    glBegin(GL_LINE_LOOP);
+    float startHalfW_px = (START_BUTTON_WIDTH / 2.0f) * lw;
+    float startHalfH_px = (START_BUTTON_HEIGHT / 2.0f) * lh;
+    // START_BUTTON_CENTER X/Y are 0..1 normalized.
+    // Convert center to pixels (centered at 0,0 for OpenGL if (-0.5..0.5) space used elsewhere?)
+    // The other drawing code uses inputSx = (-0.5f + CENTER) * lw.
+    float startCx_px = (-0.5f + START_BUTTON_CENTER_X + START_BUTTON_INPUT_OFFSET_X) * lw;
+    float startCy_px = (-0.5f + START_BUTTON_CENTER_Y + START_BUTTON_INPUT_OFFSET_Y) * lh;
+    
+    glVertex2f(startCx_px - startHalfW_px, startCy_px - startHalfH_px);
+    glVertex2f(startCx_px + startHalfW_px, startCy_px - startHalfH_px);
+    glVertex2f(startCx_px + startHalfW_px, startCy_px + startHalfH_px);
+    glVertex2f(startCx_px - startHalfW_px, startCy_px + startHalfH_px);
+    glEnd();
+    glEnable(GL_TEXTURE_2D);
+    
+    glColor4f(1, 1, 1, 1); // Reset
+#endif
+
   glDisable(GL_BLEND);
   glDepthMask(GL_TRUE);
   OGL_PopState();
