@@ -55,7 +55,7 @@ build_abi() {
     echo "=== Building for $ABI in $BUILD_DIR ==="
     
     # Configure if missing
-    if [ ! -d "$BUILD_DIR" ]; then
+     if [ ! -d "$BUILD_DIR" ]; then
         echo "Build directory $BUILD_DIR missing. Configuring..."
         mkdir -p $BUILD_DIR
         cd $BUILD_DIR
@@ -64,6 +64,7 @@ build_abi() {
               -DANDROID_ABI=arm64-v8a \
               -DANDROID_PLATFORM=android-24 \
               -DBUILD_SDL_FROM_SOURCE=ON \
+              -DCMAKE_BUILD_TYPE=Release \
               -DSDL3_DIR=extern/SDL3-3.2.8 \
               ..
         else
@@ -71,13 +72,14 @@ build_abi() {
               -DANDROID_ABI=x86_64 \
               -DANDROID_PLATFORM=android-24 \
               -DBUILD_SDL_FROM_SOURCE=ON \
+              -DCMAKE_BUILD_TYPE=Release \
               -DSDL3_DIR=extern/SDL3-3.2.8 \
               ..
         fi
         cd ..
     fi
 
-    cmake --build $BUILD_DIR
+    cmake --build $BUILD_DIR --config Release
     
     echo "--- Copying libraries to $JNI_LIBS_DIR ---"
     mkdir -p $JNI_LIBS_DIR
