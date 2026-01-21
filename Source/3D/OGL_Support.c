@@ -859,8 +859,15 @@ static void OGL_FixTextureGamma(uint8_t *imageMemory, int width, int height,
     break;
   }
 
-  SDL_Log("Gamma correction not supported for srcFormat $%x / dataType $%x",
-          srcFormat, dataType);
+  // Log once per unsupported format combination to avoid spam
+  static GLint sLastFormat = 0;
+  static GLint sLastType = 0;
+  if (srcFormat != sLastFormat || dataType != sLastType) {
+    sLastFormat = srcFormat;
+    sLastType = dataType;
+    SDL_Log("Gamma correction not supported for srcFormat $%x / dataType $%x",
+            srcFormat, dataType);
+  }
 }
 
 /***************** OGL TEXTUREMAP LOAD **************************/

@@ -954,10 +954,7 @@ static SDL_Gamepad *TryOpenGamepadFromJoystick(SDL_JoystickID joystickID) {
   }
 
   // Check if we are opening the Virtual Gamepad
-  bool isVirtual = false;
-#if defined(__ANDROID__)
-  isVirtual = (joystickID == gVirtualJoystickID);
-#endif
+  bool isVirtual = (joystickID == gVirtualJoystickID);
 
   // Slot Allocation Logic
   if (isVirtual) {
@@ -971,11 +968,9 @@ static SDL_Gamepad *TryOpenGamepadFromJoystick(SDL_JoystickID joystickID) {
   } else {
     // Physical Gamepad: Check for Virtual Hogging Slot 0
     bool hogging = false;
-#if defined(__ANDROID__)
     if (gGamepads[0].open &&
         SDL_GetGamepadID(gGamepads[0].sdlGamepad) == gVirtualJoystickID)
       hogging = true;
-#endif
     if (hogging) {
       SDL_Log("Physical Gamepad detected! Moving Virtual Gamepad from Slot 0 "
               "to make room...");
