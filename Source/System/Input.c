@@ -611,6 +611,7 @@ void DoSDLMaintenance(void) {
     // Touch input handling (all platforms - hidden until activated by real touch)
     case SDL_EVENT_FINGER_DOWN:
     case SDL_EVENT_FINGER_MOTION: {
+#if !defined(__TVOS__)
       // Only activate touch controls from real touch events (not mouse-simulated)
       if (event.tfinger.touchID == SDL_TOUCH_MOUSEID) break;
 
@@ -644,11 +645,13 @@ void DoSDLMaintenance(void) {
           gFingers[foundSlot].y = event.tfinger.y;
           gFingers[foundSlot].active = true;
       }
+#endif
       break;
     }
 
     case SDL_EVENT_FINGER_UP:
     case SDL_EVENT_FINGER_CANCELED: {
+#if !defined(__TVOS__)
       for (int i = 0; i < MAX_TOUCH_FINGERS; i++) {
         if (gFingers[i].active && gFingers[i].id == event.tfinger.fingerID) {
           gFingers[i].active = false;
@@ -659,6 +662,7 @@ void DoSDLMaintenance(void) {
           break;
         }
       }
+#endif
       break;
     }
 
@@ -1352,10 +1356,6 @@ void DrawVirtualGamepad(void) {
   // Check if assets are loaded and if we are in the overlay pass
   if (gAtlases[SPRITE_GROUP_GAMEPAD] == NULL || !gDrawingOverlayPane)
     return;
-
-#if defined(__TVOS__)
-  return; // Never draw touch interface on tvOS
-#endif
 
   // Hide if touch controls not activated or user prefers physical gamepad
   if (!gTouchControlsActive || gUserPrefersGamepad) {
