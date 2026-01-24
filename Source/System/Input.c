@@ -1108,7 +1108,19 @@ static SDL_Gamepad *TryOpenGamepadFromJoystick(SDL_JoystickID joystickID) {
     }
 
     // Standard "First Free" search
-    gamepadSlot = FindFreeGamepadSlot();
+    const char *name = SDL_GetJoystickNameForID(joystickID);
+    bool isRemote = (name && SDL_strstr(name, "Remote") != NULL);
+
+    if (isRemote) {
+       for (int i = MAX_LOCAL_PLAYERS - 1; i >= 0; i--) {
+        if (!gGamepads[i].open) {
+          gamepadSlot = i;
+          break;
+        }
+      }
+    } else {
+      gamepadSlot = FindFreeGamepadSlot();
+    }
   }
 
   if (gamepadSlot < 0) {
