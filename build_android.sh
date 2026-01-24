@@ -35,7 +35,17 @@ prepare_dependencies() {
         fi
         
         # Verify Checksum
-        echo "$SDL_SHA256  $SDL_TAR" | sha256sum -c -
+        echo "Verifying checksum..."
+        if command -v sha256sum >/dev/null 2>&1; then
+            echo "$SDL_SHA256  $SDL_TAR" | sha256sum -c -
+        elif command -v shasum >/dev/null 2>&1; then
+            echo "$SDL_SHA256  $SDL_TAR" | shasum -a 256 -c -
+        else
+            echo "Error: Neither sha256sum nor shasum found. Cannot verify dependency."
+            rm "$SDL_TAR"
+            exit 1
+        fi
+
         if [ $? -ne 0 ]; then
             echo "Error: Checksum verification failed!"
             rm "$SDL_TAR"
