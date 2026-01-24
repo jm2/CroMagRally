@@ -71,6 +71,12 @@ build_abi() {
     JNI_LIBS_DIR="$ANDROID_DIR/app/src/main/jniLibs/$ABI"
     
     echo "=== Building for $ABI in $BUILD_DIR ==="
+    
+    # Clean up potentially stale/incompatible libraries (like rogue libGL.a)
+    if [ -d "lib" ]; then
+        echo "Cleaning up local lib directory..."
+        rm -rf lib
+    fi
 
     # Configure
     echo "Configuring $BUILD_DIR..."

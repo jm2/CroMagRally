@@ -27,6 +27,13 @@ fi
 
 # Step 1: Configure with CMake
 echo "=== Configuring CMake for tvOS ($SDK) ==="
+
+# Clean lib directory to prevent architecture mismatch
+if [ -d "lib" ]; then
+    echo "Cleaning up local lib directory..."
+    rm -rf lib
+fi
+
 cmake -G Xcode \
     -S . \
     -B "$BUILD_DIR" \
