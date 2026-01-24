@@ -1,5 +1,9 @@
 $ErrorActionPreference = "Stop"
 
+param(
+    [switch]$Run
+)
+
 # Configuration
 $AndroidDir = "AndroidBuild"
 $SdlVersion = "3.2.8"
@@ -47,38 +51,36 @@ function Build-Abi {
     $JniLibsDir = "$AndroidDir/app/src/main/jniLibs/$Abi"
     
     Write-Host "=== Building for $Abi in $BuildDir ==="
-    
-    # Configure if missing
-    if (-not (Test-Path -Path $BuildDir)) {
-        Write-Host "Build directory $BuildDir missing. Configuring..."
-        New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null
-        Push-Location $BuildDir
-        
-        $Toolchain = "$env:ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake"
-        # Fix path for CMake if on Windows (forward slashes are generally safer for cmake args)
-        if ($IsWindows) {
-            $Toolchain = $Toolchain -replace "\\", "/"
-        }
 
-        if ($Abi -eq "arm64-v8a") {
-             cmake -DCMAKE_TOOLCHAIN_FILE="$Toolchain" `
-              -DANDROID_ABI=arm64-v8a `
-              -DANDROID_PLATFORM=android-24 `
-              -DBUILD_SDL_FROM_SOURCE=ON `
-              -DCMAKE_BUILD_TYPE=Release `
-              -DSDL3_DIR="extern/SDL3-3.2.8" `
-              ..
-        } else {
-             cmake -DCMAKE_TOOLCHAIN_FILE="$Toolchain" `
-              -DANDROID_ABI=x86_64 `
-              -DANDROID_PLATFORM=android-24 `
-              -DBUILD_SDL_FROM_SOURCE=ON `
-              -DCMAKE_BUILD_TYPE=Release `
-              -DSDL3_DIR="extern/SDL3-3.2.8" `
-              ..
-        }
-        Pop-Location
+    # Configure
+    Write-Host "Configuring $BuildDir..."
+    New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null
+    Push-Location $BuildDir
+    
+    $Toolchain = "$env:ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake"
+    # Fix path for CMake if on Windows (forward slashes are generally safer for cmake args)
+    if ($IsWindows) {
+        $Toolchain = $Toolchain -replace "\\", "/"
     }
+
+    if ($Abi -eq "arm64-v8a") {
+            cmake -DCMAKE_TOOLCHAIN_FILE="$Toolchain" `
+            -DANDROID_ABI=arm64-v8a `
+            -DANDROID_PLATFORM=android-24 `
+            -DBUILD_SDL_FROM_SOURCE=ON `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DSDL3_DIR="extern/SDL3-3.2.8" `
+            ..
+    } else {
+            cmake -DCMAKE_TOOLCHAIN_FILE="$Toolchain" `
+            -DANDROID_ABI=x86_64 `
+            -DANDROID_PLATFORM=android-24 `
+            -DBUILD_SDL_FROM_SOURCE=ON `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DSDL3_DIR="extern/SDL3-3.2.8" `
+            ..
+    }
+    Pop-Location
 
     cmake --build $BuildDir --config Release
     
@@ -121,41 +123,43 @@ Pop-Location
 $ApkPath = "$AndroidDir/app/build/outputs/apk/debug/app-debug.apk"
 Write-Host "=== Success! APK is at $ApkPath ==="
 
-# 4. Check/Launch Emulator
-$Devices = adb devices | Select-String -Pattern "\tdevice$"
-if (-not $Devices) {
-    $AvdName = "TestDevice"
-    $EmulatorBin = "emulator" 
-    if ($env:ANDROID_HOME) {
-        $EmulatorBin = "$env:ANDROID_HOME/emulator/emulator"
+if ($Run) {
+    # 4. Check/Launch Emulator
+    $Devices = adb devices | Select-String -Pattern "\tdevice$"
+    if (-not $Devices) {
+        $AvdName = "TestDevice"
+        $EmulatorBin = "emulator" 
+        if ($env:ANDROID_HOME) {
+            $EmulatorBin = "$env:ANDROID_HOME/emulator/emulator"
+        }
+        
+        Write-Host "=== No running device found. Launching emulator: $AvdName ==="
+        # Provide a warning that this might fail if emulator not in path or weird env
+        Start-Process -FilePath $EmulatorBin -ArgumentList "-avd $AvdName -no-boot-anim -netdelay none -netspeed full" -WindowStyle Hidden
+        
+        Write-Host "Waiting for device to connect..."
+        adb wait-for-device
+        Write-Host "Device connected!"
+    } else {
+        Write-Host "=== Device detected. Skipping emulator launch. ==="
     }
-    
-    Write-Host "=== No running device found. Launching emulator: $AvdName ==="
-    # Provide a warning that this might fail if emulator not in path or weird env
-    Start-Process -FilePath $EmulatorBin -ArgumentList "-avd $AvdName -no-boot-anim -netdelay none -netspeed full" -WindowStyle Hidden
-    
-    Write-Host "Waiting for device to connect..."
-    adb wait-for-device
-    Write-Host "Device connected!"
-} else {
-    Write-Host "=== Device detected. Skipping emulator launch. ==="
-}
 
-Write-Host "=== 5. Installing and Launching on All Devices ==="
+    Write-Host "=== 5. Installing and Launching on All Devices ==="
 
-$Devices = adb devices | Select-String -Pattern "\tdevice$"
-foreach ($Dev in $Devices) {
-    $Serial = $Dev.ToString().Split("`t")[0]
-    if (-not [string]::IsNullOrWhiteSpace($Serial)) {
-        Write-Host "--> Processing Device: $Serial"
-        
-        Write-Host "    Installing APK..."
-        adb -s $Serial install -r $ApkPath
-        
-        Write-Host "    Launching Activity..."
-        # Note: Package/Activity name assumes standard. If var in bash was hardcoded, here too.
-        adb -s $Serial shell am start -n io.jor.cromagrally/io.jor.cromagrally.SDLActivity
-        
-        Write-Host "--> Done with $Serial"
+    $Devices = adb devices | Select-String -Pattern "\tdevice$"
+    foreach ($Dev in $Devices) {
+        $Serial = $Dev.ToString().Split("`t")[0]
+        if (-not [string]::IsNullOrWhiteSpace($Serial)) {
+            Write-Host "--> Processing Device: $Serial"
+            
+            Write-Host "    Installing APK..."
+            adb -s $Serial install -r $ApkPath
+            
+            Write-Host "    Launching Activity..."
+            # Note: Package/Activity name assumes standard. If var in bash was hardcoded, here too.
+            adb -s $Serial shell am start -n io.jor.cromagrally/io.jor.cromagrally.SDLActivity
+            
+            Write-Host "--> Done with $Serial"
+        }
     }
 }

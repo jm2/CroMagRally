@@ -1353,6 +1353,10 @@ void DrawVirtualGamepad(void) {
   if (gAtlases[SPRITE_GROUP_GAMEPAD] == NULL || !gDrawingOverlayPane)
     return;
 
+#if defined(__TVOS__)
+  return; // Never draw touch interface on tvOS
+#endif
+
   // Hide if touch controls not activated or user prefers physical gamepad
   if (!gTouchControlsActive || gUserPrefersGamepad) {
     if (gTouchControlsActive && gUserPrefersGamepad) {

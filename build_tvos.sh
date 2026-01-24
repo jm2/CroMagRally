@@ -26,20 +26,19 @@ if [ ! -d "extern/SDL" ]; then
 fi
 
 # Step 1: Configure with CMake
-if [ ! -d "$BUILD_DIR" ]; then
-    echo "=== Configuring CMake for tvOS ($SDK) ==="
-    cmake -G Xcode \
-        -S . \
-        -B "$BUILD_DIR" \
-        -DCMAKE_SYSTEM_NAME=tvOS \
-        -DCMAKE_OSX_SYSROOT="$SDK" \
-        -DCMAKE_OSX_ARCHITECTURES="$ARCHS" \
-        -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
-        -DBUILD_SDL_FROM_SOURCE=ON \
-        -DSDL_STATIC=ON \
-        -DSDL_SHARED=OFF \
-        -DSDL_OPENGLES=ON
-fi
+echo "=== Configuring CMake for tvOS ($SDK) ==="
+cmake -G Xcode \
+    -S . \
+    -B "$BUILD_DIR" \
+    -DCMAKE_SYSTEM_NAME=tvOS \
+    -DCMAKE_OSX_SYSROOT="$SDK" \
+    -DCMAKE_OSX_ARCHITECTURES="$ARCHS" \
+    -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
+    -DBUILD_SDL_FROM_SOURCE=ON \
+    -DSDL_STATIC=ON \
+    -DSDL_SHARED=OFF \
+    -DSDL_OPENGLES=ON \
+    -DCMAKE_BUILD_TYPE=Release
 
 # Step 2: Build
 echo "=== Building with Xcode ==="
