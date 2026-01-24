@@ -2,7 +2,54 @@
 set -e
 
 # Configuration
-# Configuration
+
+# Auto-detect JAVA_HOME if not set
+if [ -z "$JAVA_HOME" ]; then
+    # macOS Android Studio
+    if [ -d "/Applications/Android Studio.app/Contents/jbr/Contents/Home" ]; then
+        export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+    elif [ -d "/Applications/Android Studio.app/Contents/jre/Contents/Home" ]; then
+        export JAVA_HOME="/Applications/Android Studio.app/Contents/jre/Contents/Home"
+    # Linux Android Studio (standard/snap/archive)
+    elif [ -d "/opt/android-studio/jbr" ]; then
+        export JAVA_HOME="/opt/android-studio/jbr"
+    elif [ -d "$HOME/android-studio/jbr" ]; then
+        export JAVA_HOME="$HOME/android-studio/jbr"
+    fi
+    
+    if [ ! -z "$JAVA_HOME" ]; then
+        echo "Auto-detected JAVA_HOME: $JAVA_HOME"
+    fi
+fi
+
+# Auto-detect ANDROID_HOME if not set
+if [ -z "$ANDROID_HOME" ]; then
+    # macOS
+    if [ -d "$HOME/Library/Android/sdk" ]; then
+        export ANDROID_HOME="$HOME/Library/Android/sdk"
+    # Linux
+    elif [ -d "$HOME/Android/Sdk" ]; then
+        export ANDROID_HOME="$HOME/Android/Sdk"
+    fi
+    
+    if [ ! -z "$ANDROID_HOME" ]; then
+        echo "Auto-detected ANDROID_HOME: $ANDROID_HOME"
+    fi
+fi
+
+# Auto-detect NDK if not set (but ANDROID_HOME is present)
+if [ -z "$ANDROID_NDK_HOME" ] && [ ! -z "$ANDROID_HOME" ]; then
+    NDK_ROOT="$ANDROID_HOME/ndk"
+    if [ -d "$NDK_ROOT" ]; then
+        # Find the directory with the highest version number
+        LATEST_NDK=$(ls -1d "$NDK_ROOT"/* | sort -V | tail -n1)
+        if [ ! -z "$LATEST_NDK" ]; then
+            export ANDROID_NDK_HOME="$LATEST_NDK"
+            echo "Auto-detected ANDROID_NDK_HOME: $ANDROID_NDK_HOME"
+        fi
+    fi
+fi
+
 ANDROID_DIR="AndroidBuild"
 SDL_VERSION="3.2.8"
 SDL_DIR="extern/SDL3-${SDL_VERSION}"

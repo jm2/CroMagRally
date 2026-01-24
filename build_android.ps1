@@ -1,10 +1,47 @@
-$ErrorActionPreference = "Stop"
-
 param(
     [switch]$Run
 )
 
+$ErrorActionPreference = "Stop"
+
 # Configuration
+if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) {
+    Write-Error "Ninja is not found in your PATH. Please install Ninja (e.g., 'winget install ninja') or add it to your PATH."
+}
+
+if (-not $env:JAVA_HOME) {
+    $PossibleJava = @(
+        "C:\Program Files\Android\Android Studio\jbr",
+        "C:\Program Files\Android\Android Studio\jre"
+    )
+    foreach ($Path in $PossibleJava) {
+        if (Test-Path $Path) {
+            $env:JAVA_HOME = $Path
+            Write-Host "Auto-detected JAVA_HOME: $Path"
+            break
+        }
+    }
+}
+
+if (-not $env:ANDROID_HOME) {
+    $PossibleSdk = "$env:LOCALAPPDATA\Android\Sdk"
+    if (Test-Path $PossibleSdk) {
+        $env:ANDROID_HOME = $PossibleSdk
+        Write-Host "Auto-detected ANDROID_HOME: $PossibleSdk"
+    }
+}
+
+if (-not $env:ANDROID_NDK_HOME -and $env:ANDROID_HOME) {
+    $NdkRoot = "$env:ANDROID_HOME\ndk"
+    if (Test-Path $NdkRoot) {
+        $LatestNdk = Get-ChildItem $NdkRoot | Sort-Object Name -Descending | Select-Object -First 1
+        if ($LatestNdk) {
+            $env:ANDROID_NDK_HOME = $LatestNdk.FullName
+            Write-Host "Auto-detected ANDROID_NDK_HOME: $($LatestNdk.FullName)"
+        }
+    }
+}
+
 $AndroidDir = "AndroidBuild"
 $SdlVersion = "3.2.8"
 $SdlDir = "extern/SDL3-$SdlVersion"
@@ -34,7 +71,8 @@ function Prepare-Dependencies {
         tar -xzf $SdlTar -C extern/
         Remove-Item $SdlTar
         Write-Host "=== SDL3 setup complete ==="
-    } else {
+    }
+    else {
         Write-Host "=== SDL3 found in $SdlDir ==="
     }
 }
@@ -70,15 +108,16 @@ function Build-Abi {
     }
 
     if ($Abi -eq "arm64-v8a") {
-            cmake -DCMAKE_TOOLCHAIN_FILE="$Toolchain" `
+        cmake -GNinja -DCMAKE_TOOLCHAIN_FILE="$Toolchain" `
             -DANDROID_ABI=arm64-v8a `
             -DANDROID_PLATFORM=android-24 `
             -DBUILD_SDL_FROM_SOURCE=ON `
             -DCMAKE_BUILD_TYPE=Release `
             -DSDL3_DIR="extern/SDL3-3.2.8" `
             ..
-    } else {
-            cmake -DCMAKE_TOOLCHAIN_FILE="$Toolchain" `
+    }
+    else {
+        cmake -GNinja -DCMAKE_TOOLCHAIN_FILE="$Toolchain" `
             -DANDROID_ABI=x86_64 `
             -DANDROID_PLATFORM=android-24 `
             -DBUILD_SDL_FROM_SOURCE=ON `
@@ -121,7 +160,8 @@ Write-Host "=== 3. Assembling Debug APK (Gradle) ==="
 Push-Location $AndroidDir
 if ($IsWindows) {
     .\gradlew.bat assembleDebug
-} else {
+}
+else {
     ./gradlew assembleDebug
 }
 Pop-Location
@@ -146,7 +186,8 @@ if ($Run) {
         Write-Host "Waiting for device to connect..."
         adb wait-for-device
         Write-Host "Device connected!"
-    } else {
+    }
+    else {
         Write-Host "=== Device detected. Skipping emulator launch. ==="
     }
 

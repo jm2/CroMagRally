@@ -279,7 +279,7 @@ class WindowsProject(Project):
         self.build_args = ["-m"]  # multiprocessor compilation
 
     def get_artifact_name(self):
-        return f"{game_name}-{game_ver}-windows-x64.zip"
+        return f"{game_name}-{game_ver}-windows-{args.A}.zip"
 
     def prepare_dependencies(self):
         rmtree_if_exists(f"{libs_dir}/SDL3")
