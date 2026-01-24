@@ -115,7 +115,7 @@ void ToolBoxInit(void)
 {
 OSErr		iErr;
 
-#if _DEBUG											// in debug builds, boot with debug mode (you can turn it off with F8)
+#if _DEBUG && !defined(__TVOS__) && !defined(__IOS__)
 	gDebugMode = 1;
 #endif
 
