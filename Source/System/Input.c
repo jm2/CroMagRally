@@ -73,7 +73,7 @@ static SDL_Sensor *gAccelerometer = NULL;
 #define STICK_RADIUS_Y 0.16f   // Vertical radius (Increased for lower sensitivity)
 #define STICK_VISUAL_RADIUS_X 0.10f // Visual radius (Decoupled from input range)
 #define STICK_VISUAL_RADIUS_Y 0.10f // Visual radius (Decoupled from input range)
-#define STICK_CLAIM_RADIUS 0.20f  // Touch claim radius (Increased for better responsiveness)
+#define STICK_CLAIM_RADIUS 0.25f  // Touch claim radius (Increased for better responsiveness)
 
 // Button layout configuration
 #define BUTTON_CENTER_X 0.85f
@@ -99,6 +99,7 @@ typedef struct {
   SDL_FingerID id;
   float x, y;
   bool active;
+  int ghostFrames;
 } VirtualFinger;
 
 #define MAX_TOUCH_FINGERS 10
@@ -116,6 +117,10 @@ typedef struct {
 } VirtualInputState;
 static VirtualInputState gVirtualInput = {0};
 
+// Menu navigation auto-repeat state
+static uint32_t gMenuStickHoldStartTime = 0;
+static bool gMenuStickHeld = false;
+
 #pragma mark -
 /**********************/
 
@@ -124,8 +129,12 @@ static VirtualInputState gVirtualInput = {0};
 static void ResetTouchInput(void) {
   gJoystickFingerActive = false;
   gJoystickFingerID = 0;
+  gMenuStickHeld = false;
+  gMenuStickHoldStartTime = 0;
+
   for (int i = 0; i < MAX_TOUCH_FINGERS; i++) {
     gFingers[i].active = false;
+    gFingers[i].ghostFrames = 0;
   }
 }
 
@@ -188,9 +197,66 @@ static void InitMobileInput(void) {
 }
 #endif
 
+void ValidateActiveFingers(void) {
+    int num_touch_devices = 0;
+    SDL_TouchID *touch_devices = SDL_GetTouchDevices(&num_touch_devices);
+    
+    // For every active virtual finger...
+    for (int i = 0; i < MAX_TOUCH_FINGERS; i++) {
+        if (gFingers[i].active) {
+            bool found_in_sdl = false;
+            
+            // Check against all actual SDL fingers
+            if (touch_devices) {
+                for (int t = 0; t < num_touch_devices; t++) {
+                    int num_fingers = 0;
+                    SDL_Finger **fingers = SDL_GetTouchFingers(touch_devices[t], &num_fingers);
+                    
+                    if (fingers) {
+                        for (int f = 0; f < num_fingers; f++) {
+                            if (fingers[f]->id == gFingers[i].id) {
+                                found_in_sdl = true;
+                                break;
+                            }
+                        }
+                        SDL_free(fingers);
+                    }
+                    if (found_in_sdl) break;
+                }
+            }
+            
+            if (found_in_sdl) {
+                gFingers[i].ghostFrames = 0;
+            } else {
+                gFingers[i].ghostFrames++;
+            }
+
+            // If the finger claims to be active but SDL checks fail for enough frames, kill it.
+            // 10 frames @ 60hz = 166ms grace period for system gestures or transient loss.
+            if (gFingers[i].ghostFrames > 10) {
+                // SDL_Log("Ghost finger detected! ID %llu being stuck-killed", (unsigned long long)gFingers[i].id);
+                gFingers[i].active = false;
+                gFingers[i].ghostFrames = 0;
+                
+                // Also clear joystick ownership if this was the joystick finger
+                if (gJoystickFingerActive && gJoystickFingerID == gFingers[i].id) {
+                    gJoystickFingerActive = false;
+                    gJoystickFingerID = 0;
+                }
+            }
+        }
+    }
+    
+    if (touch_devices) {
+        SDL_free(touch_devices);
+    }
+}
+
 static void UpdateVirtualGamepad(void) {
   if (!gVirtualJoystick)
     return;
+    
+  ValidateActiveFingers();
 
   float targetStickX = 0, targetStickY = 0;
   bool btnA = false, btnB = false, btnX = false, btnY = false, btnStart = false;
@@ -339,16 +405,13 @@ static void UpdateVirtualGamepad(void) {
     // Auto-repeat for menu navigation (when not in game)
     // Simulates repeated presses when holding the stick up/down
     if (!gIsInGame) {
-      static uint32_t sStickHoldStartTime = 0;
-      static bool sStickHeld = false;
-      
       if (SDL_fabs(targetStickY) > 0.5f) {
         uint32_t now = SDL_GetTicks();
-        if (!sStickHeld) {
-          sStickHeld = true;
-          sStickHoldStartTime = now;
+        if (!gMenuStickHeld) {
+          gMenuStickHeld = true;
+          gMenuStickHoldStartTime = now;
         } else {
-          uint32_t heldTime = now - sStickHoldStartTime;
+          uint32_t heldTime = now - gMenuStickHoldStartTime;
           // Initial delay 400ms
           if (heldTime > 400) {
             uint32_t repeatTime = heldTime - 400;
@@ -362,7 +425,7 @@ static void UpdateVirtualGamepad(void) {
           }
         }
       } else {
-        sStickHeld = false;
+        gMenuStickHeld = false;
       }
     }
   } else {
@@ -370,9 +433,14 @@ static void UpdateVirtualGamepad(void) {
     gVirtualInput.stickY = 0;
     gVirtualInput.visualStickX = 0;
     gVirtualInput.visualStickY = 0;
+    
+    // Joystick inactive, so reset hold state
+    gMenuStickHeld = false;
+    gMenuStickHoldStartTime = 0;
   }
   
   gVirtualInput.btnA = btnA;
+
   gVirtualInput.btnB = btnB;
   gVirtualInput.btnX = btnX;
   gVirtualInput.btnY = btnY;
