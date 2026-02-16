@@ -117,9 +117,6 @@ typedef struct {
 } VirtualInputState;
 static VirtualInputState gVirtualInput = {0};
 
-// Menu navigation auto-repeat state
-static uint32_t gMenuStickHoldStartTime = 0;
-static bool gMenuStickHeld = false;
 
 #pragma mark -
 /**********************/
@@ -129,8 +126,6 @@ static bool gMenuStickHeld = false;
 static void ResetTouchInput(void) {
   gJoystickFingerActive = false;
   gJoystickFingerID = 0;
-  gMenuStickHeld = false;
-  gMenuStickHoldStartTime = 0;
 
   for (int i = 0; i < MAX_TOUCH_FINGERS; i++) {
     gFingers[i].active = false;
@@ -414,45 +409,14 @@ static void UpdateVirtualGamepad(void) {
     if (SDL_fabs(gVirtualInput.stickX) < 0.01f) gVirtualInput.stickX = 0;
     if (SDL_fabs(gVirtualInput.stickY) < 0.01f) gVirtualInput.stickY = 0;
     
-    // CAPTURE VISUAL STATE HERE BEFORE MENU REPEAT LOGIC
+    // CAPTURE VISUAL STATE HERE BEFORE INPUT INJECTION
     gVirtualInput.visualStickX = gVirtualInput.stickX;
     gVirtualInput.visualStickY = gVirtualInput.stickY;
-    
-    // Auto-repeat for menu navigation (when not in game)
-    // Simulates repeated presses when holding the stick up/down
-    if (!gIsInGame) {
-      if (SDL_fabs(targetStickY) > 0.5f) {
-        uint32_t now = SDL_GetTicks();
-        if (!gMenuStickHeld) {
-          gMenuStickHeld = true;
-          gMenuStickHoldStartTime = now;
-        } else {
-          uint32_t heldTime = now - gMenuStickHoldStartTime;
-          // Initial delay 400ms
-          if (heldTime > 400) {
-            uint32_t repeatTime = heldTime - 400;
-            // Accelerate: Slow repeat (250ms) for first 1s, then Fast (100ms)
-            uint32_t rate = (repeatTime > 1000) ? 100 : 250;
-            
-            // Create a 50ms "gap" (return to 0) to trigger a new press event
-            if ((repeatTime % rate) < 50) {
-              gVirtualInput.stickY = 0;
-            }
-          }
-        }
-      } else {
-        gMenuStickHeld = false;
-      }
-    }
   } else {
     gVirtualInput.stickX = 0;
     gVirtualInput.stickY = 0;
     gVirtualInput.visualStickX = 0;
     gVirtualInput.visualStickY = 0;
-    
-    // Joystick inactive, so reset hold state
-    gMenuStickHeld = false;
-    gMenuStickHoldStartTime = 0;
   }
   
   gVirtualInput.btnA = btnA;
@@ -587,6 +551,11 @@ static void UpdateGamepadSpecificInputNeeds(int gamepadNum) {
   }
 
   SDL_Gamepad *sdlGamepad = gamepad->sdlGamepad;
+  
+  // Ignore raw SDL events from the Virtual Joystick. 
+  // We use Direct Injection (below) to handle touch inputs.
+  // This ensures consistent behavior whether the Virtual Stick is in Slot 0 (Laptop) or Slot 1 (Mixed).
+  bool isVirtualDevice = (SDL_GetGamepadID(sdlGamepad) == gVirtualJoystickID);
 
   for (int needNum = 0; needNum < NUM_CONTROL_NEEDS; needNum++) {
     const InputBinding *kb = &gGamePrefs.bindings[needNum];
@@ -602,11 +571,15 @@ static void UpdateGamepadSpecificInputNeeds(int gamepadNum) {
       int type = pb->type;
 
       if (type == kInputTypeButton) {
-        if (0 != SDL_GetGamepadButton(sdlGamepad, pb->id)) {
-          actuation = 1;
+        // Read Physical/SDL Input (Skip if this is the Virtual Device)
+        if (!isVirtualDevice) {
+            if (0 != SDL_GetGamepadButton(sdlGamepad, pb->id)) {
+              actuation = 1;
+            }
         }
 
-        // Inject Virtual Gamepad Button
+        // Inject Virtual Input (Directly) -> Only into Player 1 (Slot 0)
+        // This allows Touch to control P1 even if the Virtual Device is pushed to Slot 1.
         if (gamepadNum == 0 && !gUserPrefersGamepad) {
           if ((pb->id == SDL_GAMEPAD_BUTTON_SOUTH && gVirtualInput.btnA) ||
               (pb->id == SDL_GAMEPAD_BUTTON_EAST && gVirtualInput.btnB) ||
@@ -617,16 +590,20 @@ static void UpdateGamepadSpecificInputNeeds(int gamepadNum) {
           }
         }
       } else if (type == kInputTypeAxisPlus || type == kInputTypeAxisMinus) {
-        float value;
-        int16_t axis = SDL_GetGamepadAxis(sdlGamepad, pb->id);
+        float value = 0;
+        
+        // Read Physical/SDL Input (Skip if this is the Virtual Device)
+        if (!isVirtualDevice) {
+            int16_t axis = SDL_GetGamepadAxis(sdlGamepad, pb->id);
 
-        // Normalize axis value to [0, 1]
-        if (type == kInputTypeAxisPlus)
-          value = axis * (1.0f / 32767.0f);
-        else
-          value = axis * (1.0f / -32768.0f);
+            // Normalize axis value to [0, 1]
+            if (type == kInputTypeAxisPlus)
+              value = axis * (1.0f / 32767.0f);
+            else
+              value = axis * (1.0f / -32768.0f);
+        }
 
-        // Inject Virtual Gamepad Axis
+        // Inject Virtual Gamepad Axis -> Only into Player 1 (Slot 0)
         if (gamepadNum == 0 && !gUserPrefersGamepad) {
           if (pb->id == SDL_GAMEPAD_AXIS_LEFTX) {
             float v = gVirtualInput.stickX;
@@ -706,14 +683,14 @@ void DoSDLMaintenance(void) {
       gUserPrefersGamepad = false; // Touch Reactivation
       
       int foundSlot = -1;
-      // 1. Search for existing finger with this ID
+      // Search for existing finger with this ID
       for (int i = 0; i < MAX_TOUCH_FINGERS; i++) {
          if (gFingers[i].active && gFingers[i].id == event.tfinger.fingerID) {
             foundSlot = i;
             break;
          }
       }
-      // 2. If not found, search for empty slot
+      // If not found, search for empty slot
       if (foundSlot == -1) {
          for (int i = 0; i < MAX_TOUCH_FINGERS; i++) {
             if (!gFingers[i].active) {

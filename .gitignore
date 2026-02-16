@@ -14,3 +14,4 @@ AndroidBuild/.gradle
 AndroidBuild/app/src/main/assets
 AndroidBuild/app/src/main/jniLibs
 Data/files.txt
+packaging/CroMagRally.exe.rc
