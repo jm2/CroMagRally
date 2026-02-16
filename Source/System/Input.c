@@ -150,6 +150,19 @@ static void InitTouchData(void) {
   }
 }
 
+static void DisableVirtualJoystick(void) {
+  if (gVirtualJoystickID > 0) {
+    if (gVirtualJoystick) {
+      SDL_CloseJoystick(gVirtualJoystick);
+      gVirtualJoystick = NULL;
+    }
+    SDL_DetachVirtualJoystick(gVirtualJoystickID);
+    gVirtualJoystickID = 0;
+    gTouchControlsActive = false;
+    ResetTouchInput();
+  }
+}
+
 // Create virtual joystick if not exists (Lazy Load)
 static void EnableVirtualJoystick(void) {
   if (gVirtualJoystickID) return;
@@ -171,6 +184,9 @@ static void EnableVirtualJoystick(void) {
     gVirtualJoystick = SDL_OpenJoystick(gVirtualJoystickID);
     SDL_Log("Virtual Gamepad added with ID %u", (uint32_t)gVirtualJoystickID);
     gTouchControlsActive = true; 
+    
+    // Immediately attempt to open/assign this joystick to a player slot
+    TryOpenGamepadFromJoystick(gVirtualJoystickID);
   } else {
     SDL_Log("Failed to add Virtual Gamepad: %s", SDL_GetError());
   }
@@ -775,6 +791,7 @@ void DoSDLMaintenance(void) {
       break;
 
     case SDL_EVENT_KEY_DOWN:
+      DisableVirtualJoystick();
       gUserPrefersGamepad = false;
       break;
 
@@ -783,8 +800,10 @@ void DoSDLMaintenance(void) {
       bool isVirtual = false;
       if (event.gdevice.which == gVirtualJoystickID)
         isVirtual = true;
-      if (!isVirtual)
+      if (!isVirtual) {
+        DisableVirtualJoystick();
         gUserPrefersGamepad = true;
+      }
       break;
     }
 
@@ -795,6 +814,7 @@ void DoSDLMaintenance(void) {
       
       if (!isVirtual &&
           SDL_abs(event.gaxis.value) > 3000) { // Deadzone check & ID check
+        DisableVirtualJoystick();
         gUserPrefersGamepad = true;
       }
       break;
@@ -1138,13 +1158,7 @@ static SDL_Gamepad *TryOpenGamepadFromJoystick(SDL_JoystickID joystickID) {
 
   // Slot Allocation Logic
   if (isVirtual) {
-    // Search backwards for a free slot
-    for (int i = MAX_LOCAL_PLAYERS - 1; i >= 0; i--) {
-      if (!gGamepads[i].open) {
-        gamepadSlot = i;
-        break;
-      }
-    }
+     gamepadSlot = FindFreeGamepadSlot();
   } else {
     // Physical Gamepad: Check for Virtual Hogging Slot 0
     bool hogging = false;
