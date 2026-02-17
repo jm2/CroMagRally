@@ -66,6 +66,7 @@ Boolean gStateStack_Normalize[STATE_STACK_SIZE];
 Boolean gStateStack_Texture2D[STATE_STACK_SIZE];
 Boolean gStateStack_Blend[STATE_STACK_SIZE];
 Boolean gStateStack_Fog[STATE_STACK_SIZE];
+Boolean gStateStack_AlphaTest[STATE_STACK_SIZE];
 GLboolean gStateStack_DepthMask[STATE_STACK_SIZE];
 GLint gStateStack_BlendDst[STATE_STACK_SIZE];
 GLint gStateStack_BlendSrc[STATE_STACK_SIZE];
@@ -1204,6 +1205,7 @@ void OGL_PushState(void) {
   gStateStack_Normalize[i] = glIsEnabled(GL_NORMALIZE);
   gStateStack_Texture2D[i] = glIsEnabled(GL_TEXTURE_2D);
   gStateStack_Fog[i] = glIsEnabled(GL_FOG);
+  gStateStack_AlphaTest[i] = glIsEnabled(GL_ALPHA_TEST);
   gStateStack_Blend[i] = glIsEnabled(GL_BLEND);
   gStateStack_ProjectionType[i] = gMyState_ProjectionType;
 
@@ -1267,6 +1269,11 @@ void OGL_PopState(void) {
     glEnable(GL_FOG);
   else
     glDisable(GL_FOG);
+
+  if (gStateStack_AlphaTest[i])
+    glEnable(GL_ALPHA_TEST);
+  else
+    glDisable(GL_ALPHA_TEST);
 
   glDepthMask(gStateStack_DepthMask[i]);
   glBlendFunc(gStateStack_BlendSrc[i], gStateStack_BlendDst[i]);
