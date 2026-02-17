@@ -216,7 +216,7 @@ if [ "$DO_RUN" = true ]; then
             adb -s $DEVICE_SERIAL install -r $ANDROID_DIR/app/build/outputs/apk/debug/app-debug.apk
             
             echo "    Launching Activity..."
-            adb -s $DEVICE_SERIAL shell am start -n io.jor.cromagrally/io.jor.cromagrally.SDLActivity
+            adb -s $DEVICE_SERIAL shell am start -n io.jor.cromagrally/org.libsdl.app.SDLActivity
             
             echo "--> Done with $DEVICE_SERIAL"
         fi

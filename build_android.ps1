@@ -50,7 +50,7 @@ $SdlUrl = "https://libsdl.org/release/$SdlTar"
 $SdlSha256 = "13388fabb361de768ecdf2b65e52bb27d1054cae6ccb6942ba926e378e00db03"
 
 # Function to check and download dependencies
-function Prepare-Dependencies {
+function Install-Dependencies {
     if (-not (Test-Path -Path $SdlDir)) {
         Write-Host "=== SDL3 not found. Downloading... ==="
         New-Item -ItemType Directory -Force -Path "extern" | Out-Null
@@ -77,7 +77,7 @@ function Prepare-Dependencies {
     }
 }
 
-Prepare-Dependencies
+Install-Dependencies
 
 # Function to build and copy for a specific ABI
 function Build-Abi {
@@ -204,7 +204,7 @@ if ($Run) {
             
             Write-Host "    Launching Activity..."
             # Note: Package/Activity name assumes standard. If var in bash was hardcoded, here too.
-            adb -s $Serial shell am start -n io.jor.cromagrally/io.jor.cromagrally.SDLActivity
+            adb -s $Serial shell am start -n io.jor.cromagrally/org.libsdl.app.SDLActivity
             
             Write-Host "--> Done with $Serial"
         }

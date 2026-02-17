@@ -1,4 +1,4 @@
-package io.jor.cromagrally;
+package org.libsdl.app;
 
 import android.content.*;
 import android.os.Build;
