@@ -67,6 +67,8 @@ uint32_t			gClientSendCounter[MAX_PLAYERS];
 uint32_t			gHostSendCounter;
 int				gTimeoutCounter;
 
+static void ResetNetGameTransientState(void);		// defined below, near the host input queues
+
 NetHostControlInfoMessageType	gHostOutMess;
 NetClientControlInfoMessageType	gClientOutMess;
 
@@ -232,6 +234,7 @@ OSErr	iErr;
 	gSimulationPaused	= false;
 	gHostSendCounter	= 0;
 	memset(gClientSendCounter, 0, sizeof(gClientSendCounter));
+	ResetNetGameTransientState();			// clear host input queues, redundancy history, stall-strike counter
 }
 
 
@@ -486,6 +489,7 @@ bool UpdateNetSequence(void)
 //
 Boolean SetupNetworkHosting(void)
 {
+	ResetNetGameTransientState();			// start from a clean slate (belt-and-suspenders vs EndNetworkGame)
 	gNetSequenceState = kNetSequence_HostOffline;
 	gTargetFPS = OGL_GetMonitorRefreshRate();
 	gUseRedundancy = (Net_GetConnectionHint() == 1);
@@ -553,6 +557,8 @@ failure:
 Boolean SetupNetworkJoin(void)
 {
 OSStatus			status = noErr;
+
+	ResetNetGameTransientState();			// start from a clean slate
 
 	gNetSequenceState = kNetSequence_ClientOffline;
 
@@ -974,6 +980,9 @@ Boolean								gotIt = false;
 		}
 		else
 		{
+			SDL_PumpEvents();			// keep the OS/window responsive while we block for the host packet
+			SDL_Delay(1);				// yield a slice instead of pegging a core in a zero-sleep spin
+
 				/* SEE IF WE ARE NOT GETTING THE PACKET */
 				//
 				// If this happens, then it is possible that Net Sprocket lost a packet.  There is no way to know who's packet got lost
@@ -1056,11 +1065,14 @@ Boolean Client_CheckIfMorePacketsWaiting(void)
 // the next frame.
 //
 
+// Client redundancy history. File-scope (not function-static) so ResetNetGameTransientState
+// can clear it between games — otherwise stale history from a prior game leaks into the next.
+static uint32_t					historyControlBits[8];
+static OGLVector2D				historyAnalog[8];
+
 void ClientSend_ControlInfoToHost(void)
 {
 OSStatus						status;
-static uint32_t					historyControlBits[8];
-static OGLVector2D				historyAnalog[8];
 
 	GAME_ASSERT(gIsNetworkClient);
 
@@ -1159,6 +1171,19 @@ static void Queue_Pop(int playerNum)
     {
         q->head = (q->head + 1) % NET_QUEUE_SIZE;
     }
+}
+
+// Clear all per-process net state that must NOT survive from one net game to the next.
+// Called from both the setup paths and EndNetworkGame so stale state can never wedge a
+// later game (the host input queues, the redundancy history, and the stall-strike counter
+// all used to persist, which is why a second hosted game in the same process would hang
+// then fatally error out).
+static void ResetNetGameTransientState(void)
+{
+	memset(sHostInputQueues, 0, sizeof(sHostInputQueues));
+	memset(historyControlBits, 0, sizeof(historyControlBits));
+	memset(historyAnalog, 0, sizeof(historyAnalog));
+	gTimeoutCounter = 0;
 }
 
 // Helper to Apply msg to gPlayerInfo (Shared logic)
@@ -1280,6 +1305,11 @@ Boolean								abort = false;
 			}
 			NSpMessage_Release(gNetGame, inMess);			// dispose of message
 		}
+		else
+		{
+			SDL_PumpEvents();			// keep the OS/window responsive while we block for client input
+			SDL_Delay(1);				// yield a slice instead of pegging a core in a zero-sleep spin
+		}
 
 		if ((TickCount() - tick) > (DATA_TIMEOUT*60))		// see if we've been waiting longer than n seconds
 		{
@@ -1292,6 +1322,12 @@ Boolean								abort = false;
 			tick = TickCount();														// reset tick
 		}
 	}
+
+	// We got a full frame of input from everyone (the loop only exits cleanly when all
+	// players are synced). Clear the stall-strike counter so the 4-strike fatal requires
+	// 4 *consecutive* stalled frames, not 4 cumulative stalls over the whole session.
+	if (!abort)
+		gTimeoutCounter = 0;
 }
 
 

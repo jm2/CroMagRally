@@ -572,6 +572,11 @@ static sockfd_t CreateTCPSocket(bool bindIt)
 
 	if (bindIt)
 	{
+		// Allow re-hosting on the same port without waiting out TIME-WAIT or a leaked socket
+		// from a previous game (otherwise a second host attempt fails with EADDRINUSE).
+		int reuse = 1;
+		setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (void *)&reuse, sizeof(reuse));
+
 		int bindRC = bind(sockfd, goodRes->ai_addr, goodRes->ai_addrlen);
 		if (0 != bindRC)
 		{

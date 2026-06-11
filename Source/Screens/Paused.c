@@ -153,13 +153,18 @@ static void UpdatePausedMenuCallback(void)
 		if (gIsNetworkClient)
 		{
 			ClientReceive_ControlInfoFromHost();
-			// TODO: If net game died, bail here
-			ClientSend_ControlInfoToHost();
+			// The receive can tear the net game down (e.g. the host left -> EndNetworkGame
+			// clears gIsNetworkClient). Don't send into a dead session: ClientSend asserts
+			// gIsNetworkClient and would crash both this client's process.
+			if (gIsNetworkClient && gNetGameInProgress)
+				ClientSend_ControlInfoToHost();
 		}
-		else
+		else if (gIsNetworkHost)
 		{
 			HostSend_ControlInfoToClients();
-			HostReceive_ControlInfoFromClients();
+			// A send failure can call NetGameFatalError -> EndNetworkGame (clears gIsNetworkHost).
+			if (gIsNetworkHost && gNetGameInProgress)
+				HostReceive_ControlInfoFromClients();
 		}
 	}
 }
