@@ -15,3 +15,6 @@ AndroidBuild/app/src/main/assets
 AndroidBuild/app/src/main/jniLibs
 Data/files.txt
 packaging/CroMagRally.exe.rc
+
+# AI review working artifacts (curated docs live in docs/)
+cromag-review/
