@@ -90,7 +90,7 @@ static void UpdateFlaming(short p);
 #define	DELTA_SUBDIV			40.0f				// smaller == more subdivisions per frame
 
 
-#define	WATER_FRICTION			1000.0f
+#define	WATER_FRICTION			1600.0f			// matches original 1999 value; low-accel cars are kept moving on water by the launch boost in DoPlayerControl_Car instead of by lowering this
 
 
 #define	ENGINE_VOLUME			0.4f
@@ -2986,6 +2986,22 @@ float			fps = gFramesPerSecondFrac;
 	else
 	if (!gPlayerInfo[playerNum].onWater)
 		thrust = 0;												// no thrust unless we're on water
+	else
+	{
+				/* ON WATER: apply the same low-speed launch boost we give on the ground.		*/
+				/* The original 1999 code only boosted while STATUS_BIT_ONGROUND was set, which	*/
+				/* water never sets, so the lowest-acceleration car had net thrust below water	*/
+				/* friction and stayed permanently stuck. Boosting here unsticks it without		*/
+				/* changing WATER_FRICTION or normal on-water handling for any other car.		*/
+
+		if ((speed < 400.0f) && (thrust != 0.0f))				// give a little boost if going too slow
+		{
+			if (thrust < 0.0f)
+				thrust = -5000;
+			else
+				thrust = 5000;
+		}
+	}
 
 
 	gPlayerInfo[playerNum].currentThrust = thrust;				// remember the thrust

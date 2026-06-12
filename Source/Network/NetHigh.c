@@ -67,6 +67,8 @@ uint32_t			gClientSendCounter[MAX_PLAYERS];
 uint32_t			gHostSendCounter;
 int				gTimeoutCounter;
 
+static void ResetNetGameTransientState(void);		// defined below, near the host input queues
+
 NetHostControlInfoMessageType	gHostOutMess;
 NetClientControlInfoMessageType	gClientOutMess;
 
@@ -102,13 +104,24 @@ static void ClearPlayerSyncMask(void)
 
 }
 
+// Bounds check for a player index pulled off the wire, before it is used to index
+// gPlayerInfo[] / sHostInputQueues[] / gClientSendCounter[] (all sized MAX_PLAYERS).
+static inline Boolean IsValidPlayerNum(int n)
+{
+	return (n >= 0) && (n < MAX_PLAYERS);
+}
+
 static void MarkPlayerSynced(NSpPlayerID playerID)
 {
+	if (playerID < 0 || playerID >= 32)				// 1 << playerID is undefined outside this range
+		return;
 	gPlayerSyncMask |= 1 << playerID;
 }
 
 static Boolean PlayerIsSynced(NSpPlayerID playerID)
 {
+	if (playerID < 0 || playerID >= 32)
+		return false;
 	return (gPlayerSyncMask & (1 << playerID)) != 0;
 }
 
@@ -221,6 +234,7 @@ OSErr	iErr;
 	gSimulationPaused	= false;
 	gHostSendCounter	= 0;
 	memset(gClientSendCounter, 0, sizeof(gClientSendCounter));
+	ResetNetGameTransientState();			// clear host input queues, redundancy history, stall-strike counter
 }
 
 
@@ -373,7 +387,11 @@ bool UpdateNetSequence(void)
 					{
 						NetPlayerCharTypeMessage *mess = (NetPlayerCharTypeMessage *) message;
 
-						// TODO: Check player num
+						if (message->messageLen < sizeof(NetPlayerCharTypeMessage)		// reject a short message cast up to this struct
+							|| !IsValidPlayerNum(mess->playerNum))						// reject an out-of-range player index from the wire
+						{
+							break;
+						}
 
 						gPlayerInfo[mess->playerNum].vehicleType = mess->vehicleType;	// save this player's type
 						gPlayerInfo[mess->playerNum].sex = mess->sex;					// save this player's sex
@@ -471,6 +489,7 @@ bool UpdateNetSequence(void)
 //
 Boolean SetupNetworkHosting(void)
 {
+	ResetNetGameTransientState();			// start from a clean slate (belt-and-suspenders vs EndNetworkGame)
 	gNetSequenceState = kNetSequence_HostOffline;
 	gTargetFPS = OGL_GetMonitorRefreshRate();
 	gUseRedundancy = (Net_GetConnectionHint() == 1);
@@ -538,6 +557,8 @@ failure:
 Boolean SetupNetworkJoin(void)
 {
 OSStatus			status = noErr;
+
+	ResetNetGameTransientState();			// start from a clean slate
 
 	gNetSequenceState = kNetSequence_ClientOffline;
 
@@ -638,11 +659,22 @@ NetConfigMessage		message;
 
 void HandleGameConfigMessage(NetConfigMessage* inMessage)
 {
+	if (inMessage->h.messageLen < sizeof(NetConfigMessage))		// reject a short/truncated config message
+		return;
+
 	gGameMode 			= inMessage->gameMode;
 	gTheAge 			= inMessage->age;
 	gTrackNum 			= inMessage->trackNum;
 	gNumRealPlayers 	= inMessage->numPlayers;
 	gMyNetworkPlayerNum = inMessage->playerNum;
+
+	// Defensive: the host supplies these, but a corrupt/hostile value must not drive OOB
+	// array access (the loop below and later gPlayerInfo[gMyNetworkPlayerNum] indexing).
+	if (gNumRealPlayers < 1 || gNumRealPlayers > MAX_PLAYERS)
+		gNumRealPlayers = MAX_PLAYERS;
+	if (!IsValidPlayerNum(gMyNetworkPlayerNum))
+		gMyNetworkPlayerNum = 0;
+
 	gDifficulty			= inMessage->difficulty;
 	gTagDuration		= inMessage->tagDuration;
 	gTargetFPS			= inMessage->targetFPS;
@@ -948,6 +980,9 @@ Boolean								gotIt = false;
 		}
 		else
 		{
+			SDL_PumpEvents();			// keep the OS/window responsive while we block for the host packet
+			SDL_Delay(1);				// yield a slice instead of pegging a core in a zero-sleep spin
+
 				/* SEE IF WE ARE NOT GETTING THE PACKET */
 				//
 				// If this happens, then it is possible that Net Sprocket lost a packet.  There is no way to know who's packet got lost
@@ -1030,11 +1065,14 @@ Boolean Client_CheckIfMorePacketsWaiting(void)
 // the next frame.
 //
 
+// Client redundancy history. File-scope (not function-static) so ResetNetGameTransientState
+// can clear it between games — otherwise stale history from a prior game leaks into the next.
+static uint32_t					historyControlBits[8];
+static OGLVector2D				historyAnalog[8];
+
 void ClientSend_ControlInfoToHost(void)
 {
 OSStatus						status;
-static uint32_t					historyControlBits[8];
-static OGLVector2D				historyAnalog[8];
 
 	GAME_ASSERT(gIsNetworkClient);
 
@@ -1106,6 +1144,7 @@ static PacketQueue sHostInputQueues[MAX_PLAYERS];
 
 static void Queue_Push(int playerNum, NetClientControlInfoMessageType* msg)
 {
+    if (!IsValidPlayerNum(playerNum)) return;		// never index sHostInputQueues[] with a wire-supplied value out of range
     PacketQueue* q = &sHostInputQueues[playerNum];
     // Check overflow
     int next = (q->tail + 1) % NET_QUEUE_SIZE;
@@ -1118,6 +1157,7 @@ static void Queue_Push(int playerNum, NetClientControlInfoMessageType* msg)
 
 static NetClientControlInfoMessageType* Queue_Peek(int playerNum)
 {
+    if (!IsValidPlayerNum(playerNum)) return NULL;
     PacketQueue* q = &sHostInputQueues[playerNum];
     if (q->head == q->tail) return NULL;
     return &q->msgs[q->head];
@@ -1125,6 +1165,7 @@ static NetClientControlInfoMessageType* Queue_Peek(int playerNum)
 
 static void Queue_Pop(int playerNum)
 {
+    if (!IsValidPlayerNum(playerNum)) return;
     PacketQueue* q = &sHostInputQueues[playerNum];
     if (q->head != q->tail)
     {
@@ -1132,10 +1173,24 @@ static void Queue_Pop(int playerNum)
     }
 }
 
+// Clear all per-process net state that must NOT survive from one net game to the next.
+// Called from both the setup paths and EndNetworkGame so stale state can never wedge a
+// later game (the host input queues, the redundancy history, and the stall-strike counter
+// all used to persist, which is why a second hosted game in the same process would hang
+// then fatally error out).
+static void ResetNetGameTransientState(void)
+{
+	memset(sHostInputQueues, 0, sizeof(sHostInputQueues));
+	memset(historyControlBits, 0, sizeof(historyControlBits));
+	memset(historyAnalog, 0, sizeof(historyAnalog));
+	gTimeoutCounter = 0;
+}
+
 // Helper to Apply msg to gPlayerInfo (Shared logic)
 static void ApplyClientMessage(NetClientControlInfoMessageType* mess)
 {
     int i = mess->playerNum;
+    if (!IsValidPlayerNum(i)) return;
     gPlayerInfo[i].controlBits	= mess->controlBits;
     gPlayerInfo[i].controlBits_New = mess->controlBitsNew;
     gPlayerInfo[i].analogSteering = mess->analogSteering;
@@ -1146,6 +1201,7 @@ static void ApplyClientMessage(NetClientControlInfoMessageType* mess)
 static Boolean RecoverFromFuture(NetClientControlInfoMessageType* future, int expectedFrame)
 {
     int i = future->playerNum;
+    if (!IsValidPlayerNum(i)) return false;
     if (!gUseRedundancy) return false;
     
     int gap = future->frameCounter - expectedFrame;
@@ -1227,15 +1283,16 @@ Boolean								abort = false;
 				case kNetClientControlInfoMessage:
 				{
 					NetClientControlInfoMessageType* cMsg = (NetClientControlInfoMessageType*)inMess;
-					int i = cMsg->playerNum;
-                    
-                    // Route to Queue (or process directly if empty and matching?)
-                    // Simpler: Always Push to Queue, then let Step 1 handle it?
-                    // Or Optimization: If Queue Empty & Match, Process. Else Push.
-                    // Let's Push and let Step 1 handle it immediately (via "continue" or loop structure?).
-                    // Since we are inside the `while(!Synced)` loop, Step 1 will run next iteration.
-                    // This adds 1 loop iteration latency (0 time). Cleanest logic.
-                    Queue_Push(i, cMsg);
+
+					// Drop a malformed or out-of-range client packet before it touches any array.
+					if (inMess->messageLen < sizeof(NetClientControlInfoMessageType)
+						|| !IsValidPlayerNum(cMsg->playerNum))
+					{
+						break;
+					}
+
+					// Push to the per-player queue; Step 1 (above) consumes it next loop iteration.
+					Queue_Push(cMsg->playerNum, cMsg);
 					break;
 				}
 
@@ -1247,6 +1304,11 @@ Boolean								abort = false;
 					break;
 			}
 			NSpMessage_Release(gNetGame, inMess);			// dispose of message
+		}
+		else
+		{
+			SDL_PumpEvents();			// keep the OS/window responsive while we block for client input
+			SDL_Delay(1);				// yield a slice instead of pegging a core in a zero-sleep spin
 		}
 
 		if ((TickCount() - tick) > (DATA_TIMEOUT*60))		// see if we've been waiting longer than n seconds
@@ -1260,6 +1322,12 @@ Boolean								abort = false;
 			tick = TickCount();														// reset tick
 		}
 	}
+
+	// We got a full frame of input from everyone (the loop only exits cleanly when all
+	// players are synced). Clear the stall-strike counter so the 4-strike fatal requires
+	// 4 *consecutive* stalled frames, not 4 cumulative stalls over the whole session.
+	if (!abort)
+		gTimeoutCounter = 0;
 }
 
 
@@ -1424,7 +1492,8 @@ Boolean HandleOtherNetMessage(NSpMessageHeader	*message)
 					/* AN ERROR MESSAGE */
 
 		case	kNSpError:
-				DoFatalAlert("HandleOtherNetMessage: kNSpError");
+				printf("HandleOtherNetMessage: kNSpError (ignored)\n");
+				break;
 
 
 					/* A PLAYER UNEXPECTEDLY HAS LEFT THE GAME */
@@ -1465,38 +1534,24 @@ Boolean HandleOtherNetMessage(NSpMessageHeader	*message)
 		case	kNetSyncMessage:
 				break;
 
+				/* UNEXPECTED INTERNAL MESSAGE TYPES                                          */
+				/* A peer, or a relayed kNSpAllPlayers message, can deliver any of these in   */
+				/* game. Log and ignore rather than handing a remote peer a DoFatalAlert that  */
+				/* would crash the host and every client.                                      */
+
 		case	kNSpJoinRequest:
-				DoFatalAlert("HandleOtherNetMessage: kNSpJoinRequest");
-
 		case	kNSpJoinApproved:
-				DoFatalAlert("HandleOtherNetMessage: kNSpJoinApproved");
-
 		case	kNSpJoinDenied:
-				DoFatalAlert("HandleOtherNetMessage: kNSpJoinDenied");
-
 		case	kNSpPlayerJoined:
-				DoFatalAlert("HandleOtherNetMessage: kNSpPlayerJoined");
-
 		case	kNSpHostChanged:
-				DoFatalAlert("HandleOtherNetMessage: kNSpHostChanged");
-
 		case	kNSpGroupCreated:
-				DoFatalAlert("HandleOtherNetMessage: kNSpGroupCreated");
-
 		case	kNSpGroupDeleted:
-				DoFatalAlert("HandleOtherNetMessage: kNSpGroupDeleted");
-
 		case	kNSpPlayerAddedToGroup:
-				DoFatalAlert("HandleOtherNetMessage: kNSpPlayerAddedToGroup");
-
 		case	kNSpPlayerRemovedFromGroup:
-				DoFatalAlert("HandleOtherNetMessage: kNSpPlayerAddedToGroup");
-
 		case	kNSpPlayerTypeChanged:
-				DoFatalAlert("HandleOtherNetMessage: kNSpPlayerAddedToGroup");
-
 		default:
-				DoFatalAlert("HandleOtherNetMessage: unknown");
+				printf("HandleOtherNetMessage: unexpected message '%s' (ignored)\n", NSp4CCString(message->what));
+				break;
 	}
 
 	return(gGameOver);
@@ -1519,7 +1574,11 @@ NSpPlayerID	playerID = mess->playerID;
 
 	if (i < 0)
 	{
-		DoFatalAlert("PlayerUnexpectedlyLeavesGame: cannot find matching player id#");
+		// A leave for an unknown / already-removed player id: e.g. a client that dropped during
+		// the lobby before ids were assigned, or a duplicate leave. Ignore it rather than taking
+		// the whole session down with a fatal alert.
+		printf("PlayerUnexpectedlyLeavesGame: no matching player id #%d; ignoring.\n", (int) playerID);
+		return;
 	}
 
 

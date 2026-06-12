@@ -1,6 +1,12 @@
 name: Full Compile Check
 
-on: [workflow_dispatch]
+# Run automatically on pull requests and pushes to master so compile breakage is caught
+# in CI (Linux GCC/Clang, Windows VS2022, macOS), plus manual dispatch for ad-hoc checks.
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [master]
 
 jobs:
   full-compile-check:

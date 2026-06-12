@@ -469,7 +469,7 @@ NSpPlayerID NSpGame_AcceptNewClient(NSpGameReference gameRef)
 	ApplyTCPSocketOptions(newSocket);
 
 	// Find vacant player slot
-	for (int i = 0; i < MAX_PLAYERS; i++)
+	for (int i = 0; i < MAX_CLIENTS; i++)		// players[] is sized MAX_CLIENTS, not MAX_PLAYERS — iterating to MAX_PLAYERS read/wrote past the array
 	{
 		if (game->players[i].state == kNSpPlayerState_Offline)
 		{
@@ -572,6 +572,11 @@ static sockfd_t CreateTCPSocket(bool bindIt)
 
 	if (bindIt)
 	{
+		// Allow re-hosting on the same port without waiting out TIME-WAIT or a leaked socket
+		// from a previous game (otherwise a second host attempt fails with EADDRINUSE).
+		int reuse = 1;
+		setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (void *)&reuse, sizeof(reuse));
+
 		int bindRC = bind(sockfd, goodRes->ai_addr, goodRes->ai_addrlen);
 		if (0 != bindRC)
 		{
@@ -775,6 +780,33 @@ bye:
 	return outMessage;
 }
 
+// The host only relays application (game) broadcasts to all players. Internal NSp control
+// messages are point-to-point; forwarding one would let a malicious/buggy client deliver e.g.
+// kNSpError or kNSpJoinDenied to every peer and trip a fatal handler. Never relay those.
+static bool IsRelayableBroadcast(int32_t what)
+{
+	switch (what)
+	{
+		case kNSpError:
+		case kNSpUndefinedMessage:
+		case kNSpJoinRequest:
+		case kNSpJoinApproved:
+		case kNSpJoinDenied:
+		case kNSpPlayerJoined:
+		case kNSpPlayerLeft:
+		case kNSpHostChanged:
+		case kNSpGameTerminated:
+		case kNSpGroupCreated:
+		case kNSpGroupDeleted:
+		case kNSpPlayerAddedToGroup:
+		case kNSpPlayerRemovedFromGroup:
+		case kNSpPlayerTypeChanged:
+			return false;		// internal/reserved type — never relay
+		default:
+			return true;		// application/game message
+	}
+}
+
 static NSpMessageHeader* NSpMessage_GetAsHost(NSpGame* game)
 {
 	NSpMessageHeader* message = NULL;
@@ -823,8 +855,8 @@ static NSpMessageHeader* NSpMessage_GetAsHost(NSpGame* game)
 			message->from = player->id;
 			GAME_ASSERT(NSpGame_IsValidPlayerID(game, message->from));
 
-			// Forward broadcast messages
-			if (message->to == kNSpAllPlayers)
+			// Forward broadcast messages (game messages only — never internal control types)
+			if (message->to == kNSpAllPlayers && IsRelayableBroadcast(message->what))
 			{
 				// TODO: if we ever do UDP, we'll need to decide what to do with the flags below
 				NSpMessage_Send(game, message, kNSpSendFlag_Registered);
@@ -869,7 +901,11 @@ static NSpMessageHeader* NSpMessage_GetAsClient(NSpGame* game)
 			game->myID = message->to;		// that's our ID
 
 			NSpPlayer* newPlayer = NSpGame_GetPlayerFromID(game, game->myID);
-			GAME_ASSERT(newPlayer);
+			if (!newPlayer)					// host supplied an out-of-range id: ignore rather than assert-crash
+			{
+				printf("kNSpJoinApproved: invalid id %d from host; ignoring.\n", (int) game->myID);
+				break;
+			}
 
 			newPlayer->id			= game->myID;
 			newPlayer->state		= kNSpPlayerState_Me;
@@ -883,8 +919,15 @@ static NSpMessageHeader* NSpMessage_GetAsClient(NSpGame* game)
 		{
 			NSpPlayerJoinedMessage* joinedMessage = (NSpPlayerJoinedMessage*) message;
 
+			if (message->messageLen < sizeof(NSpPlayerJoinedMessage))	// a short message would over-read playerInfo / name
+				break;
+
 			NSpPlayer* newPlayer = NSpGame_GetPlayerFromID(game, joinedMessage->playerInfo.id);
-			GAME_ASSERT(newPlayer);
+			if (!newPlayer)
+			{
+				printf("kNSpPlayerJoined: invalid id %d; ignoring.\n", (int) joinedMessage->playerInfo.id);
+				break;
+			}
 
 			newPlayer->id			= joinedMessage->playerInfo.id;
 			newPlayer->state		= kNSpPlayerState_ConnectedPeer;
@@ -897,6 +940,9 @@ static NSpMessageHeader* NSpMessage_GetAsClient(NSpGame* game)
 		case kNSpPlayerLeft:
 		{
 			NSpPlayerLeftMessage* leftMessage = (NSpPlayerLeftMessage*) message;
+
+			if (message->messageLen < sizeof(NSpPlayerLeftMessage))
+				break;
 
 			NSpPlayer* deadPlayer = NSpGame_GetPlayerFromID(game, leftMessage->playerID);
 			if (deadPlayer)
@@ -1213,7 +1259,15 @@ int NSpSearch_Tick(NSpSearchReference searchRef)
 	}
 	else
 	{
-		// TODO: Check payload!!
+		// Validate the advertisement payload: only register a host that actually sent our lobby
+		// magic string (must match the advertiser in NSpGame_AdvertiseTick). Without this, any
+		// stray UDP datagram on the port registered a bogus "game" the client would try to join.
+		static const char kLobbyMagic[] = "JOIN MY CMR GAME";
+		if (receivedBytes < (ssize_t) (sizeof(kLobbyMagic) - 1) ||
+			memcmp(message, kLobbyMagic, sizeof(kLobbyMagic) - 1) != 0)
+		{
+			return kNSpRC_OK;		// not one of our advertisements — ignore it
+		}
 
 		if (search->numGamesFound < MAX_LOBBIES &&
 			!NSpSearch_IsHostKnown(search, &remoteAddr))

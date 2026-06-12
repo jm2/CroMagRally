@@ -398,7 +398,7 @@ void SetPlayerParmsFromTileAttributes(short playerNum, uint16_t flags)
 		gPlayerInfo[playerNum].groundTraction = .05f;
 		gPlayerInfo[playerNum].groundFriction = .05f;
 		gPlayerInfo[playerNum].groundSteering = .2f;
-		gPlayerInfo[playerNum].groundAcceleration = .5;
+		gPlayerInfo[playerNum].groundAcceleration = .3;			// original 1999 value (fork had raised this to .5, over-buffing ice accel for every car; not needed since the on-ground launch boost already unsticks low-accel cars on ice)
 		gPlayerInfo[playerNum].noSkids			= true;
 		gPlayerInfo[playerNum].dragDebrisTexture = -1;
 		gPlayerInfo[playerNum].alwaysDoDrag 	= false;

@@ -1,6 +1,22 @@
 name: Make Release Builds
 
-on: [workflow_dispatch]
+# Build every shippable platform for a release.
+#  - release:published  -> builds run automatically when you publish a GitHub Release
+#                          (artifacts are uploaded to the run; download + attach to the release).
+#  - workflow_dispatch  -> run manually from the Actions tab for test/smoke builds.
+# Optional: to drive builds straight off a tag push instead of a published release,
+# uncomment the `push:` block below. Leaving both enabled can double-build if you
+# publish a release from the same tag, so pick one trigger model.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+  # push:
+  #   tags:
+  #     - 'v*'
+
+permissions:
+  contents: read
 
 jobs:
   build-linux-appimage:
@@ -57,6 +73,27 @@ jobs:
           path: dist/
           compression-level: 0
 
+  build-windows-arm64:
+    # Near-exact clone of build-windows; only runs-on changes (windows-2022 -> windows-11-arm)
+    # and `-A ARM64` is passed explicitly so the artifact name + VS platform are deterministic.
+    runs-on: windows-11-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with: {submodules: 'recursive'}
+      - run: |
+          $ARTIFACT_NAME = python3 build.py --print-artifact-name -A ARM64
+          echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $env:GITHUB_ENV
+      - run: python3 build.py --dependencies
+      - run: python3 build.py --configure -G 'Visual Studio 17 2022' -A ARM64
+      - run: python3 build.py --build
+      - run: python3 build.py --package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{env.ARTIFACT_NAME}}
+          path: dist/
+          compression-level: 0
+
   build-macos:
     runs-on: macos-latest  # as of January 2025, this still supports the macOS 10.13 deployment target
     timeout-minutes: 15
@@ -85,4 +122,178 @@ jobs:
         with:
           name: ${{env.ARTIFACT_NAME}}
           path: dist/
+          compression-level: 0
+
+  build-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30   # SDL3 is compiled from source for TWO ABIs (x86_64 + arm64-v8a)
+    env:
+      # Surfaced at job level so the signing step's `if:` can detect whether a
+      # keystore secret is configured (step-level env is not visible to its own if:).
+      ANDROID_SIGNING_KEY: ${{ secrets.ANDROID_SIGNING_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with: {submodules: 'recursive'}   # extern/Pomme + extern/gl4es are required by CMakeLists
+
+      - name: Set up JDK 17   # AGP 8.7.3 / Gradle 9.2.1 require JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK platform, build-tools and NDK
+        run: |
+          sdkmanager --install "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      - name: Drop committed local.properties
+        # It is checked in pointing at /opt/android-sdk which does not exist on the runner;
+        # removing it makes AGP fall back to $ANDROID_SDK_ROOT set by setup-android.
+        run: rm -f AndroidBuild/local.properties
+
+      - name: Build native libs + assets (CMake/NDK, Release)
+        # build_android.sh: fetches & sha256-verifies SDL3 3.2.8, builds libCroMagRally.so +
+        # libSDL3.so for x86_64 and arm64-v8a (CMAKE_BUILD_TYPE=Release, android-24), copies
+        # them into AndroidBuild/.../jniLibs, copies Data/ into assets, then assembleDebug.
+        run: ./build_android.sh
+
+      - name: Assemble release APK (unsigned)
+        run: ./gradlew assembleRelease
+        working-directory: AndroidBuild
+
+      - name: Sign release APK
+        id: sign_apk
+        # Only runs when a keystore secret is configured; otherwise the job still
+        # succeeds and uploads the UNSIGNED app-release-unsigned.apk.
+        if: ${{ env.ANDROID_SIGNING_KEY != '' }}
+        uses: r0adkll/sign-android-release@v1
+        with:
+          releaseDirectory: AndroidBuild/app/build/outputs/apk/release
+          signingKeyBase64: ${{ secrets.ANDROID_SIGNING_KEY }}
+          alias: ${{ secrets.ANDROID_KEY_ALIAS }}
+          keyStorePassword: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          keyPassword: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        env:
+          BUILD_TOOLS_VERSION: "35.0.0"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CroMagRally-3.0.2-android
+          path: AndroidBuild/app/build/outputs/apk/release/*.apk
+          compression-level: 0
+
+  build-ios:
+    runs-on: macos-latest          # macOS 14/15 image: Xcode 15/16 + iOS SDK + CMake preinstalled
+    timeout-minutes: 30            # SDL3-static-from-source + game via Xcode can take ~15-25 min
+    steps:
+      - uses: actions/checkout@v4
+        with: {submodules: 'recursive'}   # extern/Pomme + extern/gl4es (gl4es required for iOS GL ES)
+
+      - uses: maxim-lobanov/setup-xcode@v1   # optional: pin Xcode (README wants 15+)
+        with:
+          xcode-version: latest-stable
+
+      - name: Extract game version
+        run: echo "GAME_VERSION=$(grep -m1 'set(GAME_VERSION' CMakeLists.txt | sed -E 's/.*\"([^\"]+)\".*/\1/')" >> "$GITHUB_ENV"
+
+      # build_ios.sh clones SDL3 into extern/SDL when missing; it clones main (unpinned).
+      # Pin a release tag for reproducibility, matching the desktop build's SDL 3.2.8.
+      - name: Fetch SDL3 source
+        run: git clone --depth 1 --branch release-3.2.8 https://github.com/libsdl-org/SDL.git extern/SDL
+
+      # Mirrors build_ios.sh "device" target (arm64 / iphoneos, deployment 13.0, static SDL).
+      - name: Configure (CMake -> Xcode, iOS device)
+        run: |
+          cmake -G Xcode -S . -B build-ios-device \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_SYSROOT=iphoneos \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
+            -DBUILD_SDL_FROM_SOURCE=ON \
+            -DSDL_STATIC=ON \
+            -DSDL_SHARED=OFF \
+            -DCMAKE_BUILD_TYPE=Release
+
+      # build_ios.sh runs `cmake --build ... --config Release`; we add CODE_SIGNING_ALLOWED=NO so the
+      # hosted runner can produce a device build with NO Apple certs (unsigned).
+      - name: Build (unsigned device .app)
+        run: |
+          cmake --build build-ios-device --config Release -- \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" CODE_SIGN_ENTITLEMENTS=""
+
+      # Wrap the .app in the conventional Payload/ layout (unsigned .ipa) for sideload/re-sign tools.
+      - name: Package unsigned IPA
+        run: |
+          mkdir -p Payload
+          cp -R "build-ios-device/Release-iphoneos/CroMagRally.app" Payload/
+          zip -qry "CroMagRally-${GAME_VERSION}-ios-unsigned.ipa" Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CroMagRally-${{ env.GAME_VERSION }}-ios-unsigned
+          path: CroMagRally-${{ env.GAME_VERSION }}-ios-unsigned.ipa
+          compression-level: 0
+
+  build-tvos:
+    name: tvOS (Apple TV)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with: {submodules: 'recursive'}
+
+      # macos-latest already includes a recent Xcode with the tvOS SDK + simulators.
+      # Pin only if you need reproducibility across runner image updates.
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      # SDL3 is NOT a submodule; build_tvos.sh clones it into extern/SDL.
+      - name: Fetch SDL3 source
+        run: git clone --depth 1 https://github.com/libsdl-org/SDL.git extern/SDL
+
+      # ---- OPTIONAL: signed, distributable build -------------------------------
+      # To produce a SIGNED Apple TV build (installable on hardware / App Store /
+      # TestFlight) uncomment the cert import below, drop CODE_SIGNING_ALLOWED=NO
+      # from the Build step, and add an xcodebuild -archive / -exportArchive step
+      # with a tvOS provisioning profile + ExportOptions.plist. The repo does not
+      # currently script .ipa export, so that step must be authored separately.
+      # - uses: apple-actions/import-codesign-certs@v3
+      #   with:
+      #     p12-file-base64: ${{ secrets.APPLE_DISTRIBUTION_CERTIFICATE_P12_BASE64 }}
+      #     p12-password: ${{ secrets.APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD }}
+      # --------------------------------------------------------------------------
+
+      # Configure for Apple TV hardware (appletvos / arm64), derived from the
+      # 'device' branch of build_tvos.sh.
+      - name: Configure (CMake / Xcode generator)
+        run: |
+          rm -rf lib
+          cmake -G Xcode -S . -B build-tvos-device \
+            -DCMAKE_SYSTEM_NAME=tvOS \
+            -DCMAKE_OSX_SYSROOT=appletvos \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
+            -DBUILD_SDL_FROM_SOURCE=ON \
+            -DSDL_STATIC=ON \
+            -DSDL_SHARED=OFF \
+            -DSDL_OPENGLES=ON \
+            -DCMAKE_BUILD_TYPE=Release
+
+      # Code signing disabled so the job is green on a hosted runner with no Apple
+      # secrets. The resulting .app is UNSIGNED (compiles + bundles game Data, but
+      # is not installable on real Apple TV hardware).
+      - name: Build
+        run: |
+          cmake --build build-tvos-device --config Release \
+            -- CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CroMagRally-tvOS
+          path: build-tvos-device/Release-appletvos/CroMagRally.app
           compression-level: 0

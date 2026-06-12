@@ -324,7 +324,7 @@ ObjNode	*theNode;
 
 		if (theNode
 			&& theNode->SplineMoveCall
-			&& (!gSimulationPaused || !(theNode->StatusBits & STATUS_BIT_MOVEINPAUSE)))
+			&& (!gSimulationPaused || (theNode->StatusBits & STATUS_BIT_MOVEINPAUSE)))	// match MoveObjects: during pause move only nodes flagged MOVEINPAUSE (inherited jorio/net condition had this inverted)
 		{
 			theNode->SplineMoveCall(theNode);				// call object's spline move routine
 		}

@@ -897,9 +897,12 @@ float	speed;
 
 		/* MAKE CAR SPIN WILDLY */
 
-	// ChaoticFloat for car spin
-	whoNode->DeltaRot.y = ChaoticFloat(whoNode->Speed3D, whoNode->PlayerNum) * 5.0f;
-	whoNode->DeltaRot.z = ChaoticFloat(whoNode->Speed3D, whoNode->PlayerNum+10) * 2.5f;
+	// ChaoticFloat for car spin, centered around 0 so the kick can go either direction.
+	// The original sinf()-based spin was symmetric; the ChaoticFloat conversion dropped the
+	// -0.5 offset, biasing every cactus hit to spin the same way. ChaoticFloat is [0..1], so
+	// (ChaoticFloat - 0.5) * 2 maps to [-1..1] before scaling.
+	whoNode->DeltaRot.y = (ChaoticFloat(whoNode->Speed3D, whoNode->PlayerNum) - 0.5f) * 2.0f * 5.0f;
+	whoNode->DeltaRot.z = (ChaoticFloat(whoNode->Speed3D, whoNode->PlayerNum+10) - 0.5f) * 2.0f * 2.5f;
 
 		gDelta.y += 1000.0f;				// pop up the guy who hit the cactus
 		

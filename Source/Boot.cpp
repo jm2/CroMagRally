@@ -110,6 +110,15 @@ static void ParseCommandLine(int argc, char **argv) {
       gCommandLine.vsync = 1;
     else if (argument == "--adaptive-vsync")
       gCommandLine.vsync = -1;
+    else if (argument == "--host")
+      gCommandLine.netHost = true;					// host a net game from the command line (consumed in Main.c)
+    else if (argument == "--join")
+      gCommandLine.netJoin = true;					// join a net game via lobby discovery
+    else if (argument == "--port") {
+      GAME_ASSERT_MESSAGE(i + 1 < argc, "port # unspecified");
+      gNetPort = atoi(argv[i + 1]);					// override the default gameplay/lobby port (49959)
+      i += 1;
+    }
 #if 0
 		else if (argument == "--fullscreen-resolution")
 		{

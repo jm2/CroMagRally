@@ -155,6 +155,10 @@ static void DisableVirtualJoystick(void) {
     gVirtualJoystickID = 0;
     gTouchControlsActive = false;
     ResetTouchInput();
+    // Clear the injected virtual state too. After a keyboard teardown gUserPrefersGamepad
+    // stays false, so the injection sites would otherwise keep feeding the LAST touch stick/
+    // buttons into player 0 even though the virtual pad is gone.
+    SDL_memset(&gVirtualInput, 0, sizeof(gVirtualInput));
   }
 }
 
@@ -768,15 +772,18 @@ void DoSDLMaintenance(void) {
       break;
 
     case SDL_EVENT_KEY_DOWN:
-      DisableVirtualJoystick();
-      gUserPrefersGamepad = false;
+      // Ignore OS key auto-repeat: a held key shouldn't keep tearing the touch pad down
+      // (and, on a touch device, re-tearing it every repeat while the player is typing).
+      if (!event.key.repeat) {
+        DisableVirtualJoystick();
+        gUserPrefersGamepad = false;
+      }
       break;
 
-    case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
-    case SDL_EVENT_GAMEPAD_BUTTON_UP: {
-      bool isVirtual = false;
-      if (event.gdevice.which == gVirtualJoystickID)
-        isVirtual = true;
+    case SDL_EVENT_GAMEPAD_BUTTON_DOWN: {
+      // Switch away from touch on a real button PRESS only. Releasing a button (BUTTON_UP)
+      // is not an intent to use the gamepad and used to trigger a spurious teardown.
+      bool isVirtual = (event.gdevice.which == gVirtualJoystickID);
       if (!isVirtual) {
         DisableVirtualJoystick();
         gUserPrefersGamepad = true;

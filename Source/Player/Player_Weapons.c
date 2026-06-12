@@ -627,7 +627,7 @@ ObjNode	*newObj;
 		.slot		= SLOT_OF_DUMB+9,
 		.moveCall	= MoveOilSpill,
 		.rot		= VisualRandomFloat() * PI2,
-		.scale		= 3.0f + VisualRandomFloat() * 2.0f
+		.scale		= 3.0f + RandomFloat() * 2.0f		// synced stream: this scale sets the oil slick's slip hitbox, which must match on every peer (the oil drop is input-driven, so the draw lands on the same frame everywhere and is safe to sync)
 	};
 	newObj = MakeNewDisplayGroupObject(&def);
 
