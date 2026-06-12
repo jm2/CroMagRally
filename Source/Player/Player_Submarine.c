@@ -605,7 +605,11 @@ static float    sideForce[MAX_PLAYERS] = {0};       // Persistent sideways force
 		float sidewaysforce_update = 1.0f; // How often the sub has its x-axis direction reassigned while stuck
         if ((int)(stuckTimer[player] * sidewaysforce_update) != (int)((stuckTimer[player] - fps) * sidewaysforce_update)) // Update sideways force every second
         {
-            sideForce[player] = (VisualRandomLong() & 1) ? 1.0f : -1.0f; // randomly assign either full left or full right directional movement
+            // sideForce feeds analogSteering.x (a sim path -> car position), so it must not
+            // come from the unsynced VisualRandom stream. Use stateless ChaoticFloat keyed on
+            // the stuck timer + player slot: no synced-stream draw, but the left/right choice
+            // no longer diverges per-machine.
+            sideForce[player] = (ChaoticFloat(stuckTimer[player], player) < 0.5f) ? 1.0f : -1.0f; // randomly assign either full left or full right directional movement
         }
 
 		// Try to get unstuck 

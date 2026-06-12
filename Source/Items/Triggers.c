@@ -1438,8 +1438,10 @@ short	teamNum;
 
 			/* PUT TORCH ON BASE */
 
-	theTorch->Coord.x = theNode->Coord.x + VisualRandomFloat2() * 100.0f;
-	theTorch->Coord.z = theNode->Coord.z + VisualRandomFloat2() * 100.0f;
+	// The captured-torch placement sets capture/scoring geometry -> sim-affecting, so key it on
+	// the base coord + team via stateless ChaoticFloat instead of the unsynced VisualRandom stream.
+	theTorch->Coord.x = theNode->Coord.x + (ChaoticFloat(theNode->Coord.x, teamNum) - 0.5f) * 2.0f * 100.0f;
+	theTorch->Coord.z = theNode->Coord.z + (ChaoticFloat(theNode->Coord.z, teamNum + 1) - 0.5f) * 2.0f * 100.0f;
 	theTorch->Coord.y = theNode->Coord.y + gObjectGroupBBoxList[MODEL_GROUP_GLOBAL][GLOBAL_ObjType_TeamBaseRed].max.y;
 
 	UpdateObjectTransforms(theTorch);

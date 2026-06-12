@@ -113,7 +113,7 @@ Boolean Client_CheckIfMorePacketsWaiting(void);
 void HostReceive_ControlInfoFromClients(void);
 
 void PlayerBroadcastVehicleType(void);
-void GetVehicleSelectionFromNetPlayers(void);
+Boolean GetVehicleSelectionFromNetPlayers(void);
 
 
 void EndNetworkGame(void);

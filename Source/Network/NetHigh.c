@@ -595,6 +595,8 @@ NetConfigMessage		message;
 
 	gNumRealPlayers = NSpGame_GetNumActivePlayers(gNetGame);
 
+	gNumGatheredPlayers = gNumRealPlayers;							// live human count; decremented as players leave (drives the everybody-left check)
+
 	gMyNetworkPlayerNum = 0;										// the host is always player #0
 
 
@@ -674,6 +676,8 @@ void HandleGameConfigMessage(NetConfigMessage* inMessage)
 		gNumRealPlayers = MAX_PLAYERS;
 	if (!IsValidPlayerNum(gMyNetworkPlayerNum))
 		gMyNetworkPlayerNum = 0;
+
+	gNumGatheredPlayers = gNumRealPlayers;					// live human count; decremented as players leave (drives the everybody-left check)
 
 	gDifficulty			= inMessage->difficulty;
 	gTagDuration		= inMessage->tagDuration;
@@ -1235,9 +1239,19 @@ Boolean								abort = false;
 	while (!AreAllPlayersSynced() && !abort)				// loop until I've got the message from all players
 	{
 		// 1. Process Queues (Buffers)
+		//
+		// The sync mask is keyed on NSp slot IDs (AreAllPlayersSynced compares against
+		// NSpGame_GetActivePlayersIDMask), but the queues/counters are indexed by internal
+		// playerNum. Mark/check the mask by gPlayerInfo[i].net.nspPlayerID, keep the queue and
+		// counter access playerNum-based, and skip bots (no live NSp ID, never in the target
+		// mask) so lobby churn (e.g. IDs {0,2} / playerNums {0,1}) can't wedge the barrier.
 		for (int i = 0; i < gNumRealPlayers; i++)
 		{
-			if (PlayerIsSynced(i)) continue; // Already have data for this frame
+			if (gPlayerInfo[i].isComputer) continue;	// bots have no NSp ID, not in target mask
+
+			NSpPlayerID id = gPlayerInfo[i].net.nspPlayerID;
+
+			if (PlayerIsSynced(id)) continue; // Already have data for this frame
 
 			NetClientControlInfoMessageType* msg = Queue_Peek(i);
 			while (msg)
@@ -1253,7 +1267,7 @@ Boolean								abort = false;
 					// Exact Match
 					ApplyClientMessage(msg);
 					gClientSendCounter[i]++;
-					MarkPlayerSynced(i);
+					MarkPlayerSynced(id);
 					Queue_Pop(i);
 					break; // Done for this player
 				}
@@ -1263,7 +1277,7 @@ Boolean								abort = false;
 					if (RecoverFromFuture(msg, gClientSendCounter[i]))
 					{
 						gClientSendCounter[i]++;
-						MarkPlayerSynced(i);
+						MarkPlayerSynced(id);
 						// Do NOT Pop. Keep future packet for later.
 					}
 					break; // Wait for missing packets (or used recovery)
@@ -1463,13 +1477,16 @@ NetPlayerCharTypeMessage	outMess;
 
 /***************** GET VEHICLE SELECTION FROM NET PLAYERS ***********************/
 
-void GetVehicleSelectionFromNetPlayers(void)
+// Returns true if the player aborted or the net game was torn down while waiting for the
+// other players' vehicle selections, so the caller can bail cleanly instead of starting a
+// broken match.
+Boolean GetVehicleSelectionFromNetPlayers(void)
 {
 	ClearPlayerSyncMask();
 	MarkPlayerSynced(NSpPlayer_GetMyID(gNetGame));		// we have our own local info already
 
 	gNetSequenceState = kNetSequence_WaitingForPlayerVehicles;
-	DoNetGatherScreen();
+	return DoNetGatherScreen();							// true == aborted/torn down
 }
 
 
@@ -1588,7 +1605,10 @@ NSpPlayerID	playerID = mess->playerID;
 	gNumGatheredPlayers--;										// one less net player in the game
 	// gNumRealPlayers--;										// DON'T decrement this, or the screen layout will change mid-game!
 
-	if (gNumRealPlayers <= 1)									// see if nobody to play with
+	// Use gNumGatheredPlayers (the live human count, decremented above) here, NOT gNumRealPlayers
+	// which is intentionally never decremented to keep the split-screen layout stable. Checking
+	// gNumRealPlayers meant gGameOver never fired when everyone else bailed.
+	if (gNumGatheredPlayers <= 1)								// see if nobody to play with
 		gGameOver = true;
 
 			/* HANDLE SPECIFICS */

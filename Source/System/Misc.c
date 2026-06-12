@@ -12,6 +12,7 @@
 #include "game.h"
 #include "network.h"
 #include <time.h>
+#include <string.h>
 
 extern	SDL_Window* 	gSDLWindow;
 
@@ -242,7 +243,13 @@ void InitMyRandomSeed(void)
 //
 float ChaoticFloat(float seedVal, int modifier)
 {
-	uint32_t h = (uint32_t)(seedVal * 10.0f);
+	// Reinterpret the IEEE-754 bit pattern rather than value-truncating the cast. Casting a
+	// negative float to uint32_t is UB (C11 6.3.1.4) and diverges across targets (AArch64 fcvtzu
+	// saturates to 0, x86 cvttss2si wraps), which desyncs peers when seedVal is a negative
+	// (off-map) coordinate. memcpy of the bit pattern is well-defined for all finite inputs and
+	// identical across all targets.
+	uint32_t h;
+	memcpy(&h, &seedVal, sizeof h);
 	h ^= gSimulationFrame; 			// Time varying
 	h += modifier;
 	h *= 0x85ebca6b;				
