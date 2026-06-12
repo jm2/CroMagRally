@@ -1857,8 +1857,11 @@ Boolean DoTrig_LandMine(ObjNode *theNode, ObjNode *whoNode, Byte sideBits)
 
 		/* MAKE CAR SPIN WILDLY */
 
-	whoNode->DeltaRot.y = VisualRandomFloat2() * 20.0f;
-	whoNode->DeltaRot.z = VisualRandomFloat2() * 10.0f;
+	// DeltaRot integrates into the car's Rot/heading (sim path), so use stateless ChaoticFloat
+	// keyed on car speed + player slot instead of the unsynced VisualRandom stream. Same pattern
+	// as the cactus spin fix: VisualRandomFloat2()*S == (ChaoticFloat-0.5)*2*S, centered.
+	whoNode->DeltaRot.y = (ChaoticFloat(whoNode->Speed3D, whoNode->PlayerNum) - 0.5f) * 2.0f * 20.0f;
+	whoNode->DeltaRot.z = (ChaoticFloat(whoNode->Speed3D, whoNode->PlayerNum + 10) - 0.5f) * 2.0f * 10.0f;
 
 
 		/* MAKE EXPLOSION */

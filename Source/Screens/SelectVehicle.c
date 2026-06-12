@@ -88,7 +88,12 @@ Boolean DoMultiPlayerVehicleSelections(void)
 		}
 
 		PlayerBroadcastVehicleType();								// tell other net players about my type
-		GetVehicleSelectionFromNetPlayers();						// get types from other net players
+
+		// Propagate an abort/teardown that happens while waiting for the other net players'
+		// vehicle selections, so we bail cleanly instead of starting a broken split-screen match.
+		if (GetVehicleSelectionFromNetPlayers())					// get types from other net players
+			return true;											// aborted / net game torn down
+
 		return false;
 	}
 	else

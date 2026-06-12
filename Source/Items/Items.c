@@ -832,10 +832,22 @@ Boolean AddStump(TerrainItemEntryType *itemPtr, long  x, long z)
 {
 ObjNode	*newObj;
 
+	// Stumps are solid/collidable (CBITS_ALLSOLID + collision box built from the mesh bbox
+	// below), so the mesh index changes collision geometry -> sim-affecting. Derive the variant
+	// from a PURE, frame-independent hash of the world coords only. ChaoticFloat must NOT be used
+	// here: it folds in gSimulationFrame, and stumps stream in at peer-divergent frames (terrain
+	// streaming is driven by each machine's LOCAL camera position), so routing the persistent
+	// collision variant through it would desync the collision box across peers.
+	uint32_t h = ((uint32_t)x * 73856093u) ^ ((uint32_t)z * 19349663u);
+	h ^= h >> 13;
+	h *= 0xc2b2ae35u;
+	h ^= h >> 16;
+
 	NewObjectDefinitionType def =
 	{
 		.group 		= MODEL_GROUP_LEVELSPECIFIC,
-		.type 		= SCANDINAVIA_ObjType_Stump1 + (VisualRandomLong() & 0x3),
+		// The .rot below stays on VisualRandom (purely visual).
+		.type 		= SCANDINAVIA_ObjType_Stump1 + (h & 0x3),
 		.coord		= {x,0,z},
 		.flags 		= gAutoFadeStatusBits,
 		.slot 		= 400,

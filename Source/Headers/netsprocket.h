@@ -18,10 +18,10 @@ typedef int sockfd_t;
 
 #define MAX_CLIENTS MAX_LOCAL_PLAYERS
 #define kNSpPlayerNameLength 32
-#define kNSpMaxPayloadLength 256
+#define kNSpMaxPayloadLength 512			// CMR7: bumped 256->512 to fit the wider host control msg (must change with the 4CC)
 #define kNSpMaxMessageLength (kNSpMaxPayloadLength + sizeof(NSpMessageHeader))
 
-#define kNSpCMRProtocol4CC 'CMR6'
+#define kNSpCMRProtocol4CC 'CMR7'			// CMR7 wire format; old 'CMR6' peers are cleanly rejected by the version check
 
 typedef enum
 {
@@ -171,6 +171,7 @@ int NSpGame_StopAdvertising(NSpGameReference gameRef);
 int NSpGame_AdvertiseTick(NSpGameReference gameRef, float dt);
 bool NSpGame_IsAdvertising(NSpGameReference gameRef);
 int NSpGame_Dispose(NSpGameReference inGame, int disposeFlags);
+void NSpGame_FlushSends(NSpGameReference gameRef);
 
 NSpSearchReference NSpSearch_StartSearchingForGameHosts(void);
 int NSpSearch_Dispose(NSpSearchReference searchRef);
