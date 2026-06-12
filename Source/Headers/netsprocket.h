@@ -171,6 +171,7 @@ int NSpGame_StopAdvertising(NSpGameReference gameRef);
 int NSpGame_AdvertiseTick(NSpGameReference gameRef, float dt);
 bool NSpGame_IsAdvertising(NSpGameReference gameRef);
 int NSpGame_Dispose(NSpGameReference inGame, int disposeFlags);
+void NSpGame_FlushSends(NSpGameReference gameRef);
 
 NSpSearchReference NSpSearch_StartSearchingForGameHosts(void);
 int NSpSearch_Dispose(NSpSearchReference searchRef);

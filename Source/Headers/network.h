@@ -112,6 +112,8 @@ void ClientReceive_ControlInfoFromHost(void);
 Boolean Client_CheckIfMorePacketsWaiting(void);
 void HostReceive_ControlInfoFromClients(void);
 
+void Net_Pump(void);
+
 void PlayerBroadcastVehicleType(void);
 Boolean GetVehicleSelectionFromNetPlayers(void);
 

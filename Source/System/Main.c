@@ -1024,6 +1024,8 @@ static void PlayArea(void)
 	{
 		uint64_t startTick = SDL_GetPerformanceCounter();
 
+		Net_Pump();						// Stage 1: drain non-blocking send rings (cheap no-op outside net games)
+
 		//
 		// 1. INPUT & NETWORK SYNC
 		//

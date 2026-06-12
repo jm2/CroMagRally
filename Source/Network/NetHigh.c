@@ -73,6 +73,25 @@ NetHostControlInfoMessageType	gHostOutMess;
 NetClientControlInfoMessageType	gClientOutMess;
 
 
+#pragma mark - Net pump
+
+/********** NET PUMP **********/
+//
+// Stage 1: drain the per-socket non-blocking send rings. Called at frame start (Main.c
+// PlayArea loop) and once per iteration inside the still-blocking Stage-1 receive loops so
+// a backlogged uplink/broadcast keeps moving while the main thread waits — this is what
+// prevents a host<->client mutual-wait deadlock. No-op outside a net game.
+//
+
+void Net_Pump(void)
+{
+	if (!gNetGameInProgress || gNetGame == nil)
+		return;
+
+	NSpGame_FlushSends(gNetGame);
+}
+
+
 #pragma mark - Net fatal error
 
 
@@ -986,6 +1005,7 @@ Boolean								gotIt = false;
 		{
 			SDL_PumpEvents();			// keep the OS/window responsive while we block for the host packet
 			SDL_Delay(1);				// yield a slice instead of pegging a core in a zero-sleep spin
+			Net_Pump();					// keep the uplink ring draining while blocked (avoids host<->client mutual wait)
 
 				/* SEE IF WE ARE NOT GETTING THE PACKET */
 				//
@@ -1323,6 +1343,7 @@ Boolean								abort = false;
 		{
 			SDL_PumpEvents();			// keep the OS/window responsive while we block for client input
 			SDL_Delay(1);				// yield a slice instead of pegging a core in a zero-sleep spin
+			Net_Pump();					// keep the broadcast ring draining toward a slow client while blocked
 		}
 
 		if ((TickCount() - tick) > (DATA_TIMEOUT*60))		// see if we've been waiting longer than n seconds

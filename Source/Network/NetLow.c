@@ -54,6 +54,27 @@ int gNetPort = 49959;
 #define SOCKET_SNDBUF_SIZE 65536
 #define SOCKET_RCVBUF_SIZE 65536
 
+// Per-socket non-blocking send ring (Stage 1). Absorbs whatever the kernel send buffer
+// can't take in one shot so the main thread never blocks retrying a slow/stalled peer.
+// 32 KB ~= 2s of host control msgs (~290B @60pps) or ~10s of client msgs (~52B); a single
+// max message (kNSpMaxMessageLength) always fits an empty ring, so overflow only ever comes
+// from sustained backlog -> the existing kick (host) / terminate (client) path.
+#define SEND_RING_CAPACITY 32768
+
+typedef struct SendRing
+{
+	uint32_t					head;			// read cursor: next byte to send()
+	uint32_t					tail;			// write cursor: next byte to append
+	uint32_t					used;			// bytes currently queued (0..SEND_RING_CAPACITY)
+	uint32_t					highWater;		// telemetry: max 'used' ever seen
+	uint8_t						data[SEND_RING_CAPACITY];
+} SendRing;
+
+static void		SendRing_Reset(SendRing* r);
+static uint32_t	SendRing_FreeSpace(const SendRing* r);
+static bool		SendRing_Append(SendRing* r, const uint8_t* src, uint32_t len);
+static int		SendRing_Drain(SendRing* r, sockfd_t sockfd);
+
 typedef enum
 {
 	kNSpPlayerState_Offline,
@@ -68,6 +89,8 @@ typedef struct NSpPlayer
 	NSpPlayerState				state;
 	sockfd_t					sockfd;
 	char						name[kNSpPlayerNameLength];
+	SendRing					sendRing;		// host-side outbound queue for this peer socket (auto-reset by NSpPlayer_Clear's memset)
+	bool						needsLeaveNotify;	// host: a send to this peer failed; NSpMessage_GetAsHost owes the host's own NetHigh a synthetic kNSpPlayerLeft before the slot is reused
 } NSpPlayer;
 
 typedef struct NSpGame
@@ -85,8 +108,10 @@ typedef struct NSpGame
 	float						timeToReadvertise;
 
 	uint32_t					cookie;
-	
+
 	int							nextPollIndex;
+
+	SendRing					clientSendRing;	// client-side outbound queue for clientToHostSocket (zero-init by AllocPtrClear in NSpGame_Alloc)
 } NSpGame;
 
 typedef struct
@@ -110,7 +135,9 @@ static sockfd_t CreateTCPSocket(bool bindIt);
 static NSpGame* NSpGame_Unbox(NSpGameReference gameRef);
 static NSpGameReference NSpGame_Alloc(void);
 static void NSpPlayer_Clear(NSpPlayer* player);
-static int SendOnSocket(sockfd_t sockfd, NSpMessageHeader* header);
+static void NSpPlayer_DeferLeaveNotify(NSpPlayer* peer);
+static int SendBytesBlocking(sockfd_t sockfd, NSpMessageHeader* header);
+static int SendOrEnqueue(sockfd_t sockfd, SendRing* ring, NSpMessageHeader* header);
 
 static NSpPlayerID NSpGame_ClientSlotToID(NSpGameReference gameRef, int slot);
 static int NSpGame_ClientIDToSlot(NSpGameReference gameRef, NSpPlayerID id);
@@ -421,7 +448,7 @@ static NSpGameReference JoinLobby(const LobbyInfo* lobby)
 	NSpJoinRequestMessage* joinRequestMessage = AllocMessage(NSpJoinRequest, kNSpUnspecifiedEndpoint, kNSpHostID);
 	snprintf(joinRequestMessage->name, sizeof(joinRequestMessage->name), "CLIENT");
 
-	int rc = SendOnSocket(sockfd, &joinRequestMessage->header);
+	int rc = SendBytesBlocking(sockfd, &joinRequestMessage->header);	// one-shot lobby send: no per-socket ring exists yet
 	NSpMessage_Release(NULL, &joinRequestMessage->header);
 
 	if (rc != kNSpRC_OK)
@@ -488,6 +515,8 @@ NSpPlayerID NSpGame_AcceptNewClient(NSpGameReference gameRef)
 		newPlayer->state		= kNSpPlayerState_AwaitingHandshake;
 		newPlayer->sockfd		= newSocket;
 		snprintf(newPlayer->name, sizeof(newPlayer->name), "PLAYER %d", newPlayer->id);
+
+		SendRing_Reset(&newPlayer->sendRing);	// start a reused slot with an empty ring (defensive; NSpPlayer_Clear already zeroed it on the prior kick)
 	}
 	else
 	{
@@ -497,7 +526,7 @@ NSpPlayerID NSpGame_AcceptNewClient(NSpGameReference gameRef)
 		NSpJoinDeniedMessage* deniedMessage = AllocMessage(NSpJoinDenied, kNSpHostID, kNSpUnspecifiedEndpoint);
 		snprintf(deniedMessage->reason, sizeof(deniedMessage->reason), "THE GAME IS FULL.");
 
-		SendOnSocket(newSocket, &deniedMessage->header);
+		SendBytesBlocking(newSocket, &deniedMessage->header);	// one-shot denial; socket is closed immediately after
 		NSpMessage_Release(gameRef, &deniedMessage->header);
 
 		goto fail;
@@ -818,6 +847,31 @@ static NSpMessageHeader* NSpMessage_GetAsHost(NSpGame* game)
 		int i = (game->nextPollIndex + count) % MAX_CLIENTS;
 		count++;
 		NSpPlayer* player = &game->players[i];
+
+		// A host-side SEND failure (ring overflow / dead socket) flagged this slot but could not
+		// notify the host's own NetHigh from the send path. Synthesize the local kNSpPlayerLeft
+		// HERE — the same logical point the recv-side broken-pipe branch below does — so the host
+		// runs PlayerUnexpectedlyLeavesGame in lockstep with the remote clients (keeps isComputer /
+		// gNumGatheredPlayers / the synced-RNG draw count consistent, avoiding a seed desync). This
+		// must come before the IsSocketValid skip because the send path already closed the socket.
+		if (player->needsLeaveNotify)
+		{
+			player->needsLeaveNotify = false;
+
+			NSpPlayerLeftMessage* leftMessage = AllocMessage(NSpPlayerLeft, kNSpHostID, kNSpHostID);
+			leftMessage->playerCount		= NSpGame_GetNumActivePlayers(game) - 1;
+			leftMessage->playerID			= player->id;
+			CopyPlayerName(leftMessage->playerName, player->name);
+			message = &leftMessage->header;
+
+			// Round-Robin: start next search after this player
+			game->nextPollIndex = (i + 1) % MAX_CLIENTS;
+
+			// Tell the OTHER clients this guy left + clear the slot (socket already closed)
+			NSpPlayer_Kick(game, player->id);
+
+			continue;	// message != NULL -> loop exits with the synthesized leave
+		}
 
 		if (!IsSocketValid(player->sockfd))
 		{
@@ -1728,9 +1782,99 @@ int NSpGame_AdvertiseTick(NSpGameReference gameRef, float dt)
 	return kNSpRC_OK;
 }
 
+#pragma mark - Send rings
+
+static void SendRing_Reset(SendRing* r)
+{
+	r->head = 0;
+	r->tail = 0;
+	r->used = 0;
+	// highWater is per-session telemetry; it is cleared by the struct memset on alloc/clear.
+}
+
+static uint32_t SendRing_FreeSpace(const SendRing* r)
+{
+	return SEND_RING_CAPACITY - r->used;
+}
+
+// Append 'len' bytes to the ring. Returns false on overflow (caller treats as a send failure).
+static bool SendRing_Append(SendRing* r, const uint8_t* src, uint32_t len)
+{
+	if (len > SendRing_FreeSpace(r))
+	{
+		return false;
+	}
+
+	uint32_t first = SEND_RING_CAPACITY - r->tail;		// contiguous run to the buffer end
+	if (first > len)
+	{
+		first = len;
+	}
+
+	memcpy(r->data + r->tail, src, first);
+	if (len > first)
+	{
+		memcpy(r->data, src + first, len - first);		// wrap-around to the start
+	}
+
+	r->tail = (r->tail + len) % SEND_RING_CAPACITY;
+	r->used += len;
+	if (r->used > r->highWater)
+	{
+		r->highWater = r->used;
+	}
+
+	return true;
+}
+
+// Non-blocking drain of contiguous runs until the ring is empty or the socket would block.
+// Returns kNSpRC_OK (drained or buffer full) or kNSpRC_SendFailed (peer closed / hard error).
+static int SendRing_Drain(SendRing* r, sockfd_t sockfd)
+{
+	if (!IsSocketValid(sockfd))
+	{
+		return kNSpRC_SendFailed;
+	}
+
+	while (r->used > 0)
+	{
+		uint32_t run = SEND_RING_CAPACITY - r->head;	// contiguous bytes from head
+		if (run > r->used)
+		{
+			run = r->used;
+		}
+
+		ssize_t sent = send(sockfd, (const char*)(r->data + r->head), run, MSG_NOSIGNAL);
+
+		if (sent > 0)
+		{
+			r->head = (r->head + (uint32_t)sent) % SEND_RING_CAPACITY;
+			r->used -= (uint32_t)sent;
+			continue;
+		}
+
+		if (sent == 0)
+		{
+			return kNSpRC_SendFailed;					// peer closed
+		}
+
+		if (GetSocketError() == kSocketError_WouldBlock)
+		{
+			return kNSpRC_OK;							// buffer full; retry next pump
+		}
+
+		return kNSpRC_SendFailed;						// EPIPE/ECONNRESET/etc. -> dead
+	}
+
+	return kNSpRC_OK;
+}
+
 #pragma mark - NSpMessage
 
-static int SendOnSocket(sockfd_t sockfd, NSpMessageHeader* header)
+// Blocking send retained ONLY for the one-shot, non-gameplay lobby/teardown sends (join
+// request, game-full denial) where no per-socket ring exists yet. NEVER use on the
+// per-frame gameplay path — that is what SendOrEnqueue + the send rings are for.
+static int SendBytesBlocking(sockfd_t sockfd, NSpMessageHeader* header)
 {
 	GAME_ASSERT_MESSAGE(header->what != kNSpUndefinedMessage, "Did you forget to set header->what?");
 	GAME_ASSERT_MESSAGE(header->messageLen != 0xBADBABEE, "Did you forget to set header->messageLen?");
@@ -1803,6 +1947,111 @@ static int SendOnSocket(sockfd_t sockfd, NSpMessageHeader* header)
 	return kNSpRC_OK;
 }
 
+// Non-blocking enqueue: one send() attempt when the ring is empty, append the remainder
+// (or the whole message) to the ring otherwise. Returns kNSpRC_SendFailed on overflow
+// (~2s backlog) or a hard socket error -> the caller routes it to the existing kick (host)
+// / terminate (client) path. The main thread never blocks here.
+static int SendOrEnqueue(sockfd_t sockfd, SendRing* ring, NSpMessageHeader* header)
+{
+	GAME_ASSERT_MESSAGE(header->what != kNSpUndefinedMessage, "Did you forget to set header->what?");
+	GAME_ASSERT_MESSAGE(header->messageLen != 0xBADBABEE, "Did you forget to set header->messageLen?");
+	GAME_ASSERT(header->messageLen >= sizeof(NSpMessageHeader));
+	GAME_ASSERT(header->messageLen <= kNSpMaxMessageLength);
+	GAME_ASSERT(header->version == kNSpCMRProtocol4CC);
+
+	if (!IsSocketValid(sockfd))
+	{
+		printf("%s: invalid socket %d\n", __func__, (int) sockfd);
+		return kNSpRC_InvalidSocket;
+	}
+
+	uint32_t msgLen = header->messageLen;
+
+	// TCP is a byte stream: if anything is already queued we MUST append (sending fresh
+	// bytes now would interleave them ahead of the backlog and corrupt the stream).
+	if (ring->used == 0)
+	{
+		ssize_t sent = send(sockfd, (const char*)header, msgLen, MSG_NOSIGNAL);
+
+		if (sent == (ssize_t)msgLen)
+		{
+			return kNSpRC_OK;								// healthy path: whole message out immediately
+		}
+
+		if (sent > 0)
+		{
+			// Partial send on an empty ring: queue exactly the unsent remainder.
+			return SendRing_Append(ring, (const uint8_t*)header + sent, msgLen - (uint32_t)sent)
+				? kNSpRC_OK : kNSpRC_SendFailed;
+		}
+
+		if (sent == 0)
+		{
+			return kNSpRC_SendFailed;						// peer closed
+		}
+
+		if (GetSocketError() != kSocketError_WouldBlock)
+		{
+			return kNSpRC_SendFailed;						// hard error
+		}
+
+		// EWOULDBLOCK: fall through and queue the whole message.
+	}
+
+	return SendRing_Append(ring, (const uint8_t*)header, msgLen)
+		? kNSpRC_OK : kNSpRC_SendFailed;					// false == overflow -> caller's kick / terminate path
+}
+
+// Drains each socket's send ring with non-blocking send()s. Called every Net_Pump (frame
+// start + inside the Stage-1 blocking receive loops). Host: a drain failure kicks that one
+// client (the kick's PlayerLeft broadcast only appends into OTHER slots' rings). Client:
+// a failure closes the uplink so the existing PollSocket broken-pipe path synthesizes
+// kNSpGameTerminated(NetworkError) — no NetLow->NetHigh fatal-call dependency.
+void NSpGame_FlushSends(NSpGameReference gameRef)
+{
+	NSpGame* game = NSpGame_Unbox(gameRef);
+
+	if (!game)
+	{
+		return;
+	}
+
+	if (game->isHosting)
+	{
+		for (int i = 0; i < MAX_CLIENTS; i++)
+		{
+			NSpPlayer* peer = &game->players[i];
+
+			if (!IsSocketValid(peer->sockfd))
+			{
+				SendRing_Reset(&peer->sendRing);
+				continue;
+			}
+
+			if (SendRing_Drain(&peer->sendRing, peer->sockfd) != kNSpRC_OK)
+			{
+				// Do NOT NSpPlayer_Kick directly here: that would clear the slot + tell the OTHER
+				// clients, but never run PlayerUnexpectedlyLeavesGame on the host itself (this is a
+				// send path, not the message-get path). Host and clients would then disagree on
+				// isComputer -> divergent synced-RNG draw counts -> randomSeed desync FATAL. Defer:
+				// the next NSpMessage_GetAsHost hands the host's own NetHigh the kNSpPlayerLeft.
+				NSpPlayer_DeferLeaveNotify(peer);
+			}
+		}
+	}
+	else
+	{
+		if (IsSocketValid(game->clientToHostSocket))
+		{
+			if (SendRing_Drain(&game->clientSendRing, game->clientToHostSocket) != kNSpRC_OK)
+			{
+				CloseSocket(&game->clientToHostSocket);		// next NSpMessage_Get -> kNSpGameTerminated
+				SendRing_Reset(&game->clientSendRing);
+			}
+		}
+	}
+}
+
 // Attempts to send a message.
 // If we're the host and sending fails, automatically kicks the client.
 // Kicking the client will in turn broadcast a PlayerLeftMessage to remaining clients,
@@ -1831,7 +2080,6 @@ int NSpMessage_Send(NSpGameReference gameRef, NSpMessageHeader* header, int flag
 		{
 			case kNSpAllPlayers:
 			{
-				int anyError = 0;
 				for (int i = 0; i < MAX_CLIENTS; i++)
 				{
 					NSpPlayer* peer = &game->players[i];
@@ -1839,16 +2087,20 @@ int NSpMessage_Send(NSpGameReference gameRef, NSpMessageHeader* header, int flag
 					if (peer->state == kNSpPlayerState_ConnectedPeer	// send to peers with complete handshake
 						&& peer->id != header->from)					// don't return to sender!
 					{
-						int rc = SendOnSocket(game->players[i].sockfd, header);
+						int rc = SendOrEnqueue(peer->sockfd, &peer->sendRing, header);
 						if (rc != kNSpRC_OK && kickOnFail)
 						{
-							anyError = rc;
-							NSpPlayerID kickedPlayerID = NSpGame_ClientSlotToID(gameRef, i);
-							NSpPlayer_Kick(gameRef, kickedPlayerID);
+							// A single slow/dead peer is RESOLVED by dropping that one peer (the
+							// deferred leave path notifies the host's own NetHigh + the other
+							// clients). It must NOT bubble up as the broadcast's return value:
+							// HostSend_ControlInfoToClients fatals the WHOLE session on a non-zero
+							// return, so one overflowing client would otherwise nuke everyone.
+							NSpPlayer_DeferLeaveNotify(peer);
 						}
 					}
 				}
-				return anyError;
+				// Per-peer failures are handled by the kick above; the broadcast as a whole succeeds.
+				return kNSpRC_OK;
 			}
 
 			case kNSpHostID:
@@ -1864,10 +2116,12 @@ int NSpMessage_Send(NSpGameReference gameRef, NSpMessageHeader* header, int flag
 					&& (peer->state == kNSpPlayerState_ConnectedPeer
 						|| peer->state == kNSpPlayerState_AwaitingHandshake))
 				{
-					int rc = SendOnSocket(peer->sockfd, header);
+					int rc = SendOrEnqueue(peer->sockfd, &peer->sendRing, header);
 					if (rc != kNSpRC_OK && kickOnFail)
 					{
-						NSpPlayer_Kick(gameRef, playerID);
+						// Defer the kick so the host's own NetHigh is notified of the departure at
+						// the same logical point the remote clients are (see NSpMessage_GetAsHost).
+						NSpPlayer_DeferLeaveNotify(peer);
 					}
 					return rc;
 				}
@@ -1883,11 +2137,14 @@ int NSpMessage_Send(NSpGameReference gameRef, NSpMessageHeader* header, int flag
 		// If we're a client, forward ALL messages to the host.
 		// The host will dispatch the message for us.
 
-		int rc = SendOnSocket(game->clientToHostSocket, header);
+		int rc = SendOrEnqueue(game->clientToHostSocket, &game->clientSendRing, header);
 		if (rc != kNSpRC_OK)
 		{
-			// TODO: Client couldn't send a message to the host! Kill the game?
-			puts("Client couldn't send a message to the host! Kill the game?");
+			// Ring overflow or hard socket error: tear down the uplink so the next
+			// NSpMessage_Get synthesizes kNSpGameTerminated(NetworkError) through the
+			// existing broken-pipe path (no NetLow->NetHigh fatal-call dependency).
+			CloseSocket(&game->clientToHostSocket);
+			SendRing_Reset(&game->clientSendRing);
 		}
 
 		return rc;
@@ -1895,6 +2152,19 @@ int NSpMessage_Send(NSpGameReference gameRef, NSpMessageHeader* header, int flag
 }
 
 #pragma mark - NSpCMRClient
+
+// Host-side: a send to this peer just failed (ring overflow ~2s backlog, or a hard socket
+// error). We are on a send path, NOT the message-get path, so we cannot hand the host's own
+// NetHigh a kNSpPlayerLeft from here. Defer it: drop the socket and flag the slot. The next
+// NSpMessage_GetAsHost synthesizes the local kNSpPlayerLeft (running PlayerUnexpectedlyLeavesGame
+// in lockstep with the remote clients) and broadcasts the leave to the other clients via
+// NSpPlayer_Kick. This keeps host vs client agreement on isComputer / gNumGatheredPlayers and the
+// synced-RNG draw count, which a direct NSpPlayer_Kick from a send path would break.
+static void NSpPlayer_DeferLeaveNotify(NSpPlayer* peer)
+{
+	peer->needsLeaveNotify = true;
+	CloseSocket(&peer->sockfd);		// no further send()/recv() on this dead peer; flag drives cleanup
+}
 
 int NSpPlayer_Kick(NSpGameReference gameRef, NSpPlayerID kickedPlayerID)
 {
