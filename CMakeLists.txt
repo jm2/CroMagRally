@@ -67,6 +67,15 @@ set(POMME_NO_QD3D		true)
 set(POMME_NO_VIDEO		true)
 add_compile_definitions(POMME_CASE_SENSITIVE_FSSPEC=1)
 
+# CMR7 determinism: forbid the compiler from contracting a*b+c into a fused multiply-add.
+# FMA rounds differently on ARM vs x86, so a contracted expression can flip a comparison and
+# change how many synced-RNG values a frame draws — which trips the lockstep per-frame seed
+# check between heterogeneous peers (e.g. an Apple-Silicon host and an x86 client). MSVC does
+# not contract by default, so this only applies to GCC / Clang / Apple-clang.
+if(NOT MSVC)
+	add_compile_options(-ffp-contract=off)
+endif()
+
 #------------------------------------------------------------------------------
 # FIND SDL
 #------------------------------------------------------------------------------
