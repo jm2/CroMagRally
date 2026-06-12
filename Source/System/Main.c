@@ -42,7 +42,7 @@ static Boolean PlayGame_Tournament(void);
 static Boolean PlayGame_Tag(void);
 static Boolean PlayGame_Survival(void);
 static Boolean PlayGame_CaptureTheFlag(void);
-static void UpdateGameModeSpecifics(void);
+void UpdateGameModeSpecifics(void);
 
 static void TallyTokens(void);
 
@@ -1001,20 +1001,20 @@ static void PlayArea(void)
 	//==========================================================================
 
 	//
-	// WIFI JITTER FIX: CLIENT PRE-ROLL
-	// Send a burst of initial input packets to fill the Host's OS buffer.
-	// This prevents the Host from stalling (stuttering) if packets arrive with jitter.
+	// CMR7: replace the old ~500ms 30-frame pre-roll with D_init duplicate input packets.
+	// The client banks D_init REAL packets in the host's per-client queue so the very first
+	// consumed frame is real (wired seeds 2, WiFi seeds 6); each duplicate increments
+	// gClientSendCounter[me]. The host seeds its per-client adaptive depth to match.
 	//
-	if (gIsNetworkClient && gUseRedundancy)
+	if (gIsNetworkClient)
 	{
-		int framesToBuffer = 30;
-		if (gTargetFPS > 0)
-			framesToBuffer = (30 * gTargetFPS) / 60;
-
-		for (int i = 0; i < framesToBuffer; i++) // Scaled buffer to ~500ms equivalent
-		{
+		int dinit = (Net_GetConnectionHint() == 1) ? 6 : 2;
+		for (int i = 0; i < dinit; i++)
 			ClientSend_ControlInfoToHost();
-		}
+	}
+	else if (gIsNetworkHost)
+	{
+		Host_InitInputControl();				// seed per-client adaptive input-queue depth D_init
 	}
 
 	MakeFadeEvent(true);
@@ -1039,11 +1039,16 @@ static void PlayArea(void)
 		{
 			// Clients MUST wait for the Host's packet (Lockstep)
 			// This blocks until the packet for this frame arrives.
+			// (Stage 2 keeps this blocking shim; Stage 3 makes the client free-running.)
 			ClientReceive_ControlInfoFromHost();
 		}
 		else
 		{
-			// Host must send the inputs for THIS frame before simulation
+			// CMR7 host frame: drain client inputs (non-blocking), resolve THIS frame's
+			// per-client input (substitute/coalesce — the host NEVER waits on a radio), then
+			// broadcast — all before simulation.
+			Net_Pump();
+			Host_ConsumeClientInputs();
 			HostSend_ControlInfoToClients();
 		}
 
@@ -1072,17 +1077,29 @@ static void PlayArea(void)
 
 
 		//
-		// 3. SEND CLIENT INPUT (For NEXT frame)
+		// 3. READ LOCAL INPUT (For NEXT frame) / SEND CLIENT INPUT
 		//
 		if (gNetGameInProgress)
 		{
-			ReadKeyboard();
-			GetLocalKeyState();
-			schedulePause = GetNewNeedStateAnyP(kNeed_UIPause);
-			gPlayerInfo[gMyNetworkPlayerNum].net.pauseState = schedulePause;
+			schedulePause = false;
 
 			if (gIsNetworkClient)
-				ClientSend_ControlInfoToHost();
+			{
+				// CMR7 (G1): wall-clock-paced sampler — the uplink cadence is decoupled from
+				// host-packet receipt, so a downlink stall never silences the uplink. It reads
+				// local input and sends one (or a small catch-up burst of) input packet(s).
+				SampleAndSendLocalInput(&schedulePause);
+				Net_Pump();									// flush the just-enqueued input packets
+			}
+			else
+			{
+				// Host reads its own input here for the NEXT frame (~1F latency preserved).
+				ReadKeyboard();
+				GetLocalKeyState();
+				if (GetNewNeedStateAnyP(kNeed_UIPause))
+					schedulePause = true;
+				gPlayerInfo[gMyNetworkPlayerNum].net.pauseState = schedulePause;
+			}
 		}
 
 
@@ -1113,18 +1130,9 @@ static void PlayArea(void)
 		}
 
 
-			/************************************/
-			/* NET HOST RECEIVE CLIENT KEY INFO */
-			/************************************/
-			//
-			// Odds are that the clients have all sent their control into to the Host by now,
-			// so the Host can read all of the client key info for use on the next frame.
-			//
-
-		if (gIsNetworkHost)
-		{
-			HostReceive_ControlInfoFromClients();		// get client info
-		}
+			// CMR7: the end-of-frame blocking HostReceive_ControlInfoFromClients() is DELETED.
+			// Host input intake now happens at top-of-frame via Net_Pump + Host_ConsumeClientInputs,
+			// so the host never blocks on any client's radio.
 
 
 			/**************/
@@ -1560,7 +1568,7 @@ static void CleanupLevel(void)
 
 /*************** UPDATE GAME MODE SPECIFICS **********************/
 
-static void UpdateGameModeSpecifics(void)
+void UpdateGameModeSpecifics(void)
 {
 short	i,t,winner;
 

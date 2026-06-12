@@ -32,7 +32,7 @@ typedef struct
 	//	uint8_t				numTracksCompleted;					// pass saved game value to clients so we're all the same here
 	uint8_t				difficulty;							// pass host's difficulty setting so we're in sync
 	uint8_t				tagDuration;						// # minutes in tag game
-	uint8_t				useRedundancy;						// Enable redundant input transmission (WiFi mode)
+	uint8_t				reserved;							// CMR7: was useRedundancy (retired; per-client adaptive depth replaces it)
 	uint16_t			targetFPS;							// The FPS cap for the game (min of all players)
 }NetConfigMessage;
 
@@ -41,45 +41,70 @@ typedef struct
 typedef struct
 {
 	NSpMessageHeader	h;
+	uint16_t			targetFPS;							// CMR7: host-finalized FPS (written/read in Stage 4)
+	uint16_t			pad;
 }NetSyncMessage;
+_Static_assert(sizeof(NetSyncMessage) <= kNSpMaxMessageLength, "sync msg fits");
 
 
-		/* HOST CONTROL INFO MESSAGE */
+		/* FRAME-ALIGNED GAME EVENT (CMR7) */
+		//
+		// Carried in the host control stream so every machine applies a leave/bot-conversion
+		// at the identical sim frame. Fields land in the CMR7 bump; populated in Stage 4.
+		//
+
+enum { kEvReserved = 0, kEvBecomeBot = 1, kEvUnpauseForce = 2 };
+enum { INPUT_FLAG_SUBSTITUTED = 0x01, INPUT_FLAG_COALESCED = 0x02 };
+
+typedef struct
+{
+	uint32_t			effectiveFrame;					// host sim frame at which every machine applies it
+	uint8_t				type;							// kEv*
+	int8_t				playerNum;
+	uint16_t			pad;
+}NetFrameEvent;
+_Static_assert(sizeof(NetFrameEvent) == 8, "NetFrameEvent ABI");
+
+
+		/* HOST CONTROL INFO MESSAGE (CMR7) */
 
 typedef struct
 {
 	NSpMessageHeader	h;
 	float				fps, fpsFrac;
-	uint32_t			randomSeed;					// simply used for error checking (all machines should have same seed!)
+	uint32_t			randomSeed;						// simply used for error checking (all machines should have same seed!)
+	uint32_t			frameCounter;					// host frame (gHostSendCounter)
+	uint32_t			simTick;						// gSimulationFrame (diagnostic)
 	uint32_t			controlBits[MAX_PLAYERS];
-	uint32_t			controlBitsNew[MAX_PLAYERS];
+	uint32_t			controlBitsNew[MAX_PLAYERS];	// HOST-DERIVED edges (clients apply verbatim)
 	OGLVector2D			analogSteering[MAX_PLAYERS];
-	uint32_t			frameCounter;
-	uint8_t				pauseState[MAX_PLAYERS];
-
-	uint32_t			simTick;
-	OGLPoint3D			syncPos[MAX_PLAYERS];			// Authoritative position from Host
+	OGLPoint3D			syncPos[MAX_PLAYERS];			// Authoritative position from Host (rubber-band feed)
 	float				syncRotY[MAX_PLAYERS];			// Authoritative Y-Rotation (Heading)
+	uint32_t			ackInputSeq[MAX_PLAYERS];		// last REAL input seq applied per player
+	uint8_t				pauseState[MAX_PLAYERS];
+	uint8_t				inputFlags[MAX_PLAYERS];		// bit0 substituted, bit1 coalesced (telemetry)
+	uint8_t				queueDepth[MAX_PLAYERS];		// telemetry
+	uint8_t				targetDepth[MAX_PLAYERS];		// telemetry
+	uint8_t				eventCount;						// 0..2 (0 until Stage 4)
+	NetFrameEvent		events[2];
 }NetHostControlInfoMessageType;
+_Static_assert(sizeof(NetHostControlInfoMessageType) <= kNSpMaxMessageLength, "host msg fits");
 
 
-		/* CLIENT CONTROL INFO MESSAGE */
+		/* CLIENT CONTROL INFO MESSAGE (CMR7) */
 
 typedef struct
 {
 	NSpMessageHeader	h;
 	int16_t				playerNum;
-	uint32_t			controlBits;
-	uint32_t			controlBitsNew;
-	uint32_t			frameCounter;
-	OGLVector2D			analogSteering;
-
-	// Redundancy History (Last 8 frames)
-	uint32_t			prevControlBits[8];
-	OGLVector2D			prevAnalogSteering[8];
-	
 	uint8_t				pauseState;
+	uint8_t				pad;
+	uint32_t			inputSeq;						// monotonic, client-owned (was frameCounter)
+	uint32_t			lastHostFrameSeen;				// RTT/diagnostics
+	uint32_t			controlBits;
+	OGLVector2D			analogSteering;
 }NetClientControlInfoMessageType;
+_Static_assert(sizeof(NetClientControlInfoMessageType) <= kNSpMaxMessageLength, "client msg fits");
 
 
 		/* PLAYER CHAR TYPE MESSAGE */
@@ -110,9 +135,15 @@ void HostSend_ControlInfoToClients(void);
 void ClientSend_ControlInfoToHost(void);
 void ClientReceive_ControlInfoFromHost(void);
 Boolean Client_CheckIfMorePacketsWaiting(void);
-void HostReceive_ControlInfoFromClients(void);
+
+void Host_PumpClientInputs(void);				// CMR7: non-blocking drain of client inputs into per-player queues
+void Host_ConsumeClientInputs(void);			// CMR7: depth controller + substitution + coalesce + single-apply
+void Host_InitInputControl(void);				// CMR7: seed per-client D_init before the game loop
+void SampleAndSendLocalInput(Boolean* outSchedulePause);	// CMR7: wall-clock-paced client input sampler
+void ResetNetGameTransientState(void);			// CMR7: zero all per-session host/client net state
 
 void Net_Pump(void);
+int Net_GetConnectionHint(void);				// CMR7: per-client D_init seed (1 = WiFi, 0 = wired)
 
 void PlayerBroadcastVehicleType(void);
 Boolean GetVehicleSelectionFromNetPlayers(void);

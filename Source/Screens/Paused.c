@@ -141,31 +141,70 @@ void OnToggleSplitscreenMode(const MenuItem* mi)
 
 static void UpdatePausedMenuCallback(void)
 {
+			/* CMR7 CLIENT-INITIATED PAUSE: STAY IN LOCKSTEP UNTIL THE HOST CONFIRMS THE PAUSE */
+	//
+	// The host never waits (free-running Net_Pump + Host_ConsumeClientInputs). If a pausing
+	// client froze its sim immediately, the host would keep advancing MoveEverything for the
+	// whole uplink round-trip while the client did not — so the per-frame seed check
+	// (MyRandomLong() vs the host's broadcast seed) would diverge within ~2 packets and fire a
+	// kNetSequence_SeedDesync FATAL. Instead, mirror the Main.c game loop here: consume the
+	// host packet, then advance the sim normally while the host is still running, and only
+	// switch to the frozen (MoveObjects-only) branch once the host's broadcast itself reports
+	// the net pause. We re-assert our own pauseState each iteration so the host latches the
+	// pause (ClientReceive overwrites our local copy with the host's lagging view).
+
+	if (gNetGameInProgress && gIsNetworkClient)
+	{
+		ClientReceive_ControlInfoFromHost();
+
+		// The receive can tear the net game down (e.g. the host left -> EndNetworkGame
+		// clears gIsNetworkClient). Don't send into a dead session: ClientSend asserts
+		// gIsNetworkClient and would crash both this client's process.
+		if (!gIsNetworkClient || !gNetGameInProgress)
+			return;
+
+		// Evaluate BEFORE re-asserting our own intent below, so this reflects ONLY the host's
+		// (just-received) broadcast — i.e. whether the host has actually begun the net pause.
+		Boolean hostConfirmedPause = IsNetGamePaused();
+
+		if (hostConfirmedPause)
+		{
+			gSimulationPaused = true;
+			MoveObjects();								// frozen step — host is running MoveObjects too
+			DoPlayerTerrainUpdate();
+		}
+		else
+		{
+			gSimulationPaused = false;
+			MoveEverything();							// stay in lockstep: same RNG draw count as the host
+			UpdateGameModeSpecifics();
+			DoPlayerTerrainUpdate();
+			gSimulationFrame++;
+		}
+
+		// Re-assert our local pause intent (the menu is open) so the host latches & broadcasts
+		// the net pause; ClientReceive just clobbered our copy with the host's lagging view.
+		gPlayerInfo[gMyNetworkPlayerNum].net.pauseState = 1;
+		ClientSend_ControlInfoToHost();
+		return;
+	}
+
 	MoveObjects();
 	DoPlayerTerrainUpdate();							// need to call this to keep supertiles active
 
 
 			/* IF DOING NET GAME, LET OTHER PLAYERS KNOW WE'RE STILL GOING SO THEY DONT TIME OUT */
 
-	if (gNetGameInProgress)
+	if (gNetGameInProgress && gIsNetworkHost)
 	{
-		// Burn one net frame
-		if (gIsNetworkClient)
-		{
-			ClientReceive_ControlInfoFromHost();
-			// The receive can tear the net game down (e.g. the host left -> EndNetworkGame
-			// clears gIsNetworkClient). Don't send into a dead session: ClientSend asserts
-			// gIsNetworkClient and would crash both this client's process.
-			if (gIsNetworkClient && gNetGameInProgress)
-				ClientSend_ControlInfoToHost();
-		}
-		else if (gIsNetworkHost)
-		{
+		// CMR7: the host never blocks — drain client inputs (non-blocking), resolve them
+		// (substitute/coalesce), then broadcast, keeping the full-rate lockstep alive while
+		// the pause menu is open.
+		Net_Pump();
+		Host_ConsumeClientInputs();
+		// A send failure can call NetGameFatalError -> EndNetworkGame (clears gIsNetworkHost).
+		if (gIsNetworkHost && gNetGameInProgress)
 			HostSend_ControlInfoToClients();
-			// A send failure can call NetGameFatalError -> EndNetworkGame (clears gIsNetworkHost).
-			if (gIsNetworkHost && gNetGameInProgress)
-				HostReceive_ControlInfoFromClients();
-		}
 	}
 }
 
