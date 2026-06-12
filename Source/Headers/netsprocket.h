@@ -183,3 +183,8 @@ const char* NSpSearch_GetHostAddress(NSpSearchReference searchRef, int gameNum);
 int NSpPlayer_Kick(NSpGameReference gameRef, NSpPlayerID kickedPlayerID);
 const char* NSpPlayer_GetName(NSpGameReference gameRef, NSpPlayerID playerID);
 NSpPlayerID NSpPlayer_GetMyID(NSpGameReference gameRef);
+
+// CMR7 Stage 4: per-connection liveness (ms, SDL_GetTicks). lastHeard/hostLastHeard are pure in-memory.
+uint32_t NSpPlayer_GetLastHeard(NSpGameReference gameRef, NSpPlayerID playerID);	// host: this client's last-received-bytes time (0 if unknown)
+uint32_t NSpGame_GetHostLastHeard(NSpGameReference gameRef);						// client: host's last-received-bytes time
+void NSpGame_TouchAllLastHeard(NSpGameReference gameRef);						// refresh all liveness clocks to now (game-loop entry)

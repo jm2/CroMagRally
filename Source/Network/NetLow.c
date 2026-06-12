@@ -91,6 +91,7 @@ typedef struct NSpPlayer
 	char						name[kNSpPlayerNameLength];
 	SendRing					sendRing;		// host-side outbound queue for this peer socket (auto-reset by NSpPlayer_Clear's memset)
 	bool						needsLeaveNotify;	// host: a send to this peer failed; NSpMessage_GetAsHost owes the host's own NetHigh a synthetic kNSpPlayerLeft before the slot is reused
+	uint32_t					lastHeard;		// CMR7 Stage 4: host per-client last-received-bytes time (ms, SDL_GetTicks); drives the badge/drop policy
 } NSpPlayer;
 
 typedef struct NSpGame
@@ -112,6 +113,8 @@ typedef struct NSpGame
 	int							nextPollIndex;
 
 	SendRing					clientSendRing;	// client-side outbound queue for clientToHostSocket (zero-init by AllocPtrClear in NSpGame_Alloc)
+
+	uint32_t					hostLastHeard;	// CMR7 Stage 4: client tracks last-received-bytes time from host (ms, SDL_GetTicks)
 } NSpGame;
 
 typedef struct
@@ -460,6 +463,7 @@ static NSpGameReference JoinLobby(const LobbyInfo* lobby)
 	NSpGame* game = NSpGame_Unbox(gameRef);
 	game->isHosting = false;
 	game->clientToHostSocket = sockfd;
+	game->hostLastHeard = (uint32_t) SDL_GetTicks();	// CMR7 Stage 4: seed host-link liveness at join time
 	return gameRef;
 
 fail:
@@ -514,6 +518,7 @@ NSpPlayerID NSpGame_AcceptNewClient(NSpGameReference gameRef)
 		newPlayer->id			= newPlayerID;
 		newPlayer->state		= kNSpPlayerState_AwaitingHandshake;
 		newPlayer->sockfd		= newSocket;
+		newPlayer->lastHeard	= (uint32_t) SDL_GetTicks();	// CMR7 Stage 4: seed liveness so a fresh slot isn't instantly "stale"
 		snprintf(newPlayer->name, sizeof(newPlayer->name), "PLAYER %d", newPlayer->id);
 
 		SendRing_Reset(&newPlayer->sendRing);	// start a reused slot with an empty ring (defensive; NSpPlayer_Clear already zeroed it on the prior kick)
@@ -901,6 +906,9 @@ static NSpMessageHeader* NSpMessage_GetAsHost(NSpGame* game)
 		}
 		else if (message)
 		{
+			// CMR7 Stage 4: any byte from this client refreshes its liveness clock (covers 'keep' + all real traffic).
+			player->lastHeard = (uint32_t) SDL_GetTicks();
+
 			// Round-Robin: Start next search after this player
 			game->nextPollIndex = (i + 1) % MAX_CLIENTS;
 
@@ -945,6 +953,13 @@ static NSpMessageHeader* NSpMessage_GetAsClient(NSpGame* game)
 	if (message == NULL)
 	{
 		return NULL;
+	}
+
+	// CMR7 Stage 4: real bytes from the host refresh the host-link liveness clock (covers 'keep' + all
+	// traffic). A synthesized broken-pipe GameTerminated must NOT refresh it — the host is gone.
+	if (!brokenPipe)
+	{
+		game->hostLastHeard = (uint32_t) SDL_GetTicks();
 	}
 
 	// If we did get a message, handle internal message types
@@ -2255,4 +2270,31 @@ NSpPlayerID NSpPlayer_GetMyID(NSpGameReference gameRef)
 	}
 
 	return game->myID;
+}
+
+uint32_t NSpPlayer_GetLastHeard(NSpGameReference gameRef, NSpPlayerID playerID)
+{
+	NSpPlayer* player = NSpGame_GetPlayerFromID(gameRef, playerID);
+	return player ? player->lastHeard : 0;
+}
+
+uint32_t NSpGame_GetHostLastHeard(NSpGameReference gameRef)
+{
+	NSpGame* game = NSpGame_Unbox(gameRef);
+	return game ? game->hostLastHeard : 0;
+}
+
+// CMR7 Stage 4: refresh every liveness clock to now. Called at game-loop entry so the long
+// (possibly >NET_DROP_MS) lobby/vehicle-select/level-load gap can never trip a false drop on the
+// first in-game NetCheck_ConnectionTimeouts.
+void NSpGame_TouchAllLastHeard(NSpGameReference gameRef)
+{
+	NSpGame* game = NSpGame_Unbox(gameRef);
+	if (!game)
+		return;
+
+	uint32_t now = (uint32_t) SDL_GetTicks();
+	game->hostLastHeard = now;
+	for (int i = 0; i < MAX_CLIENTS; i++)
+		game->players[i].lastHeard = now;
 }

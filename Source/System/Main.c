@@ -968,6 +968,11 @@ static void CheckCheats(void)
 
 static void StepGameSimulation(void)
 {
+	// CMR7 Stage 4 (G3): apply frame-aligned events (become-bot) for the frame just sent/consumed —
+	// AFTER the per-frame seed exchange (HostSend / the client handler, both already done) and BEFORE
+	// MoveEverything, so any conditional RNG draw lands at the identical stream position on every peer.
+	ApplyPendingFrameEvents();
+
 	if (IsNetGamePaused())
 	{
 		gSimulationPaused = true;
@@ -1051,6 +1056,8 @@ static void PlayArea(void)
 		Host_InitInputControl();				// seed per-client adaptive input-queue depth D_init
 	}
 
+	Net_RefreshLastHeard();						// CMR7 Stage 4: refresh liveness clocks so the long lobby/load gap can't trip a false drop
+
 	MakeFadeEvent(true);
 
 	
@@ -1059,6 +1066,7 @@ static void PlayArea(void)
 		uint64_t startTick = SDL_GetPerformanceCounter();
 
 		Net_Pump();						// Stage 1: drain non-blocking send rings (cheap no-op outside net games)
+		NetCheck_ConnectionTimeouts();	// CMR7 Stage 4: per-connection lastHeard badge/drop policy (no-op outside net games)
 
 		//
 		// 1. INPUT / NETWORK SYNC  +  2. SIMULATION
@@ -1818,6 +1826,54 @@ void GameMain(void)
 			else
 			{
 				SDL_Log("Failed to create MulticastLock");
+			}
+
+			// CMR7 Stage 4: acquire a high-priority WifiLock so the radio stays out of power-save during
+			// net games (the MulticastLock above only keeps multicast/discovery alive). Prefer
+			// WIFI_MODE_FULL_LOW_LATENCY (=4, API 29+); fall back to WIFI_MODE_FULL_HIGH_PERF (=3) on
+			// older OSes / if the call throws. We hold it for the process via a GlobalRef, mirroring the
+			// MulticastLock. NOTE: this does NOT survive OS app-backgrounding — Android suspends the
+			// socket threads after ~8s in the background, so a backgrounded peer still goes silent and is
+			// converted to a bot by the lastHeard/keepalive policy regardless of this lock.
+			{
+				jmethodID createWifiLock = (*env)->GetMethodID(env, wifiManagerClass, "createWifiLock", "(ILjava/lang/String;)Landroid/net/wifi/WifiManager$WifiLock;");
+				jstring wifiTag = (*env)->NewStringUTF(env, "CroMagRally");
+
+				jobject wifiLock = NULL;
+				if (createWifiLock)
+				{
+					wifiLock = (*env)->CallObjectMethod(env, wifiManager, createWifiLock, 4 /*WIFI_MODE_FULL_LOW_LATENCY*/, wifiTag);
+
+					if ((*env)->ExceptionCheck(env) || !wifiLock)		// API<29 / threw: retry FULL_HIGH_PERF
+					{
+						(*env)->ExceptionClear(env);
+						wifiLock = (*env)->CallObjectMethod(env, wifiManager, createWifiLock, 3 /*WIFI_MODE_FULL_HIGH_PERF*/, wifiTag);
+						if ((*env)->ExceptionCheck(env))
+						{
+							(*env)->ExceptionClear(env);
+							wifiLock = NULL;
+						}
+					}
+				}
+
+				if (wifiLock)
+				{
+					jclass wifiLockClass = (*env)->GetObjectClass(env, wifiLock);
+					jmethodID wifiAcquire = (*env)->GetMethodID(env, wifiLockClass, "acquire", "()V");
+					(*env)->CallVoidMethod(env, wifiLock, wifiAcquire);
+
+					static jobject globalWifiLock = NULL;				// GlobalRef keeps the lock held for the process
+					globalWifiLock = (*env)->NewGlobalRef(env, wifiLock);
+
+					(*env)->DeleteLocalRef(env, wifiLockClass);
+					(*env)->DeleteLocalRef(env, wifiLock);
+				}
+				else
+				{
+					SDL_Log("Failed to create WifiLock");
+				}
+
+				(*env)->DeleteLocalRef(env, wifiTag);
 			}
 		}
 		else

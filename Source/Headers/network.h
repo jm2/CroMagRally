@@ -13,6 +13,7 @@ enum
 	kNetSyncMessage					= 'sync',
 	kNetHostControlInfoMessage		= 'hctl',
 	kNetClientControlInfoMessage	= 'cctl',
+	kNetKeepAliveMessage			= 'keep',		// CMR7 Stage 4: header-only heartbeat (radios awake + lastHeard fresh outside in-game streaming)
 };
 
 		/***************************/
@@ -66,6 +67,12 @@ typedef struct
 }NetFrameEvent;
 _Static_assert(sizeof(NetFrameEvent) == 8, "NetFrameEvent ABI");
 
+// Max frame-aligned events buffered/applied concurrently (host pending ring + per-machine apply
+// table). The wire MUST carry the same count: NetCheck/leave can schedule one become-bot per
+// in-flight player in a SINGLE host frame, all sharing one effectiveFrame, so a smaller wire cap
+// would silently drop the surplus and desync the host vs clients (seed/state FATAL).
+#define NET_MAX_PENDING_EVENTS	8
+
 
 		/* HOST CONTROL INFO MESSAGE (CMR7) */
 
@@ -86,8 +93,8 @@ typedef struct
 	uint8_t				inputFlags[MAX_PLAYERS];		// bit0 substituted, bit1 coalesced (telemetry)
 	uint8_t				queueDepth[MAX_PLAYERS];		// telemetry
 	uint8_t				targetDepth[MAX_PLAYERS];		// telemetry
-	uint8_t				eventCount;						// 0..2 (0 until Stage 4)
-	NetFrameEvent		events[2];
+	uint8_t				eventCount;						// 0..NET_MAX_PENDING_EVENTS (0 until Stage 4)
+	NetFrameEvent		events[NET_MAX_PENDING_EVENTS];	// every concurrently-pending event MUST fit here (no broadcast starvation)
 }NetHostControlInfoMessageType;
 _Static_assert(sizeof(NetHostControlInfoMessageType) <= kNSpMaxMessageLength, "host msg fits");
 
@@ -143,7 +150,6 @@ void HostWaitForPlayersToPrepareLevel(void);
 
 void HostSend_ControlInfoToClients(void);
 void ClientSend_ControlInfoToHost(void);
-void ClientReceive_ControlInfoFromHost(void);	// CMR7 Stage 3: retained bounded shim — Paused.c / loading barriers only
 void Client_PumpHostPackets(void);				// CMR7 Stage 3: non-blocking drain of host control packets into the client ring
 HostConsumeResult Client_ConsumeHostPacketFromRing(void);	// CMR7 Stage 3: pop one + apply via the verbatim handler
 Boolean Client_IsHoldBadgeVisible(void);		// CMR7 Stage 3: subtle net badge after ~250ms of host-packet absence
@@ -157,6 +163,11 @@ void ResetNetGameTransientState(void);			// CMR7: zero all per-session host/clie
 
 void Net_Pump(void);
 int Net_GetConnectionHint(void);				// CMR7: per-client D_init seed (1 = WiFi, 0 = wired)
+
+void ApplyPendingFrameEvents(void);				// CMR7 Stage 4: apply frame-aligned events (become-bot) for the frame just simulated
+void NetCheck_ConnectionTimeouts(void);			// CMR7 Stage 4: per-frame lastHeard badge/drop policy (host + client)
+void Net_MaybeSendKeepAlive(void);				// CMR7 Stage 4: throttled header-only heartbeat (lobby/barriers keep radios awake)
+void Net_RefreshLastHeard(void);				// CMR7 Stage 4: reset all liveness clocks to now (game-loop entry)
 
 void PlayerBroadcastVehicleType(void);
 Boolean GetVehicleSelectionFromNetPlayers(void);

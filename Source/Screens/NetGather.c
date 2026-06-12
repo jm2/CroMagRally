@@ -207,6 +207,8 @@ Boolean DoNetGatherScreen(void)
 
 		UpdateNetSequence();
 
+		Net_MaybeSendKeepAlive();		// CMR7 Stage 4: keep WiFi radios awake + lastHeard fresh while gathering / selecting vehicles
+
 		MoveObjects();
 		OGL_DrawScene(DrawObjects);
 	}

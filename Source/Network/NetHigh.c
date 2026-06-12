@@ -43,7 +43,13 @@ int Net_GetConnectionHint(void);
 /****************************/
 
 #define LOADING_TIMEOUT	15						// # seconds to wait for clients to load a level
-#define	DATA_TIMEOUT	2						// # seconds for data to timeout
+
+// CMR7 Stage 4: frame-aligned events + connection-liveness policy.
+#define D_MAX				8					// max per-client adaptive input-queue depth
+#define EV_BECOME_BOT_LEAD	(D_MAX + 4)			// ~12 frames (~200ms @60) of lead so every peer records the event before its effectiveFrame
+#define NET_BADGE_MS		1000				// >1s silence from a peer -> connection badge (substitution continues)
+#define NET_DROP_MS			10000				// >10s silence -> host frame-aligns a become-bot / client errors out
+#define NET_KEEPALIVE_MS	50					// 20Hz heartbeat throttle (lobby/barriers only; in-game streams 60pps)
 
 /**********************/
 /*     VARIABLES      */
@@ -66,7 +72,6 @@ Str32			gPlayerNameStrings[MAX_PLAYERS];
 
 uint32_t			gClientSendCounter[MAX_PLAYERS];
 uint32_t			gHostSendCounter;
-int				gTimeoutCounter;
 
 NetHostControlInfoMessageType	gHostOutMess;
 NetClientControlInfoMessageType	gClientOutMess;
@@ -206,6 +211,34 @@ static uint8_t sClientConnectionHint[MAX_PLAYERS];	// 0 wired / 1 wifi, from cha
 static double sNextSampleTime = 0.0;				// wall-clock sampler cursor (seconds, perf-counter base)
 
 
+#pragma mark - Frame-aligned events (CMR7 Stage 4)
+
+//
+// CMR7 Stage 4 (G3 determinism fix): a player leaving / dropping is NOT converted to a bot at
+// TCP-arrival time (which would draw ChooseTaggedPlayer's synced RNG at a stream position that
+// differs across peers -> kNetSequence_SeedDesync FATAL). Instead the host schedules a
+// kEvBecomeBot event at effectiveFrame = currentHostFrame + EV_BECOME_BOT_LEAD, re-broadcasts it
+// in every host control packet until that frame, and EVERY machine (host included) applies it
+// from a shared table at the IDENTICAL sim frame — right after the per-frame seed exchange and
+// before MoveEverything — so the conditional RandomRange lands at the same RNG-stream position
+// on all peers. The host keeps SUBSTITUTING the leaver's input between the leave and effectiveFrame.
+//
+
+// NET_MAX_PENDING_EVENTS is defined in network.h so the wire events[] array stays the same size.
+
+// Host-only outgoing ring: events re-broadcast every frame until their effectiveFrame passes.
+typedef struct { NetFrameEvent ev; Boolean active; } PendingEventSlot;
+static PendingEventSlot sHostPendingEvents[NET_MAX_PENDING_EVENTS];
+
+// Per-machine apply table (host + clients): dedupe by (effectiveFrame,type,playerNum) + apply once.
+typedef struct { uint32_t effectiveFrame; uint8_t type; int8_t playerNum; Boolean applied; Boolean valid; } FrameEventEntry;
+static FrameEventEntry sFrameEventTable[NET_MAX_PENDING_EVENTS];
+
+// Connection-liveness badge (host: per-player slot; client: gNetBadge[0] = host link).
+static Boolean		gNetBadge[MAX_PLAYERS];
+static uint32_t		gLastNetSendMs = 0;			// keepalive throttle, bumped whenever we send anything
+
+
 static void Queue_Push(int playerNum, NetClientControlInfoMessageType* msg)
 {
 	if (!IsValidPlayerNum(playerNum)) return;		// never index sHostInputQueues[] with an out-of-range wire value
@@ -260,10 +293,14 @@ void ResetNetGameTransientState(void)
 	memset(sDepth, 0, sizeof(sDepth));
 	memset(sInputFlags, 0, sizeof(sInputFlags));
 	memset(sClientConnectionHint, 0, sizeof(sClientConnectionHint));
-	gTimeoutCounter = 0;
 	gHostSendCounter = 0;
 	memset(gClientSendCounter, 0, sizeof(gClientSendCounter));
 	sNextSampleTime = 0.0;
+	// CMR7 Stage 4: frame-aligned event + connection-liveness state (risk 11: a 2nd in-process net game must start clean).
+	memset(sHostPendingEvents, 0, sizeof(sHostPendingEvents));
+	memset(sFrameEventTable, 0, sizeof(sFrameEventTable));
+	memset(gNetBadge, 0, sizeof(gNetBadge));
+	gLastNetSendMs = 0;
 	ResetClientHostRing();					// CMR7 Stage 3: empty the client host-packet ring + reset hold timers
 }
 
@@ -288,6 +325,263 @@ static int FindHumanByNSpPlayerID(NSpPlayerID playerID)
 			/* NOT FOUND */
 
 	return -1;
+}
+
+
+#pragma mark - Frame-aligned events (CMR7 Stage 4)
+
+// Record an event into the per-machine apply table, deduped by (effectiveFrame,type,playerNum).
+// Called on the host (from Host_ScheduleFrameEvent) and on clients (from the host control handler,
+// once per re-broadcast). Idempotent: a re-broadcast event already in the table is ignored.
+static void RecordFrameEvent(uint32_t effectiveFrame, uint8_t type, int8_t playerNum)
+{
+	for (int k = 0; k < NET_MAX_PENDING_EVENTS; k++)			// dedupe
+	{
+		FrameEventEntry* e = &sFrameEventTable[k];
+		if (e->valid && e->effectiveFrame == effectiveFrame && e->type == type && e->playerNum == playerNum)
+			return;
+	}
+
+	for (int k = 0; k < NET_MAX_PENDING_EVENTS; k++)			// find a free / already-applied slot
+	{
+		FrameEventEntry* e = &sFrameEventTable[k];
+		if (!e->valid || e->applied)
+		{
+			e->effectiveFrame	= effectiveFrame;
+			e->type				= type;
+			e->playerNum		= playerNum;
+			e->applied			= false;
+			e->valid			= true;
+			return;
+		}
+	}
+	// Table full of un-applied events (>8 concurrent leaves in one ~12-frame window): drop. Extremely
+	// rare; the TCP keepalive backstop still converts the peer eventually via a later leave/drop.
+}
+
+// HOST: schedule a frame-aligned event. Deduped against any un-applied (type,playerNum) already in
+// flight so a leave + a >10s drop for the same player don't double-convert. effectiveFrame is the
+// frame ABOUT to be sent (gHostSendCounter) + lead, so all clients receive it before applying.
+static void Host_ScheduleFrameEvent(uint8_t type, int playerNum)
+{
+	if (!IsValidPlayerNum(playerNum))
+		return;
+
+	for (int k = 0; k < NET_MAX_PENDING_EVENTS; k++)			// dedupe an in-flight (un-applied) (type,playerNum)
+	{
+		FrameEventEntry* e = &sFrameEventTable[k];
+		if (e->valid && !e->applied && e->type == type && e->playerNum == playerNum)
+			return;
+	}
+
+	uint32_t effF = gHostSendCounter + EV_BECOME_BOT_LEAD;
+
+	for (int s = 0; s < NET_MAX_PENDING_EVENTS; s++)			// push into the outgoing re-broadcast ring
+	{
+		if (!sHostPendingEvents[s].active)
+		{
+			sHostPendingEvents[s].ev.effectiveFrame	= effF;
+			sHostPendingEvents[s].ev.type			= type;
+			sHostPendingEvents[s].ev.playerNum		= (int8_t) playerNum;
+			sHostPendingEvents[s].ev.pad			= 0;
+			sHostPendingEvents[s].active			= true;
+			break;
+		}
+	}
+
+	RecordFrameEvent(effF, type, (int8_t) playerNum);			// host applies via the same shared table as the clients
+}
+
+// HOST: map a leave message's NSpPlayerID to a dense player index and schedule its become-bot.
+static void ScheduleBecomeBotFromLeave(NSpPlayerLeftMessage* mess)
+{
+	int i = FindHumanByNSpPlayerID(mess->playerID);
+	if (i < 0)
+	{
+		printf("ScheduleBecomeBotFromLeave: no matching player id #%d; ignoring.\n", (int) mess->playerID);
+		return;
+	}
+	Host_ScheduleFrameEvent(kEvBecomeBot, i);
+}
+
+// Convert gPlayerInfo[i] to a bot. This is the OLD PlayerUnexpectedlyLeavesGame body, now operating
+// on a dense player index and invoked from ApplyPendingFrameEvents at the identical sim frame on every
+// peer (so the tag-mode ChooseTaggedPlayer RNG draw is stream-aligned). Idempotent via the isComputer guard.
+static void ApplyBecomeBot(int i)
+{
+	if (!IsValidPlayerNum(i))
+		return;
+	if (gPlayerInfo[i].isComputer)								// already a bot (dup event / leave+drop): nothing to do
+		return;
+
+	gPlayerInfo[i].isComputer = true;							// turn it into a computer player.
+	gPlayerInfo[i].isEliminated = true;							// also eliminate from battles
+	gPlayerInfo[i].net.pauseState = 0;							// unpause if they were paused
+	gNumGatheredPlayers--;										// one less net player in the game
+	// gNumRealPlayers--;										// DON'T decrement this, or the screen layout will change mid-game!
+
+	// Use gNumGatheredPlayers (the live human count) here, NOT gNumRealPlayers (kept stable for the
+	// split-screen layout). Both host and client decrement identically at this frame, so gGameOver fires
+	// in lockstep.
+	if (gNumGatheredPlayers <= 1)								// see if nobody to play with
+	{
+		gGameOver = true;
+		if (gNetSequenceState < kNetSequence_Error)				// don't stomp a more specific post-match error
+			gNetSequenceState = kNetSequence_OfflineEverybodyLeft;
+	}
+
+			/* HANDLE SPECIFICS */
+
+	switch (gGameMode)
+	{
+		case	GAME_MODE_TAG1:
+		case	GAME_MODE_TAG2:
+				if (gPlayerInfo[i].isIt)
+					ChooseTaggedPlayer();						// synced RNG draw — stream-aligned by the frame-aligned apply
+				break;
+	}
+}
+
+// HOST: drain the pending-event ring into an outgoing host control message. The wire events[] is sized
+// NET_MAX_PENDING_EVENTS — the same as the pending ring and the per-machine apply table — so EVERY
+// concurrently-pending event is broadcast each frame and no event is starved at the wire boundary.
+// (NetCheck/leave can schedule several become-bots sharing one effectiveFrame in a single host frame;
+// a 2-slot wire used to drop the surplus while the host still applied all of them -> seed/state desync.)
+// An event is re-sent every frame INCLUDING its effectiveFrame packet (so the client records it before
+// the matching consume), then expired the frame after (effectiveFrame < thisFrame).
+static void Host_FillOutgoingEvents(NetHostControlInfoMessageType* m, uint32_t thisFrame)
+{
+	int n = 0;
+	for (int s = 0; s < NET_MAX_PENDING_EVENTS; s++)
+	{
+		if (!sHostPendingEvents[s].active)
+			continue;
+		if (sHostPendingEvents[s].ev.effectiveFrame < thisFrame)	// already applied at its effectiveFrame: stop broadcasting
+		{
+			sHostPendingEvents[s].active = false;
+			continue;
+		}
+		if (n < NET_MAX_PENDING_EVENTS)
+			m->events[n++] = sHostPendingEvents[s].ev;
+	}
+	m->eventCount = (uint8_t) n;
+}
+
+// BOTH ROLES: apply every table entry whose effectiveFrame == the frame just simulated. Called from
+// StepGameSimulation (and the pause callback) AFTER the per-frame seed exchange and BEFORE MoveEverything,
+// so any conditional RNG draw inside ApplyBecomeBot lands at the identical stream position on all peers.
+// host frame just sent / client frame just consumed both leave gHostSendCounter == thatFrame+1.
+void ApplyPendingFrameEvents(void)
+{
+	if (!gNetGameInProgress || gHostSendCounter == 0)
+		return;
+
+	uint32_t frame = gHostSendCounter - 1;
+
+	// Apply in a canonical order (playerNum asc, then type) so multi-event frames draw RNG in the same
+	// order on every peer regardless of how the table was filled.
+	for (;;)
+	{
+		int best = -1;
+		for (int k = 0; k < NET_MAX_PENDING_EVENTS; k++)
+		{
+			FrameEventEntry* e = &sFrameEventTable[k];
+			if (!e->valid || e->applied || e->effectiveFrame != frame)
+				continue;
+			if (best < 0
+				|| e->playerNum < sFrameEventTable[best].playerNum
+				|| (e->playerNum == sFrameEventTable[best].playerNum && e->type < sFrameEventTable[best].type))
+				best = k;
+		}
+		if (best < 0)
+			break;
+
+		FrameEventEntry* e = &sFrameEventTable[best];
+		switch (e->type)
+		{
+			case kEvBecomeBot:		ApplyBecomeBot(e->playerNum); break;
+			case kEvUnpauseForce:	if (IsValidPlayerNum(e->playerNum)) gPlayerInfo[e->playerNum].net.pauseState = 0; break;
+			default:				break;
+		}
+		e->applied = true;
+	}
+}
+
+
+#pragma mark - Connection liveness (CMR7 Stage 4)
+
+//
+// CMR7 Stage 4: per-connection lastHeard policy, replacing the old session-killing 4-strike
+// DATA_TIMEOUT. Called once/frame each role (main loop + pause). >1s silence raises a badge but
+// substitution continues; >10s schedules a frame-aligned become-bot (host) / errors out (client).
+// The TCP keepalive (5s + 3x1s) is the independent dead-peer backstop, surfacing ~8s as a
+// synthesized PlayerLeft/GameTerminated that feeds the same conversion path.
+//
+void NetCheck_ConnectionTimeouts(void)
+{
+	if (!gNetGameInProgress || gNetGame == nil)
+		return;
+
+	uint32_t now = (uint32_t) SDL_GetTicks();
+
+	if (gIsNetworkHost)
+	{
+		int n = NSpGame_GetNumActivePlayers(gNetGame);
+		for (int idx = 0; idx < n; idx++)
+		{
+			NSpPlayerID pid = NSpGame_GetNthActivePlayerID(gNetGame, idx);
+			if (pid == kNSpHostID)							// skip the host's own slot
+				continue;
+
+			int pn = FindHumanByNSpPlayerID(pid);
+			if (pn < 0)										// already converted to a bot / unknown id
+				continue;
+
+			uint32_t dt = now - NSpPlayer_GetLastHeard(gNetGame, pid);
+			gNetBadge[pn] = (dt > NET_BADGE_MS);			// substitution keeps the sim alive regardless
+			if (dt > NET_DROP_MS)
+				Host_ScheduleFrameEvent(kEvBecomeBot, pn);	// deduped; host keeps substituting until effectiveFrame
+		}
+	}
+	else if (gIsNetworkClient)
+	{
+		uint32_t dt = now - NSpGame_GetHostLastHeard(gNetGame);
+		gNetBadge[0] = (dt > NET_BADGE_MS);
+		if (dt > NET_DROP_MS)
+			NetGameFatalError(kNetSequence_ErrorNoResponseFromHost);
+	}
+}
+
+//
+// CMR7 Stage 4: throttled header-only heartbeat so WiFi radios never enter power-save and lastHeard
+// stays fresh OUTSIDE in-game streaming (lobby, char-select, loading barriers). In-game needs none —
+// the 60pps control/input streams keep both directions alive by construction.
+//
+void Net_MaybeSendKeepAlive(void)
+{
+	if (!gNetGameInProgress || gNetGame == nil)
+		return;
+
+	uint32_t now = (uint32_t) SDL_GetTicks();
+	if (gLastNetSendMs != 0 && (now - gLastNetSendMs) < NET_KEEPALIVE_MS)
+		return;
+	gLastNetSendMs = now;
+
+	NSpMessageHeader h;
+	NSpClearMessageHeader(&h);
+	h.what			= kNetKeepAliveMessage;
+	h.to			= gIsNetworkHost ? kNSpAllPlayers : kNSpHostID;
+	h.messageLen	= sizeof(h);
+	NSpMessage_Send(gNetGame, &h, kNSpSendFlag_Registered);		// SendOrEnqueue: non-blocking
+}
+
+// CMR7 Stage 4: reset every per-connection liveness clock to now. Called at game-loop entry so the
+// long lobby/vehicle-select/level-load gap (which can exceed NET_DROP_MS) can never trip a false drop.
+void Net_RefreshLastHeard(void)
+{
+	if (!gNetGameInProgress || gNetGame == nil)
+		return;
+	NSpGame_TouchAllLastHeard(gNetGame);
 }
 
 
@@ -530,8 +824,11 @@ bool UpdateNetSequence(void)
 						gPlayerInfo[mess->playerNum].sex = mess->sex;					// save this player's sex
 						gPlayerInfo[mess->playerNum].skin = mess->skin;					// save this player's skin
 						
-						// Update target FPS (Lowest Common Denominator)
-						if (mess->refreshRate > 0 && mess->refreshRate < gTargetFPS)
+						// CMR7 Stage 4: only the HOST computes the LCD framerate (min over the host + every
+						// client char-type). Clients no longer lower it here — they adopt the host's
+						// finalized value, broadcast once in the level-prep kNetSyncMessage, so the
+						// negotiation is symmetric instead of each machine racing its own partial minimum.
+						if (gIsNetworkHost && mess->refreshRate > 0 && mess->refreshRate < gTargetFPS)
 						{
 							gTargetFPS = mess->refreshRate;
 							printf("New client joined with %dHz. Lowering TargetFPS to %d.\n", mess->refreshRate, gTargetFPS);
@@ -582,6 +879,16 @@ bool UpdateNetSequence(void)
 			if (message) switch (message->what)
 			{
 				case kNetSyncMessage:
+					// CMR7 Stage 4: adopt the host-finalized LCD framerate before entering the game loop.
+					if (message->messageLen >= sizeof(NetSyncMessage))
+					{
+						uint16_t fps = ((NetSyncMessage*) message)->targetFPS;
+						if (fps > 0)
+						{
+							gTargetFPS = fps;
+							printf("Adopted host-finalized TargetFPS: %d\n", gTargetFPS);
+						}
+					}
 					gNetSequenceState = kNetSequence_GameLoop;
 					puts("Got sync from host! Let's go!");
 					break;
@@ -857,6 +1164,8 @@ int						startTick = TickCount();
 	{
 		bool gotMess = UpdateNetSequence();
 
+		Net_MaybeSendKeepAlive();									// CMR7 Stage 4: heartbeat so radios stay awake + lastHeard stays fresh while loading
+
 		if ((TickCount() - startTick) > (60 * LOADING_TIMEOUT))		// if no response for a while, then time out
 		{
 			NetGameFatalError(kNetSequence_ErrorNoResponseFromClients);
@@ -885,6 +1194,8 @@ int						startTick = TickCount();
 	outMess.h.to 			= kNSpAllPlayers;						// send to all clients
 	outMess.h.what 			= kNetSyncMessage;						// set message type
 	outMess.h.messageLen 	= sizeof(outMess);						// set size of message
+	outMess.targetFPS		= gTargetFPS;							// CMR7 Stage 4: broadcast the finalized LCD framerate (host min over all char-types incl. host)
+	outMess.pad				= 0;
 	status = NSpMessage_Send(gNetGame, &outMess.h, kNSpSendFlag_Registered);	// send message
 	if (status)
 	{
@@ -934,6 +1245,8 @@ int						startTick = TickCount();
 	while (gNetSequenceState == kNetSequence_ClientWaitForSyncFromHost)
 	{
 		bool gotMess = UpdateNetSequence();
+
+		Net_MaybeSendKeepAlive();										// CMR7 Stage 4: heartbeat so radios stay awake + hostLastHeard stays fresh while loading
 
 		if ((TickCount() - startTick) > (60 * LOADING_TIMEOUT))			// if no response for a while, then time out
 		{
@@ -1009,7 +1322,7 @@ short							i;
 		gHostOutMess.inputFlags[i]	= sInputFlags[i];
 	}
 
-	gHostOutMess.eventCount = 0;									// frame-aligned events populated in Stage 4
+	Host_FillOutgoingEvents(&gHostOutMess, gHostOutMess.frameCounter);	// CMR7 Stage 4: drain pending frame-aligned events (become-bot)
 
 			/* SEND IT */
 
@@ -1028,8 +1341,6 @@ short							i;
 static Boolean Client_InGame_HandleHostControlInfoMessage(NetHostControlInfoMessageType* mess)
 {
 	GAME_ASSERT(gIsNetworkClient);
-
-	gTimeoutCounter = 0;
 
 	if (mess->frameCounter < gHostSendCounter)			// see if this is an old packet, possibly a duplicate.  If so, skip it
 		return false;
@@ -1080,6 +1391,16 @@ static Boolean Client_InGame_HandleHostControlInfoMessage(NetHostControlInfoMess
 			
 			car->Rot.y += rotDiff * kSyncFactor;
 		}
+	}
+
+	// CMR7 Stage 4: record any host-broadcast frame-aligned events (deduped). The client applies them
+	// from the shared table in StepGameSimulation at effectiveFrame, AFTER the seed check above and
+	// BEFORE MoveEverything — exactly where the host applies its own copy.
+	{
+		uint8_t ec = mess->eventCount;
+		if (ec > NET_MAX_PENDING_EVENTS) ec = NET_MAX_PENDING_EVENTS;	// clamp a wire value to the events[] bound
+		for (int k = 0; k < ec; k++)
+			RecordFrameEvent(mess->events[k].effectiveFrame, mess->events[k].type, mess->events[k].playerNum);
 	}
 
 	return true;
@@ -1189,12 +1510,12 @@ void ResetClientHostRing(void)
 //
 // CRITICAL ORDERING: every NON-control host message is ALSO staged into the same ordered ring
 // (not dispatched inline) so it is applied in exact host-stream order relative to the control
-// frames during catch-up. A relayed kNSpPlayerLeft runs PlayerUnexpectedlyLeavesGame ->
-// ChooseTaggedPlayer, a synced gSimRNG draw that also flips isComputer/isEliminated and the
-// simulated-car set. Handling it inline (while control frames N-1/N still sit un-applied in the
-// ring) would perturb gSimRNG at an EARLIER stream position than the host did, tripping the
-// next per-frame randomSeed check (kNetSequence_SeedDesync FATAL). Only kNSpGameTerminated,
-// which merely tears the session down and never touches gSimRNG / the sim set, stays inline.
+// frames during catch-up. CMR7 Stage 4 makes the client IGNORE an in-game relayed kNSpPlayerLeft
+// (the host instead broadcasts a frame-aligned kEvBecomeBot event the client applies from the
+// shared table at effectiveFrame — see ApplyPendingFrameEvents), so the leave no longer draws
+// gSimRNG inline at all. Staging non-control messages in stream order is retained as the defensive
+// invariant for any future sim-affecting message. Only kNSpGameTerminated, which merely tears the
+// session down and never touches gSimRNG / the sim set, stays inline.
 //
 void Client_PumpHostPackets(void)
 {
@@ -1273,51 +1594,10 @@ Boolean Client_IsHoldBadgeVisible(void)
 }
 
 
-//
-// CMR7 Stage 3: RETAINED bounded shim — used ONLY by Paused.c and the loading barriers
-// (the in-game loop is now free-running via Net_Pump + the ring catch-up loop). It pumps
-// the network, applies EXACTLY ONE host packet, then returns; it NEVER steps the sim (the
-// pause callback drives its own MoveObjects, so stepping here would double-step). The old
-// zero-sleep spin is gone: an empty ring yields a slice instead of pegging a core.
-//
-void ClientReceive_ControlInfoFromHost(void)
-{
-uint32_t							tick;
-
-	GAME_ASSERT(gIsNetworkClient);
-
-	tick = TickCount();														// init tick for timeout
-
-	while (true)
-	{
-		Net_Pump();															// drain host packets into the ring + flush send rings
-
-		HostConsumeResult r = Client_ConsumeHostPacketFromRing();
-		if (r == kHostConsume_Applied)
-			return;															// applied exactly one host frame
-		if (r == kHostConsume_Dup)
-			continue;														// duplicate: try the next one immediately
-
-			/* RING EMPTY — YIELD INSTEAD OF A ZERO-SLEEP SPIN */
-
-		SDL_PumpEvents();			// keep the OS/window responsive while we block for the host packet
-		SDL_Delay(1);				// yield a slice instead of pegging a core in a zero-sleep spin
-
-			/* SEE IF WE ARE NOT GETTING THE PACKET */
-
-		if ((TickCount() - tick) > (DATA_TIMEOUT*60))	// see if we've been waiting longer than n seconds
-		{
-			gTimeoutCounter++;								// keep track of how often this happens
-			if (gTimeoutCounter > 3)
-			{
-				NetGameFatalError(kNetSequence_ErrorNoResponseFromHost);
-				return;
-			}
-
-			tick = TickCount();														// reset tick
-		}
-	}
-}
+// (CMR7 Stage 4: ClientReceive_ControlInfoFromHost DELETED — the last blocking receive shim.
+// The in-game loop is free-running (Net_Pump + ring catch-up), and Paused.c / the loading
+// barriers now use the same non-blocking pump + wall-clock sampler. The 4-strike DATA_TIMEOUT
+// fatal it carried is replaced by the per-connection lastHeard policy in NetCheck_ConnectionTimeouts.)
 
 
 // (CMR7 Stage 3: Client_CheckIfMorePacketsWaiting DELETED — dead since the free-running
@@ -1845,10 +2125,19 @@ Boolean HandleOtherNetMessage(NSpMessageHeader	*message)
 					/* A PLAYER UNEXPECTEDLY HAS LEFT THE GAME */
 
 		case	kNSpPlayerLeft:
-				PlayerUnexpectedlyLeavesGame((NSpPlayerLeftMessage *)message);
-				if (gGameOver)
+				if (gNetSequenceState == kNetSequence_GameLoop)
 				{
-					gNetSequenceState = kNetSequence_OfflineEverybodyLeft;
+					// CMR7 Stage 4 (G3): a running sim must convert frame-aligned, not at TCP-arrival time.
+					// The HOST schedules + re-broadcasts a kEvBecomeBot event; EVERY peer (host included)
+					// applies it from the shared table at the identical sim frame. A relayed leave on a
+					// CLIENT is ignored here — the host's broadcast event drives the conversion deterministically.
+					if (gIsNetworkHost)
+						ScheduleBecomeBotFromLeave((NSpPlayerLeftMessage *)message);
+				}
+				else
+				{
+					// Lobby / loading barriers: no running sim to desync, so convert immediately.
+					PlayerUnexpectedlyLeavesGame((NSpPlayerLeftMessage *)message);
 				}
 				break;
 
@@ -1878,6 +2167,11 @@ Boolean HandleOtherNetMessage(NSpMessageHeader	*message)
 					/* NULL PACKET */
 
 		case	kNetSyncMessage:
+				break;
+
+					/* CMR7 Stage 4: HEARTBEAT — lastHeard was already refreshed in the NetLow Get path */
+
+		case	kNetKeepAliveMessage:
 				break;
 
 				/* UNEXPECTED INTERNAL MESSAGE TYPES                                          */
@@ -1913,43 +2207,20 @@ Boolean HandleOtherNetMessage(NSpMessageHeader	*message)
 
 static void PlayerUnexpectedlyLeavesGame(NSpPlayerLeftMessage *mess)
 {
-int			i;
-NSpPlayerID	playerID = mess->playerID;
-
-	i = FindHumanByNSpPlayerID(playerID);
+	// CMR7 Stage 4: the IMMEDIATE (lobby / loading-barrier) leave path — no running sim to desync.
+	// In-game leaves go through the frame-aligned ScheduleBecomeBotFromLeave path instead.
+	int i = FindHumanByNSpPlayerID(mess->playerID);
 
 	if (i < 0)
 	{
 		// A leave for an unknown / already-removed player id: e.g. a client that dropped during
 		// the lobby before ids were assigned, or a duplicate leave. Ignore it rather than taking
 		// the whole session down with a fatal alert.
-		printf("PlayerUnexpectedlyLeavesGame: no matching player id #%d; ignoring.\n", (int) playerID);
+		printf("PlayerUnexpectedlyLeavesGame: no matching player id #%d; ignoring.\n", (int) mess->playerID);
 		return;
 	}
 
-
-	gPlayerInfo[i].isComputer = true;							// turn it into a computer player.
-	gPlayerInfo[i].isEliminated = true;							// also eliminate from battles
-	gPlayerInfo[i].net.pauseState = 0;							// unpause if they were paused
-	gNumGatheredPlayers--;										// one less net player in the game
-	// gNumRealPlayers--;										// DON'T decrement this, or the screen layout will change mid-game!
-
-	// Use gNumGatheredPlayers (the live human count, decremented above) here, NOT gNumRealPlayers
-	// which is intentionally never decremented to keep the split-screen layout stable. Checking
-	// gNumRealPlayers meant gGameOver never fired when everyone else bailed.
-	if (gNumGatheredPlayers <= 1)								// see if nobody to play with
-		gGameOver = true;
-
-			/* HANDLE SPECIFICS */
-
-	switch(gGameMode)
-	{
-		case	GAME_MODE_TAG1:
-		case	GAME_MODE_TAG2:
-				if (gPlayerInfo[i].isIt)
-					ChooseTaggedPlayer();
-				break;
-	}
+	ApplyBecomeBot(i);
 }
 
 
