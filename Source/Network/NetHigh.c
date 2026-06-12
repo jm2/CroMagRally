@@ -15,6 +15,7 @@
 #include "miscscreens.h"
 #include <stdlib.h>
 #include <stdio.h>
+#include <math.h>
 #include <SDL3/SDL.h>
 
 #if defined(__APPLE__) && !defined(__IOS__) && !defined(__TVOS__)
@@ -42,7 +43,13 @@ int Net_GetConnectionHint(void);
 /****************************/
 
 #define LOADING_TIMEOUT	15						// # seconds to wait for clients to load a level
-#define	DATA_TIMEOUT	2						// # seconds for data to timeout
+
+// CMR7 Stage 4: frame-aligned events + connection-liveness policy.
+#define D_MAX				8					// max per-client adaptive input-queue depth
+#define EV_BECOME_BOT_LEAD	(D_MAX + 4)			// ~12 frames (~200ms @60) of lead so every peer records the event before its effectiveFrame
+#define NET_BADGE_MS		1000				// >1s silence from a peer -> connection badge (substitution continues)
+#define NET_DROP_MS			10000				// >10s silence -> host frame-aligns a become-bot / client errors out
+#define NET_KEEPALIVE_MS	50					// 20Hz heartbeat throttle (lobby/barriers only; in-game streams 60pps)
 
 /**********************/
 /*     VARIABLES      */
@@ -65,12 +72,33 @@ Str32			gPlayerNameStrings[MAX_PLAYERS];
 
 uint32_t			gClientSendCounter[MAX_PLAYERS];
 uint32_t			gHostSendCounter;
-int				gTimeoutCounter;
-
-static void ResetNetGameTransientState(void);		// defined below, near the host input queues
 
 NetHostControlInfoMessageType	gHostOutMess;
 NetClientControlInfoMessageType	gClientOutMess;
+
+
+#pragma mark - Net pump
+
+/********** NET PUMP **********/
+//
+// Stage 1: drain the per-socket non-blocking send rings. Called at frame start (Main.c
+// PlayArea loop) and once per iteration inside the still-blocking Stage-1 receive loops so
+// a backlogged uplink/broadcast keeps moving while the main thread waits — this is what
+// prevents a host<->client mutual-wait deadlock. No-op outside a net game.
+//
+
+void Net_Pump(void)
+{
+	if (!gNetGameInProgress || gNetGame == nil)
+		return;
+
+	NSpGame_FlushSends(gNetGame);			// Stage 1: drain non-blocking send rings
+
+	if (gIsNetworkHost)
+		Host_PumpClientInputs();			// CMR7: non-blocking drain of client inputs into per-player queues
+	else if (gIsNetworkClient)
+		Client_PumpHostPackets();			// CMR7 Stage 3: non-blocking drain of host control packets into the ring
+}
 
 
 #pragma mark - Net fatal error
@@ -118,18 +146,162 @@ static void MarkPlayerSynced(NSpPlayerID playerID)
 	gPlayerSyncMask |= 1 << playerID;
 }
 
-static Boolean PlayerIsSynced(NSpPlayerID playerID)
-{
-	if (playerID < 0 || playerID >= 32)
-		return false;
-	return (gPlayerSyncMask & (1 << playerID)) != 0;
-}
+// (PlayerIsSynced was only used by the deleted HostReceive busy-spin; the lobby/level-prep
+// barriers use MarkPlayerSynced + AreAllPlayersSynced, so it is no longer needed.)
 
 static Boolean AreAllPlayersSynced(void)
 
 {
 	uint32_t targetMask = NSpGame_GetActivePlayersIDMask(gNetGame);
 	return 0 == (gPlayerSyncMask ^ targetMask);
+}
+
+
+#pragma mark - Host input control state (CMR7)
+
+//
+// CMR7 host-side input control. The host NEVER blocks on a client's radio: client input
+// packets are drained (non-blocking) into per-client queues by Host_PumpClientInputs, then
+// resolved each host frame by Host_ConsumeClientInputs, which SUBSTITUTES held input on an
+// underrun and COALESCES a backlog down to the per-client adaptive depth D_i. Edge bits
+// (controlBits_New) are derived host-side with the engine's own formula. This replaces the
+// old blocking, 4-strike HostReceive busy-spin.
+//
+
+#define NET_QUEUE_SIZE		128					// ~2s of client inputs @60fps (was 64)
+#define JITTER_WINDOW		128					// inter-arrival samples kept for the depth controller
+#define GRACE_RETRIES		2					// bounded re-poll attempts (~1ms each) before substituting
+#define SUB_DECAY_AFTER		30					// consecutive substituted frames before neutral decay
+#define MAX_SAMPLE_BURST	3					// wall-clock sampler max packets emitted per call
+
+typedef struct {
+	int head;
+	int tail;
+	NetClientControlInfoMessageType msgs[NET_QUEUE_SIZE];
+} PacketQueue;
+
+static PacketQueue sHostInputQueues[MAX_PLAYERS];
+
+// Last REAL input applied per client: edge-derivation baseline + ack source. NOT decayed.
+typedef struct {
+	uint32_t	controlBits;		// last REAL bits (edge baseline; never touched by decay)
+	OGLVector2D	analogSteering;		// last REAL analog (held while substituting)
+	uint8_t		pauseState;			// last REAL pause (HELD on substitute -> never spurious unpause)
+	uint32_t	lastAppliedSeq;		// == ackInputSeq broadcast; stale rule: seq <= this -> discard
+	Boolean		valid;				// false until first real input applied this race
+	uint16_t	subStreak;			// consecutive substituted frames
+} HostClientInputState;
+static HostClientInputState sLastApplied[MAX_PLAYERS];
+
+// Per-client adaptive input-queue depth controller (sized from measured arrival jitter).
+typedef struct {
+	uint64_t	lastArrivalPC;			// SDL_GetPerformanceCounter of previous packet (0=none)
+	float		deltas[JITTER_WINDOW];	// inter-arrival deltas (seconds)
+	int			count, head;			// ring fill / write idx
+	uint8_t		targetDepth;			// D_i, seeded D_init, clamp [1,8]
+	float		decayAccumSec;			// accumulator for 1-frame-per-2s decay
+	double		baselineSec;			// perf-time of last P95 recompute (throttle to <=4Hz)
+	uint8_t		baselineDepth;			// live P95-derived baseline depth (decay floor)
+} HostClientDepthState;
+static HostClientDepthState sDepth[MAX_PLAYERS];
+
+static uint8_t sInputFlags[MAX_PLAYERS];			// rebuilt each consume frame (telemetry)
+static uint8_t sClientConnectionHint[MAX_PLAYERS];	// 0 wired / 1 wifi, from char-type msg
+
+static double sNextSampleTime = 0.0;				// wall-clock sampler cursor (seconds, perf-counter base)
+
+
+#pragma mark - Frame-aligned events (CMR7 Stage 4)
+
+//
+// CMR7 Stage 4 (G3 determinism fix): a player leaving / dropping is NOT converted to a bot at
+// TCP-arrival time (which would draw ChooseTaggedPlayer's synced RNG at a stream position that
+// differs across peers -> kNetSequence_SeedDesync FATAL). Instead the host schedules a
+// kEvBecomeBot event at effectiveFrame = currentHostFrame + EV_BECOME_BOT_LEAD, re-broadcasts it
+// in every host control packet until that frame, and EVERY machine (host included) applies it
+// from a shared table at the IDENTICAL sim frame — right after the per-frame seed exchange and
+// before MoveEverything — so the conditional RandomRange lands at the same RNG-stream position
+// on all peers. The host keeps SUBSTITUTING the leaver's input between the leave and effectiveFrame.
+//
+
+// NET_MAX_PENDING_EVENTS is defined in network.h so the wire events[] array stays the same size.
+
+// Host-only outgoing ring: events re-broadcast every frame until their effectiveFrame passes.
+typedef struct { NetFrameEvent ev; Boolean active; } PendingEventSlot;
+static PendingEventSlot sHostPendingEvents[NET_MAX_PENDING_EVENTS];
+
+// Per-machine apply table (host + clients): dedupe by (effectiveFrame,type,playerNum) + apply once.
+typedef struct { uint32_t effectiveFrame; uint8_t type; int8_t playerNum; Boolean applied; Boolean valid; } FrameEventEntry;
+static FrameEventEntry sFrameEventTable[NET_MAX_PENDING_EVENTS];
+
+// Connection-liveness badge (host: per-player slot; client: gNetBadge[0] = host link).
+static Boolean		gNetBadge[MAX_PLAYERS];
+static uint32_t		gLastNetSendMs = 0;			// keepalive throttle, bumped whenever we send anything
+
+
+static void Queue_Push(int playerNum, NetClientControlInfoMessageType* msg)
+{
+	if (!IsValidPlayerNum(playerNum)) return;		// never index sHostInputQueues[] with an out-of-range wire value
+	PacketQueue* q = &sHostInputQueues[playerNum];
+	int next = (q->tail + 1) % NET_QUEUE_SIZE;
+	if (next != q->head)							// drop on full ring (>~2s backlog = deep underrun)
+	{
+		q->msgs[q->tail] = *msg;
+		q->tail = next;
+	}
+}
+
+static NetClientControlInfoMessageType* Queue_Peek(int playerNum)
+{
+	if (!IsValidPlayerNum(playerNum)) return NULL;
+	PacketQueue* q = &sHostInputQueues[playerNum];
+	if (q->head == q->tail) return NULL;
+	return &q->msgs[q->head];
+}
+
+static void Queue_Pop(int playerNum)
+{
+	if (!IsValidPlayerNum(playerNum)) return;
+	PacketQueue* q = &sHostInputQueues[playerNum];
+	if (q->head != q->tail)
+		q->head = (q->head + 1) % NET_QUEUE_SIZE;
+}
+
+static int Queue_Count(int playerNum)
+{
+	if (!IsValidPlayerNum(playerNum)) return 0;
+	PacketQueue* q = &sHostInputQueues[playerNum];
+	int n = q->tail - q->head;
+	if (n < 0) n += NET_QUEUE_SIZE;
+	return n;
+}
+
+// Engine edge-derivation formula (InputControlBits.c:145): newly-pressed bits this step.
+static inline uint32_t Host_DeriveEdges(uint32_t prevBits, uint32_t newBits)
+{
+	return (newBits ^ prevBits) & newBits;
+}
+
+// Clear ALL per-process net state that must NOT survive from one net game to the next.
+// Called from both setup paths and EndNetworkGame so stale state can never wedge a later
+// game (queues holding future seqs, depth/substitution bookkeeping, the stall-strike
+// counter, the send counters, and the wall-clock sampler cursor all used to persist).
+void ResetNetGameTransientState(void)
+{
+	memset(sHostInputQueues, 0, sizeof(sHostInputQueues));
+	memset(sLastApplied, 0, sizeof(sLastApplied));
+	memset(sDepth, 0, sizeof(sDepth));
+	memset(sInputFlags, 0, sizeof(sInputFlags));
+	memset(sClientConnectionHint, 0, sizeof(sClientConnectionHint));
+	gHostSendCounter = 0;
+	memset(gClientSendCounter, 0, sizeof(gClientSendCounter));
+	sNextSampleTime = 0.0;
+	// CMR7 Stage 4: frame-aligned event + connection-liveness state (risk 11: a 2nd in-process net game must start clean).
+	memset(sHostPendingEvents, 0, sizeof(sHostPendingEvents));
+	memset(sFrameEventTable, 0, sizeof(sFrameEventTable));
+	memset(gNetBadge, 0, sizeof(gNetBadge));
+	gLastNetSendMs = 0;
+	ResetClientHostRing();					// CMR7 Stage 3: empty the client host-packet ring + reset hold timers
 }
 
 
@@ -153,6 +325,263 @@ static int FindHumanByNSpPlayerID(NSpPlayerID playerID)
 			/* NOT FOUND */
 
 	return -1;
+}
+
+
+#pragma mark - Frame-aligned events (CMR7 Stage 4)
+
+// Record an event into the per-machine apply table, deduped by (effectiveFrame,type,playerNum).
+// Called on the host (from Host_ScheduleFrameEvent) and on clients (from the host control handler,
+// once per re-broadcast). Idempotent: a re-broadcast event already in the table is ignored.
+static void RecordFrameEvent(uint32_t effectiveFrame, uint8_t type, int8_t playerNum)
+{
+	for (int k = 0; k < NET_MAX_PENDING_EVENTS; k++)			// dedupe
+	{
+		FrameEventEntry* e = &sFrameEventTable[k];
+		if (e->valid && e->effectiveFrame == effectiveFrame && e->type == type && e->playerNum == playerNum)
+			return;
+	}
+
+	for (int k = 0; k < NET_MAX_PENDING_EVENTS; k++)			// find a free / already-applied slot
+	{
+		FrameEventEntry* e = &sFrameEventTable[k];
+		if (!e->valid || e->applied)
+		{
+			e->effectiveFrame	= effectiveFrame;
+			e->type				= type;
+			e->playerNum		= playerNum;
+			e->applied			= false;
+			e->valid			= true;
+			return;
+		}
+	}
+	// Table full of un-applied events (>8 concurrent leaves in one ~12-frame window): drop. Extremely
+	// rare; the TCP keepalive backstop still converts the peer eventually via a later leave/drop.
+}
+
+// HOST: schedule a frame-aligned event. Deduped against any un-applied (type,playerNum) already in
+// flight so a leave + a >10s drop for the same player don't double-convert. effectiveFrame is the
+// frame ABOUT to be sent (gHostSendCounter) + lead, so all clients receive it before applying.
+static void Host_ScheduleFrameEvent(uint8_t type, int playerNum)
+{
+	if (!IsValidPlayerNum(playerNum))
+		return;
+
+	for (int k = 0; k < NET_MAX_PENDING_EVENTS; k++)			// dedupe an in-flight (un-applied) (type,playerNum)
+	{
+		FrameEventEntry* e = &sFrameEventTable[k];
+		if (e->valid && !e->applied && e->type == type && e->playerNum == playerNum)
+			return;
+	}
+
+	uint32_t effF = gHostSendCounter + EV_BECOME_BOT_LEAD;
+
+	for (int s = 0; s < NET_MAX_PENDING_EVENTS; s++)			// push into the outgoing re-broadcast ring
+	{
+		if (!sHostPendingEvents[s].active)
+		{
+			sHostPendingEvents[s].ev.effectiveFrame	= effF;
+			sHostPendingEvents[s].ev.type			= type;
+			sHostPendingEvents[s].ev.playerNum		= (int8_t) playerNum;
+			sHostPendingEvents[s].ev.pad			= 0;
+			sHostPendingEvents[s].active			= true;
+			break;
+		}
+	}
+
+	RecordFrameEvent(effF, type, (int8_t) playerNum);			// host applies via the same shared table as the clients
+}
+
+// HOST: map a leave message's NSpPlayerID to a dense player index and schedule its become-bot.
+static void ScheduleBecomeBotFromLeave(NSpPlayerLeftMessage* mess)
+{
+	int i = FindHumanByNSpPlayerID(mess->playerID);
+	if (i < 0)
+	{
+		printf("ScheduleBecomeBotFromLeave: no matching player id #%d; ignoring.\n", (int) mess->playerID);
+		return;
+	}
+	Host_ScheduleFrameEvent(kEvBecomeBot, i);
+}
+
+// Convert gPlayerInfo[i] to a bot. This is the OLD PlayerUnexpectedlyLeavesGame body, now operating
+// on a dense player index and invoked from ApplyPendingFrameEvents at the identical sim frame on every
+// peer (so the tag-mode ChooseTaggedPlayer RNG draw is stream-aligned). Idempotent via the isComputer guard.
+static void ApplyBecomeBot(int i)
+{
+	if (!IsValidPlayerNum(i))
+		return;
+	if (gPlayerInfo[i].isComputer)								// already a bot (dup event / leave+drop): nothing to do
+		return;
+
+	gPlayerInfo[i].isComputer = true;							// turn it into a computer player.
+	gPlayerInfo[i].isEliminated = true;							// also eliminate from battles
+	gPlayerInfo[i].net.pauseState = 0;							// unpause if they were paused
+	gNumGatheredPlayers--;										// one less net player in the game
+	// gNumRealPlayers--;										// DON'T decrement this, or the screen layout will change mid-game!
+
+	// Use gNumGatheredPlayers (the live human count) here, NOT gNumRealPlayers (kept stable for the
+	// split-screen layout). Both host and client decrement identically at this frame, so gGameOver fires
+	// in lockstep.
+	if (gNumGatheredPlayers <= 1)								// see if nobody to play with
+	{
+		gGameOver = true;
+		if (gNetSequenceState < kNetSequence_Error)				// don't stomp a more specific post-match error
+			gNetSequenceState = kNetSequence_OfflineEverybodyLeft;
+	}
+
+			/* HANDLE SPECIFICS */
+
+	switch (gGameMode)
+	{
+		case	GAME_MODE_TAG1:
+		case	GAME_MODE_TAG2:
+				if (gPlayerInfo[i].isIt)
+					ChooseTaggedPlayer();						// synced RNG draw — stream-aligned by the frame-aligned apply
+				break;
+	}
+}
+
+// HOST: drain the pending-event ring into an outgoing host control message. The wire events[] is sized
+// NET_MAX_PENDING_EVENTS — the same as the pending ring and the per-machine apply table — so EVERY
+// concurrently-pending event is broadcast each frame and no event is starved at the wire boundary.
+// (NetCheck/leave can schedule several become-bots sharing one effectiveFrame in a single host frame;
+// a 2-slot wire used to drop the surplus while the host still applied all of them -> seed/state desync.)
+// An event is re-sent every frame INCLUDING its effectiveFrame packet (so the client records it before
+// the matching consume), then expired the frame after (effectiveFrame < thisFrame).
+static void Host_FillOutgoingEvents(NetHostControlInfoMessageType* m, uint32_t thisFrame)
+{
+	int n = 0;
+	for (int s = 0; s < NET_MAX_PENDING_EVENTS; s++)
+	{
+		if (!sHostPendingEvents[s].active)
+			continue;
+		if (sHostPendingEvents[s].ev.effectiveFrame < thisFrame)	// already applied at its effectiveFrame: stop broadcasting
+		{
+			sHostPendingEvents[s].active = false;
+			continue;
+		}
+		if (n < NET_MAX_PENDING_EVENTS)
+			m->events[n++] = sHostPendingEvents[s].ev;
+	}
+	m->eventCount = (uint8_t) n;
+}
+
+// BOTH ROLES: apply every table entry whose effectiveFrame == the frame just simulated. Called from
+// StepGameSimulation (and the pause callback) AFTER the per-frame seed exchange and BEFORE MoveEverything,
+// so any conditional RNG draw inside ApplyBecomeBot lands at the identical stream position on all peers.
+// host frame just sent / client frame just consumed both leave gHostSendCounter == thatFrame+1.
+void ApplyPendingFrameEvents(void)
+{
+	if (!gNetGameInProgress || gHostSendCounter == 0)
+		return;
+
+	uint32_t frame = gHostSendCounter - 1;
+
+	// Apply in a canonical order (playerNum asc, then type) so multi-event frames draw RNG in the same
+	// order on every peer regardless of how the table was filled.
+	for (;;)
+	{
+		int best = -1;
+		for (int k = 0; k < NET_MAX_PENDING_EVENTS; k++)
+		{
+			FrameEventEntry* e = &sFrameEventTable[k];
+			if (!e->valid || e->applied || e->effectiveFrame != frame)
+				continue;
+			if (best < 0
+				|| e->playerNum < sFrameEventTable[best].playerNum
+				|| (e->playerNum == sFrameEventTable[best].playerNum && e->type < sFrameEventTable[best].type))
+				best = k;
+		}
+		if (best < 0)
+			break;
+
+		FrameEventEntry* e = &sFrameEventTable[best];
+		switch (e->type)
+		{
+			case kEvBecomeBot:		ApplyBecomeBot(e->playerNum); break;
+			case kEvUnpauseForce:	if (IsValidPlayerNum(e->playerNum)) gPlayerInfo[e->playerNum].net.pauseState = 0; break;
+			default:				break;
+		}
+		e->applied = true;
+	}
+}
+
+
+#pragma mark - Connection liveness (CMR7 Stage 4)
+
+//
+// CMR7 Stage 4: per-connection lastHeard policy, replacing the old session-killing 4-strike
+// DATA_TIMEOUT. Called once/frame each role (main loop + pause). >1s silence raises a badge but
+// substitution continues; >10s schedules a frame-aligned become-bot (host) / errors out (client).
+// The TCP keepalive (5s + 3x1s) is the independent dead-peer backstop, surfacing ~8s as a
+// synthesized PlayerLeft/GameTerminated that feeds the same conversion path.
+//
+void NetCheck_ConnectionTimeouts(void)
+{
+	if (!gNetGameInProgress || gNetGame == nil)
+		return;
+
+	uint32_t now = (uint32_t) SDL_GetTicks();
+
+	if (gIsNetworkHost)
+	{
+		int n = NSpGame_GetNumActivePlayers(gNetGame);
+		for (int idx = 0; idx < n; idx++)
+		{
+			NSpPlayerID pid = NSpGame_GetNthActivePlayerID(gNetGame, idx);
+			if (pid == kNSpHostID)							// skip the host's own slot
+				continue;
+
+			int pn = FindHumanByNSpPlayerID(pid);
+			if (pn < 0)										// already converted to a bot / unknown id
+				continue;
+
+			uint32_t dt = now - NSpPlayer_GetLastHeard(gNetGame, pid);
+			gNetBadge[pn] = (dt > NET_BADGE_MS);			// substitution keeps the sim alive regardless
+			if (dt > NET_DROP_MS)
+				Host_ScheduleFrameEvent(kEvBecomeBot, pn);	// deduped; host keeps substituting until effectiveFrame
+		}
+	}
+	else if (gIsNetworkClient)
+	{
+		uint32_t dt = now - NSpGame_GetHostLastHeard(gNetGame);
+		gNetBadge[0] = (dt > NET_BADGE_MS);
+		if (dt > NET_DROP_MS)
+			NetGameFatalError(kNetSequence_ErrorNoResponseFromHost);
+	}
+}
+
+//
+// CMR7 Stage 4: throttled header-only heartbeat so WiFi radios never enter power-save and lastHeard
+// stays fresh OUTSIDE in-game streaming (lobby, char-select, loading barriers). In-game needs none —
+// the 60pps control/input streams keep both directions alive by construction.
+//
+void Net_MaybeSendKeepAlive(void)
+{
+	if (!gNetGameInProgress || gNetGame == nil)
+		return;
+
+	uint32_t now = (uint32_t) SDL_GetTicks();
+	if (gLastNetSendMs != 0 && (now - gLastNetSendMs) < NET_KEEPALIVE_MS)
+		return;
+	gLastNetSendMs = now;
+
+	NSpMessageHeader h;
+	NSpClearMessageHeader(&h);
+	h.what			= kNetKeepAliveMessage;
+	h.to			= gIsNetworkHost ? kNSpAllPlayers : kNSpHostID;
+	h.messageLen	= sizeof(h);
+	NSpMessage_Send(gNetGame, &h, kNSpSendFlag_Registered);		// SendOrEnqueue: non-blocking
+}
+
+// CMR7 Stage 4: reset every per-connection liveness clock to now. Called at game-loop entry so the
+// long lobby/vehicle-select/level-load gap (which can exceed NET_DROP_MS) can never trip a false drop.
+void Net_RefreshLastHeard(void)
+{
+	if (!gNetGameInProgress || gNetGame == nil)
+		return;
+	NSpGame_TouchAllLastHeard(gNetGame);
 }
 
 
@@ -232,9 +661,7 @@ OSErr	iErr;
 		gNetSequenceState	= kNetSequence_Offline;
 	ClearPlayerSyncMask();
 	gSimulationPaused	= false;
-	gHostSendCounter	= 0;
-	memset(gClientSendCounter, 0, sizeof(gClientSendCounter));
-	ResetNetGameTransientState();			// clear host input queues, redundancy history, stall-strike counter
+	ResetNetGameTransientState();			// clear host input queues, depth/substitution state, counters, stall-strike counter
 }
 
 
@@ -397,19 +824,21 @@ bool UpdateNetSequence(void)
 						gPlayerInfo[mess->playerNum].sex = mess->sex;					// save this player's sex
 						gPlayerInfo[mess->playerNum].skin = mess->skin;					// save this player's skin
 						
-						// Update target FPS (Lowest Common Denominator)
-						if (mess->refreshRate > 0 && mess->refreshRate < gTargetFPS)
+						// CMR7 Stage 4: only the HOST computes the LCD framerate (min over the host + every
+						// client char-type). Clients no longer lower it here — they adopt the host's
+						// finalized value, broadcast once in the level-prep kNetSyncMessage, so the
+						// negotiation is symmetric instead of each machine racing its own partial minimum.
+						if (gIsNetworkHost && mess->refreshRate > 0 && mess->refreshRate < gTargetFPS)
 						{
 							gTargetFPS = mess->refreshRate;
 							printf("New client joined with %dHz. Lowering TargetFPS to %d.\n", mess->refreshRate, gTargetFPS);
 						}
 
-						// Check for WiFi / Redundancy
+						// CMR7: record this client's WiFi/wired hint as a per-client adaptive-depth seed
+						// (replaces the old global gUseRedundancy all-or-nothing switch).
+						sClientConnectionHint[mess->playerNum] = (mess->connectionType == 1) ? 1 : 0;
 						if (mess->connectionType == 1)
-						{
-							gUseRedundancy = true;
-							printf("New client is on WiFi. Enabling Redundant Input Mode.\n");
-						}
+							printf("New client %d is on WiFi. Seeding deeper input queue.\n", mess->playerNum);
 
 						MarkPlayerSynced(message->from);								// inc count of received info
 
@@ -450,6 +879,16 @@ bool UpdateNetSequence(void)
 			if (message) switch (message->what)
 			{
 				case kNetSyncMessage:
+					// CMR7 Stage 4: adopt the host-finalized LCD framerate before entering the game loop.
+					if (message->messageLen >= sizeof(NetSyncMessage))
+					{
+						uint16_t fps = ((NetSyncMessage*) message)->targetFPS;
+						if (fps > 0)
+						{
+							gTargetFPS = fps;
+							printf("Adopted host-finalized TargetFPS: %d\n", gTargetFPS);
+						}
+					}
 					gNetSequenceState = kNetSequence_GameLoop;
 					puts("Got sync from host! Let's go!");
 					break;
@@ -492,8 +931,8 @@ Boolean SetupNetworkHosting(void)
 	ResetNetGameTransientState();			// start from a clean slate (belt-and-suspenders vs EndNetworkGame)
 	gNetSequenceState = kNetSequence_HostOffline;
 	gTargetFPS = OGL_GetMonitorRefreshRate();
-	gUseRedundancy = (Net_GetConnectionHint() == 1);
-	printf("Hosting Game. Local Refresh Rate: %dHz, WiFi: %d\n", gTargetFPS, gUseRedundancy);
+	sClientConnectionHint[0] = (Net_GetConnectionHint() == 1) ? 1 : 0;	// CMR7: host is always player 0; per-client D_init seed
+	printf("Hosting Game. Local Refresh Rate: %dHz, WiFi: %d\n", gTargetFPS, sClientConnectionHint[0]);
 
 
 			/* GET SOME NAMES */
@@ -595,6 +1034,8 @@ NetConfigMessage		message;
 
 	gNumRealPlayers = NSpGame_GetNumActivePlayers(gNetGame);
 
+	gNumGatheredPlayers = gNumRealPlayers;							// live human count; decremented as players leave (drives the everybody-left check)
+
 	gMyNetworkPlayerNum = 0;										// the host is always player #0
 
 
@@ -632,7 +1073,7 @@ NetConfigMessage		message;
 			message.difficulty		= gDifficulty;			// set difficulty
 			message.tagDuration		= gTagDuration;					// set tag duration
 			message.targetFPS		= gTargetFPS;					// Set the global target FPS
-			message.useRedundancy	= gUseRedundancy;				// Set Redundancy Flag
+			message.reserved		= 0;							// CMR7: was useRedundancy (retired)
 
 			status = NSpMessage_Send(gNetGame, &message.h, kNSpSendFlag_Registered);	// send message
 			if (status)
@@ -675,12 +1116,13 @@ void HandleGameConfigMessage(NetConfigMessage* inMessage)
 	if (!IsValidPlayerNum(gMyNetworkPlayerNum))
 		gMyNetworkPlayerNum = 0;
 
+	gNumGatheredPlayers = gNumRealPlayers;					// live human count; decremented as players leave (drives the everybody-left check)
+
 	gDifficulty			= inMessage->difficulty;
 	gTagDuration		= inMessage->tagDuration;
 	gTargetFPS			= inMessage->targetFPS;
-	gUseRedundancy		= inMessage->useRedundancy;
 
-	printf("Join Config Received. TargetFPS: %d, Redundancy: %d\n", gTargetFPS, gUseRedundancy);
+	printf("Join Config Received. TargetFPS: %d\n", gTargetFPS);
 
 
 	// Copy transient settings
@@ -722,6 +1164,8 @@ int						startTick = TickCount();
 	{
 		bool gotMess = UpdateNetSequence();
 
+		Net_MaybeSendKeepAlive();									// CMR7 Stage 4: heartbeat so radios stay awake + lastHeard stays fresh while loading
+
 		if ((TickCount() - startTick) > (60 * LOADING_TIMEOUT))		// if no response for a while, then time out
 		{
 			NetGameFatalError(kNetSequence_ErrorNoResponseFromClients);
@@ -750,6 +1194,8 @@ int						startTick = TickCount();
 	outMess.h.to 			= kNSpAllPlayers;						// send to all clients
 	outMess.h.what 			= kNetSyncMessage;						// set message type
 	outMess.h.messageLen 	= sizeof(outMess);						// set size of message
+	outMess.targetFPS		= gTargetFPS;							// CMR7 Stage 4: broadcast the finalized LCD framerate (host min over all char-types incl. host)
+	outMess.pad				= 0;
 	status = NSpMessage_Send(gNetGame, &outMess.h, kNSpSendFlag_Registered);	// send message
 	if (status)
 	{
@@ -800,6 +1246,8 @@ int						startTick = TickCount();
 	{
 		bool gotMess = UpdateNetSequence();
 
+		Net_MaybeSendKeepAlive();										// CMR7 Stage 4: heartbeat so radios stay awake + hostLastHeard stays fresh while loading
+
 		if ((TickCount() - startTick) > (60 * LOADING_TIMEOUT))			// if no response for a while, then time out
 		{
 			NetGameFatalError(kNetSequence_ErrorNoResponseFromHost);
@@ -848,7 +1296,7 @@ short							i;
 	for (i = 0; i < MAX_PLAYERS; i++)								// control bits
 	{
 		gHostOutMess.controlBits[i] = gPlayerInfo[i].controlBits;
-		gHostOutMess.controlBitsNew[i] = gPlayerInfo[i].controlBits_New;
+		gHostOutMess.controlBitsNew[i] = gPlayerInfo[i].controlBits_New;	// host-derived edges (Host_ConsumeClientInputs / GetLocalKeyState / AI)
 		gHostOutMess.analogSteering[i] = gPlayerInfo[i].analogSteering;
 
 		if (gPlayerInfo[i].isComputer)
@@ -866,7 +1314,15 @@ short							i;
 			gHostOutMess.syncPos[i] = gPlayerInfo[i].objNode->Coord;
 			gHostOutMess.syncRotY[i] = gPlayerInfo[i].objNode->Rot.y;
 		}
+
+		// CMR7 telemetry / ack: last REAL input seq applied, live queue depth + target depth, input flags.
+		gHostOutMess.ackInputSeq[i]	= sLastApplied[i].lastAppliedSeq;
+		gHostOutMess.queueDepth[i]	= (uint8_t) Queue_Count(i);
+		gHostOutMess.targetDepth[i]	= sDepth[i].targetDepth;
+		gHostOutMess.inputFlags[i]	= sInputFlags[i];
 	}
+
+	Host_FillOutgoingEvents(&gHostOutMess, gHostOutMess.frameCounter);	// CMR7 Stage 4: drain pending frame-aligned events (become-bot)
 
 			/* SEND IT */
 
@@ -885,8 +1341,6 @@ short							i;
 static Boolean Client_InGame_HandleHostControlInfoMessage(NetHostControlInfoMessageType* mess)
 {
 	GAME_ASSERT(gIsNetworkClient);
-
-	gTimeoutCounter = 0;
 
 	if (mess->frameCounter < gHostSendCounter)			// see if this is an old packet, possibly a duplicate.  If so, skip it
 		return false;
@@ -939,163 +1393,227 @@ static Boolean Client_InGame_HandleHostControlInfoMessage(NetHostControlInfoMess
 		}
 	}
 
+	// CMR7 Stage 4: record any host-broadcast frame-aligned events (deduped). The client applies them
+	// from the shared table in StepGameSimulation at effectiveFrame, AFTER the seed check above and
+	// BEFORE MoveEverything — exactly where the host applies its own copy.
+	{
+		uint8_t ec = mess->eventCount;
+		if (ec > NET_MAX_PENDING_EVENTS) ec = NET_MAX_PENDING_EVENTS;	// clamp a wire value to the events[] bound
+		for (int k = 0; k < ec; k++)
+			RecordFrameEvent(mess->events[k].effectiveFrame, mess->events[k].type, mess->events[k].playerNum);
+	}
+
 	return true;
 }
 
-void ClientReceive_ControlInfoFromHost(void)
+
+#pragma mark - Client host-packet ring (CMR7 Stage 3)
+
+//
+// CMR7 Stage 3: the client no longer blocks waiting for the host's per-frame control
+// packet. Net_Pump drains every readable host packet (non-blocking) into this ordered
+// 32-slot ring (~530ms @60fps); the PlayArea loop then consumes up to K_max per render
+// frame, applying each via the VERBATIM Client_InGame_HandleHostControlInfoMessage and
+// stepping the sim once per applied packet. An empty ring => hold-last-frame.
+//
+// The ring is NEVER drained past full: unread bytes stay in the kernel socket buffer
+// (TCP backpressure) so a host control packet is never dropped — dropping a middle packet
+// would make the next one trip the handler's lost-packet fatal (frameCounter > counter).
+//
+
+#define CLIENT_HOST_RING_SIZE	32
+#define CLIENT_HOLD_BADGE_TICKS	15				// 250ms @60Hz of continuous host absence => show badge
+
+// A ring slot carries EITHER a host control packet OR a verbatim copy of a non-control host
+// message (e.g. kNSpPlayerLeft), so BOTH are applied in exact host-stream (TCP) order during
+// catch-up. Applying a sim-affecting non-control message inline while control frames sit
+// un-applied in the ring would draw the synced gSimRNG (ChooseTaggedPlayer) / mutate the
+// simulated-car set at the wrong stream position => randomSeed desync FATAL.
+typedef enum
 {
-NSpMessageHeader 					*inMess = NULL;
-uint32_t							tick;
-Boolean								gotIt = false;
+	kRingEntry_Control = 0,				// host per-frame control packet (advances the sim)
+	kRingEntry_Other,					// any other host message, dispatched via HandleOtherNetMessage
+} HostRingEntryKind;
 
-	GAME_ASSERT(gIsNetworkClient);
-
-	tick = TickCount();														// init tick for timeout
-
-	while (!gotIt)
+typedef struct
+{
+	HostRingEntryKind	kind;
+	union
 	{
-		inMess = NSpMessage_Get(gNetGame);									// get message
+		NetHostControlInfoMessageType	control;						// kRingEntry_Control
+		uint8_t							other[kNSpMaxMessageLength];	// kRingEntry_Other: verbatim message bytes
+	} u;																// union align (>=4) keeps `other` valid for NSpMessageHeader*
+} HostRingEntry;
 
-		if (inMess)
-		{
-				/* WE GOT A PACKET */
+typedef struct
+{
+	int								head;			// next slot to consume
+	int								tail;			// next slot to fill
+	HostRingEntry					slots[CLIENT_HOST_RING_SIZE];
+} HostPacketRing;									// empty: head==tail; full: (tail+1)%N==head
 
-			switch (inMess->what)
-			{
-				case kNetHostControlInfoMessage:
-					gotIt = true;
-					Client_InGame_HandleHostControlInfoMessage((NetHostControlInfoMessageType*) inMess);
-					break;
+static HostPacketRing	sClientHostRing;			// static => zero-init; reset in ResetClientHostRing
+static uint32_t			sLastHostArrivalTick = 0;	// tick of the most recent host packet PUSHED to the ring
 
-				default:
-					if (HandleOtherNetMessage(inMess))
-					{
-						gotIt = true;
-					}
-					break;
-			}
-
-			NSpMessage_Release(gNetGame, inMess);
-			inMess = NULL;
-		}
-		else
-		{
-			SDL_PumpEvents();			// keep the OS/window responsive while we block for the host packet
-			SDL_Delay(1);				// yield a slice instead of pegging a core in a zero-sleep spin
-
-				/* SEE IF WE ARE NOT GETTING THE PACKET */
-				//
-				// If this happens, then it is possible that Net Sprocket lost a packet.  There is no way to know who's packet got lost
-				// so go ahead and send our most recent packet again in case it was us.  The Host will throw out any dupes that it gets.
-				//
-				// [SOURCE PORT NOTE: I don't think we should resend packets since we're using TCP for everything]
-
-			if ((TickCount() - tick) > (DATA_TIMEOUT*60))	// see if we've been waiting longer than n seconds
-			{
-				gTimeoutCounter++;								// keep track of how often this happens
-				if (gTimeoutCounter > 3)
-				{
-					NetGameFatalError(kNetSequence_ErrorNoResponseFromHost);
-					return;
-				}
-
-#if 0	// SOURCE PORT: DON'T RESEND - We're using TCP!
-				NSpMessage_Send(gNetGame, &gClientOutMess.h, kNSpSendFlag_Registered);	// resend the last message
-#endif
-
-				tick = TickCount();														// reset tick
-			}
-		}
-	}
+static inline Boolean HostRing_Full(void)
+{
+	return ((sClientHostRing.tail + 1) % CLIENT_HOST_RING_SIZE) == sClientHostRing.head;
 }
 
-
-/**************** CLIENT CHECK IF MORE PACKETS WAITING *****************/
-//
-// Returns true if there is another Host Control Info packet waiting in the buffer.
-//
-Boolean Client_CheckIfMorePacketsWaiting(void)
+static Boolean HostRing_PushControl(const NetHostControlInfoMessageType* msg)
 {
-	if (!gNetGame)
+	if (HostRing_Full())
 		return false;
-		
-	// Peek at the socket to see if there is data
-	// Note: NSpMessage_Get does a recv(), so we just try to get a message.
-	// Since we are non-blocking, this is effectively a peek if we don't break the message handling.
-	// However, NSpMessage_Get consumes the message.
-	// So we need to handle it OR peek.
-	
-	// Actually, looking at NSpMessage_GetAsClient loop in Main.c:
-	// The game loop calls ClientReceive_ControlInfoFromHost blocking.
-	// We want to know if we should loop *again*.
-	// BUT ClientReceive_ControlInfoFromHost *consumes* the message.
-	
-	// The plan says: "Refactor the game loop... if (morePackets) ClientReceive_PollControlInfo()"
-	// But ClientReceive_ControlInfoFromHost handles the message internally.
-	
-	// Let's implement this by peeking NSpMessage_Get and if it returns a specific message type, we handle it and return true.
-	
-	NSpMessageHeader* message = NSpMessage_Get(gNetGame);
-	if (message)
+	HostRingEntry* e = &sClientHostRing.slots[sClientHostRing.tail];
+	e->kind = kRingEntry_Control;
+	e->u.control = *msg;
+	sClientHostRing.tail = (sClientHostRing.tail + 1) % CLIENT_HOST_RING_SIZE;
+	return true;
+}
+
+static Boolean HostRing_PushOther(const NSpMessageHeader* msg)
+{
+	if (HostRing_Full())
+		return false;
+	uint32_t len = msg->messageLen;
+	if (len < sizeof(NSpMessageHeader))		len = sizeof(NSpMessageHeader);		// never under-copy the header
+	if (len > kNSpMaxMessageLength)			len = kNSpMaxMessageLength;			// clamp a garbage length
+	HostRingEntry* e = &sClientHostRing.slots[sClientHostRing.tail];
+	e->kind = kRingEntry_Other;
+	memcpy(e->u.other, msg, len);
+	sClientHostRing.tail = (sClientHostRing.tail + 1) % CLIENT_HOST_RING_SIZE;
+	return true;
+}
+
+static Boolean HostRing_Pop(HostRingEntry* out)
+{
+	if (sClientHostRing.head == sClientHostRing.tail)
+		return false;
+	*out = sClientHostRing.slots[sClientHostRing.head];
+	sClientHostRing.head = (sClientHostRing.head + 1) % CLIENT_HOST_RING_SIZE;
+	return true;
+}
+
+// Clear the ring + hold timers so a second net game in the same process starts empty.
+void ResetClientHostRing(void)
+{
+	sClientHostRing.head = 0;
+	sClientHostRing.tail = 0;
+	sLastHostArrivalTick = TickCount();
+}
+
+//
+// Drain every readable host message into the ring (non-blocking). We only pull from the
+// socket while the ring has space, so a host control packet is never dropped (TCP
+// backpressure handles a sustained-full ring). Called from Net_Pump's client branch — the
+// only in-game client socket drain.
+//
+// CRITICAL ORDERING: every NON-control host message is ALSO staged into the same ordered ring
+// (not dispatched inline) so it is applied in exact host-stream order relative to the control
+// frames during catch-up. CMR7 Stage 4 makes the client IGNORE an in-game relayed kNSpPlayerLeft
+// (the host instead broadcasts a frame-aligned kEvBecomeBot event the client applies from the
+// shared table at effectiveFrame — see ApplyPendingFrameEvents), so the leave no longer draws
+// gSimRNG inline at all. Staging non-control messages in stream order is retained as the defensive
+// invariant for any future sim-affecting message. Only kNSpGameTerminated, which merely tears the
+// session down and never touches gSimRNG / the sim set, stays inline.
+//
+void Client_PumpHostPackets(void)
+{
+	if (!gIsNetworkClient || !gNetGame)
+		return;
+
+	while (!HostRing_Full())									// only Get() while we can store it
 	{
-		if (message->what == kNetHostControlInfoMessage)
+		NSpMessageHeader* inMess = NSpMessage_Get(gNetGame);	// non-blocking recv
+
+		if (inMess == NULL)
+			break;												// socket drained
+
+		if (inMess->what == kNetHostControlInfoMessage)
 		{
-			// We got another frame! Handle it immediately.
-			Client_InGame_HandleHostControlInfoMessage((NetHostControlInfoMessageType*) message);
-			NSpMessage_Release(gNetGame, message);
-			return true;
+			if (inMess->messageLen >= sizeof(NetHostControlInfoMessageType))		// don't copy a short message up to the full struct (mirror the host-side guard)
+			{
+				HostRing_PushControl((NetHostControlInfoMessageType*) inMess);	// guaranteed space (ring not full)
+				sLastHostArrivalTick = TickCount();								// arrival time for the hold badge
+			}
+			// else: malformed/short control frame — drop it (released below)
+		}
+		else if (inMess->what == kNSpGameTerminated)
+		{
+			HandleOtherNetMessage(inMess);						// teardown only (no gSimRNG / sim-set touch): act now
+			NSpMessage_Release(gNetGame, inMess);				// release before the loop reuses gNetGame (now nil after teardown)
+			break;												// session torn down — stop draining
 		}
 		else
 		{
-			// Some other message, handle it standard way
-			HandleOtherNetMessage(message);
-			NSpMessage_Release(gNetGame, message);
-			return false; // Not a control info packet, so don't skip frame for this
+			HostRing_PushOther(inMess);							// PlayerLeft / sync / etc.: apply in stream order
 		}
+
+		NSpMessage_Release(gNetGame, inMess);
 	}
-	
-	return false;
 }
 
+//
+// Pop ONE staged host packet and apply it via the verbatim handler. Returns Applied
+// (counter advanced -> caller steps the sim), Dup (old/duplicate, dropped by the handler
+// -> no sim step), or Empty (ring drained). Does NOT step the simulation itself.
+//
+HostConsumeResult Client_ConsumeHostPacketFromRing(void)
+{
+	HostRingEntry entry;
+
+	if (!HostRing_Pop(&entry))
+		return kHostConsume_Empty;
+
+	if (entry.kind == kRingEntry_Other)
+	{
+		// A non-control host message (e.g. kNSpPlayerLeft) staged in exact stream order. Dispatch it
+		// at this FIFO position so any gSimRNG draw / sim-state change (ChooseTaggedPlayer, isComputer)
+		// lands where the host applied it. It neither advances the host counter nor steps the sim, so
+		// report Dup: the catch-up loop keeps draining the ring without burning a K_max slot or stepping.
+		HandleOtherNetMessage((NSpMessageHeader*) entry.u.other);
+		return kHostConsume_Dup;
+	}
+
+	Boolean applied = Client_InGame_HandleHostControlInfoMessage(&entry.u.control);	// VERBATIM apply (may also fatal inside)
+	return applied ? kHostConsume_Applied : kHostConsume_Dup;
+}
+
+//
+// True once no host packet has arrived for ~250ms of continuous absence. Keyed on ARRIVAL
+// time (not stepped==0) so a frame that only popped duplicates still counts as having
+// "heard" the host. Suppressed during the start-light countdown.
+//
+Boolean Client_IsHoldBadgeVisible(void)
+{
+	if (!gIsNetworkClient)
+		return false;
+	if (gNoCarControls)									// suppress during start-light countdown
+		return false;
+	return (TickCount() - sLastHostArrivalTick) > CLIENT_HOLD_BADGE_TICKS;
+}
+
+
+// (CMR7 Stage 4: ClientReceive_ControlInfoFromHost DELETED — the last blocking receive shim.
+// The in-game loop is free-running (Net_Pump + ring catch-up), and Paused.c / the loading
+// barriers now use the same non-blocking pump + wall-clock sampler. The 4-strike DATA_TIMEOUT
+// fatal it carried is replaced by the per-connection lastHeard policy in NetCheck_ConnectionTimeouts.)
+
+
+// (CMR7 Stage 3: Client_CheckIfMorePacketsWaiting DELETED — dead since the free-running
+// receive rewrite; host packets are now drained into the ring by Client_PumpHostPackets.)
 
 
 /************** CLIENT SEND CONTROL INFO TO HOST *********************/
 //
-// At the end of each frame, the client sends the new control state info to the host for
-// the next frame.
+// The client sends its current control state to the host. CMR7: a single packet per call,
+// stamped with a client-owned monotonic inputSeq. The host derives edges and substitutes
+// missing inputs, so the 8-frame redundancy history (dead weight on ordered TCP) is gone.
 //
-
-// Client redundancy history. File-scope (not function-static) so ResetNetGameTransientState
-// can clear it between games — otherwise stale history from a prior game leaks into the next.
-static uint32_t					historyControlBits[8];
-static OGLVector2D				historyAnalog[8];
 
 void ClientSend_ControlInfoToHost(void)
 {
-OSStatus						status;
-
 	GAME_ASSERT(gIsNetworkClient);
-
-				/* UPDATE HISTORY */
-	
-	if (gUseRedundancy)
-	{
-		// Shift history
-		for (int k = 7; k > 0; k--)
-		{
-			historyControlBits[k] = historyControlBits[k-1];
-			historyAnalog[k] = historyAnalog[k-1];
-		}
-		
-		// Store previous frame (current info before sending)
-		// Wait! This function sends info for NEXT frame?
-		// "ClientSend_ControlInfoToHost: send this info to the host to be used the next frame"
-		// The values in gPlayerInfo are what we just read.
-		// So we want to save THIS frame to history for NEXT packet.
-		historyControlBits[0] = gPlayerInfo[gMyNetworkPlayerNum].controlBits;
-		historyAnalog[0] = gPlayerInfo[gMyNetworkPlayerNum].analogSteering;
-	}
-
 
 				/* BUILD MESSAGE */
 
@@ -1105,229 +1623,334 @@ OSStatus						status;
 	gClientOutMess.h.what 			= kNetClientControlInfoMessage;			// set message type
 	gClientOutMess.h.messageLen 	= sizeof(gClientOutMess);				// set size of message
 
-	gClientOutMess.frameCounter		= gClientSendCounter[gMyNetworkPlayerNum]++;	// send client frame counter & inc
 	gClientOutMess.playerNum		= gMyNetworkPlayerNum;
-	gClientOutMess.controlBits 		= gPlayerInfo[gMyNetworkPlayerNum].controlBits;
-	gClientOutMess.controlBitsNew  	= gPlayerInfo[gMyNetworkPlayerNum].controlBits_New;
-	gClientOutMess.analogSteering	= gPlayerInfo[gMyNetworkPlayerNum].analogSteering;
 	gClientOutMess.pauseState		= gPlayerInfo[gMyNetworkPlayerNum].net.pauseState;
-
-	if (gUseRedundancy)
-	{
-		for (int k = 0; k < 8; k++)
-		{
-			gClientOutMess.prevControlBits[k] = historyControlBits[k];
-			gClientOutMess.prevAnalogSteering[k] = historyAnalog[k];
-		}
-	}
+	gClientOutMess.inputSeq			= gClientSendCounter[gMyNetworkPlayerNum]++;	// monotonic, client-owned
+	gClientOutMess.lastHostFrameSeen= gHostSendCounter;							// RTT/diagnostics
+	gClientOutMess.controlBits 		= gPlayerInfo[gMyNetworkPlayerNum].controlBits;
+	gClientOutMess.analogSteering	= gPlayerInfo[gMyNetworkPlayerNum].analogSteering;
 
 			/* SEND IT */
 
-	status = NSpMessage_Send(gNetGame, &gClientOutMess.h, kNSpSendFlag_Registered);
-//	if (status)
-//		DoFatalAlert("ClientSend_ControlInfoToHost: NSpMessage_Send failed!");
+	NSpMessage_Send(gNetGame, &gClientOutMess.h, kNSpSendFlag_Registered);	// Stage 1 SendOrEnqueue: non-blocking
 }
 
+/*************** HOST PUMP CLIENT INPUTS ***********************/
+//
+// CMR7: non-blocking drain of every readable message. Client control packets are arrival-
+// timestamped (feeding the per-client jitter estimator) and pushed into their per-player
+// queue; everything else goes to the standard dispatcher. The host NEVER blocks here.
+// Called from Net_Pump's host branch.
+//
 
-/*************** HOST GET CONTROL INFO FROM CLIENTS ***********************/
-
-#define NET_QUEUE_SIZE 64
-typedef struct {
-    int head;
-    int tail;
-    NetClientControlInfoMessageType msgs[NET_QUEUE_SIZE];
-} PacketQueue;
-
-static PacketQueue sHostInputQueues[MAX_PLAYERS];
-
-// Init queues (Call this somewhere? Or rely on 0-init? Static is 0-init. Correct.)
-
-static void Queue_Push(int playerNum, NetClientControlInfoMessageType* msg)
+void Host_PumpClientInputs(void)
 {
-    if (!IsValidPlayerNum(playerNum)) return;		// never index sHostInputQueues[] with a wire-supplied value out of range
-    PacketQueue* q = &sHostInputQueues[playerNum];
-    // Check overflow
-    int next = (q->tail + 1) % NET_QUEUE_SIZE;
-    if (next != q->head)
-    {
-        q->msgs[q->tail] = *msg;
-        q->tail = next;
-    }
-}
+	if (!gIsNetworkHost || !gNetGame)
+		return;
 
-static NetClientControlInfoMessageType* Queue_Peek(int playerNum)
-{
-    if (!IsValidPlayerNum(playerNum)) return NULL;
-    PacketQueue* q = &sHostInputQueues[playerNum];
-    if (q->head == q->tail) return NULL;
-    return &q->msgs[q->head];
-}
+	double perfFreq = (double) SDL_GetPerformanceFrequency();
 
-static void Queue_Pop(int playerNum)
-{
-    if (!IsValidPlayerNum(playerNum)) return;
-    PacketQueue* q = &sHostInputQueues[playerNum];
-    if (q->head != q->tail)
-    {
-        q->head = (q->head + 1) % NET_QUEUE_SIZE;
-    }
-}
-
-// Clear all per-process net state that must NOT survive from one net game to the next.
-// Called from both the setup paths and EndNetworkGame so stale state can never wedge a
-// later game (the host input queues, the redundancy history, and the stall-strike counter
-// all used to persist, which is why a second hosted game in the same process would hang
-// then fatally error out).
-static void ResetNetGameTransientState(void)
-{
-	memset(sHostInputQueues, 0, sizeof(sHostInputQueues));
-	memset(historyControlBits, 0, sizeof(historyControlBits));
-	memset(historyAnalog, 0, sizeof(historyAnalog));
-	gTimeoutCounter = 0;
-}
-
-// Helper to Apply msg to gPlayerInfo (Shared logic)
-static void ApplyClientMessage(NetClientControlInfoMessageType* mess)
-{
-    int i = mess->playerNum;
-    if (!IsValidPlayerNum(i)) return;
-    gPlayerInfo[i].controlBits	= mess->controlBits;
-    gPlayerInfo[i].controlBits_New = mess->controlBitsNew;
-    gPlayerInfo[i].analogSteering = mess->analogSteering;
-    gPlayerInfo[i].net.pauseState = mess->pauseState;
-}
-
-// Recover N from Future Packet (N+Gap)
-static Boolean RecoverFromFuture(NetClientControlInfoMessageType* future, int expectedFrame)
-{
-    int i = future->playerNum;
-    if (!IsValidPlayerNum(i)) return false;
-    if (!gUseRedundancy) return false;
-    
-    int gap = future->frameCounter - expectedFrame;
-    int historyIndex = gap - 1; // Gap=1(N+1) -> Idx 0. Gap=2(N+2) -> Idx 1.
-    
-    if (historyIndex >= 0 && historyIndex < 8)
-    {
-        printf("Recovering Frame %d from Future Packet %d\n", expectedFrame, future->frameCounter);
-        gPlayerInfo[i].controlBits = future->prevControlBits[historyIndex];
-        gPlayerInfo[i].controlBits_New = 0;
-        gPlayerInfo[i].analogSteering = future->prevAnalogSteering[historyIndex];
-        gPlayerInfo[i].net.pauseState = 0;
-        return true;
-    }
-    return false;
-}
-
-void HostReceive_ControlInfoFromClients(void)
-{
-NSpMessageHeader 					*inMess;
-uint32_t								tick;
-Boolean								abort = false;
-
-	GAME_ASSERT(gIsNetworkHost);
-
-	ClearPlayerSyncMask();
-	MarkPlayerSynced(NSpPlayer_GetMyID(gNetGame));			// the host already has its own info
-
-	tick = TickCount();										// start tick for timeout
-
-	while (!AreAllPlayersSynced() && !abort)				// loop until I've got the message from all players
+	NSpMessageHeader* inMess;
+	while ((inMess = NSpMessage_Get(gNetGame)) != NULL)
 	{
-		// 1. Process Queues (Buffers)
-		for (int i = 0; i < gNumRealPlayers; i++)
+		Boolean over = false;
+
+		if (inMess->what == kNetClientControlInfoMessage)
 		{
-			if (PlayerIsSynced(i)) continue; // Already have data for this frame
+			NetClientControlInfoMessageType* cMsg = (NetClientControlInfoMessageType*) inMess;
 
-			NetClientControlInfoMessageType* msg = Queue_Peek(i);
-			while (msg)
+			// Drop malformed / out-of-range / self / bot-slot packets before any array index.
+			if (inMess->messageLen >= sizeof(NetClientControlInfoMessageType)
+				&& IsValidPlayerNum(cMsg->playerNum)
+				&& cMsg->playerNum != gMyNetworkPlayerNum
+				&& !gPlayerInfo[cMsg->playerNum].isComputer)
 			{
-				if (msg->frameCounter < gClientSendCounter[i])
+				int p = cMsg->playerNum;
+
+						/* FEED THE INTER-ARRIVAL JITTER RING (drives adaptive depth D_i) */
+
+				uint64_t now = SDL_GetPerformanceCounter();
+				if (sDepth[p].lastArrivalPC != 0 && perfFreq > 0.0)
 				{
-					// Discard Old Packet
-					Queue_Pop(i);
-					msg = Queue_Peek(i);
+					float dt = (float)((double)(now - sDepth[p].lastArrivalPC) / perfFreq);
+					sDepth[p].deltas[sDepth[p].head] = dt;
+					sDepth[p].head = (sDepth[p].head + 1) % JITTER_WINDOW;
+					if (sDepth[p].count < JITTER_WINDOW)
+						sDepth[p].count++;
 				}
-				else if (msg->frameCounter == gClientSendCounter[i])
-				{
-					// Exact Match
-					ApplyClientMessage(msg);
-					gClientSendCounter[i]++;
-					MarkPlayerSynced(i);
-					Queue_Pop(i);
-					break; // Done for this player
-				}
-				else // Future
-				{
-					// Try Recovery
-					if (RecoverFromFuture(msg, gClientSendCounter[i]))
-					{
-						gClientSendCounter[i]++;
-						MarkPlayerSynced(i);
-						// Do NOT Pop. Keep future packet for later.
-					}
-					break; // Wait for missing packets (or used recovery)
-				}
+				sDepth[p].lastArrivalPC = now;
+
+				Queue_Push(p, cMsg);
 			}
-		}
-
-		if (AreAllPlayersSynced()) break;
-
-		// 2. Poll Network
-		inMess = NSpMessage_Get(gNetGame);					// get message
-		if (inMess)
-		{
-			tick = TickCount();								// reset tick for timeout
-			switch(inMess->what)
-			{
-				case kNetClientControlInfoMessage:
-				{
-					NetClientControlInfoMessageType* cMsg = (NetClientControlInfoMessageType*)inMess;
-
-					// Drop a malformed or out-of-range client packet before it touches any array.
-					if (inMess->messageLen < sizeof(NetClientControlInfoMessageType)
-						|| !IsValidPlayerNum(cMsg->playerNum))
-					{
-						break;
-					}
-
-					// Push to the per-player queue; Step 1 (above) consumes it next loop iteration.
-					Queue_Push(cMsg->playerNum, cMsg);
-					break;
-				}
-
-				default:
-					if (HandleOtherNetMessage(inMess))
-					{
-						abort = true;
-					}
-					break;
-			}
-			NSpMessage_Release(gNetGame, inMess);			// dispose of message
 		}
 		else
 		{
-			SDL_PumpEvents();			// keep the OS/window responsive while we block for client input
-			SDL_Delay(1);				// yield a slice instead of pegging a core in a zero-sleep spin
+			over = HandleOtherNetMessage(inMess);
 		}
 
-		if ((TickCount() - tick) > (DATA_TIMEOUT*60))		// see if we've been waiting longer than n seconds
+		NSpMessage_Release(gNetGame, inMess);
+
+		if (over || !gNetGameInProgress || gNetGame == nil)		// game torn down mid-drain (e.g. everybody left)
+			return;
+	}
+}
+
+
+/*************** HOST INPUT CONSUME HELPERS ***********************/
+
+static int CompareFloatAsc(const void* a, const void* b)
+{
+	float fa = *(const float*) a;
+	float fb = *(const float*) b;
+	return (fa < fb) ? -1 : ((fa > fb) ? 1 : 0);
+}
+
+// Commit a real applied packet as the new edge-derivation baseline + ack source.
+static void Host_CommitApplied(int i, const NetClientControlInfoMessageType* m)
+{
+	HostClientInputState* S = &sLastApplied[i];
+	S->controlBits		= m->controlBits;
+	S->analogSteering	= m->analogSteering;
+	S->pauseState		= m->pauseState;
+	S->lastAppliedSeq	= m->inputSeq;
+	S->valid			= true;
+	S->subStreak		= 0;
+	gClientSendCounter[i] = m->inputSeq + 1;			// bookkeeping mirror (stale-discard baseline)
+}
+
+// Recompute the P95-jitter-derived baseline depth (<=4Hz) and slowly decay the target depth.
+static void Host_UpdateDepth(int i)
+{
+	double F = (gTargetFPS > 0) ? (1.0 / gTargetFPS) : (1.0 / 60.0);
+	double now = (double) SDL_GetPerformanceCounter() / (double) SDL_GetPerformanceFrequency();
+
+	if (now - sDepth[i].baselineSec >= 0.25)			// throttle the recompute to <=4Hz
+	{
+		int n = sDepth[i].count;
+		if (n > 0)
 		{
-			gTimeoutCounter++;								// keep track of how often this happens
-			if (gTimeoutCounter > 3)
+			float tmp[JITTER_WINDOW];
+			for (int k = 0; k < n; k++)
 			{
-				NetGameFatalError(kNetSequence_ErrorNoResponseFromClients);
-				return;
+				float dev = sDepth[i].deltas[k] - (float) F;
+				tmp[k] = (dev < 0.0f) ? -dev : dev;
 			}
-			tick = TickCount();														// reset tick
+			qsort(tmp, n, sizeof(float), CompareFloatAsc);
+
+			int idx = (int) ceilf(0.95f * (float) n) - 1;
+			if (idx < 0) idx = 0;
+			if (idx >= n) idx = n - 1;
+
+			float p95 = tmp[idx];
+			int dbase = (int) ceilf(p95 / (float) F) + 1;
+			if (dbase < 1) dbase = 1;
+			if (dbase > 8) dbase = 8;
+
+			sDepth[i].baselineDepth = (uint8_t) dbase;
+			if (dbase > (int) sDepth[i].targetDepth)
+				sDepth[i].targetDepth = (uint8_t) dbase;
 		}
+		sDepth[i].baselineSec = now;
 	}
 
-	// We got a full frame of input from everyone (the loop only exits cleanly when all
-	// players are synced). Clear the stall-strike counter so the 4-strike fatal requires
-	// 4 *consecutive* stalled frames, not 4 cumulative stalls over the whole session.
-	if (!abort)
-		gTimeoutCounter = 0;
+	// Decay one frame per 2s while above the live baseline and above the floor.
+	sDepth[i].decayAccumSec += (float) F;
+	if (sDepth[i].decayAccumSec >= 2.0f
+		&& sDepth[i].targetDepth > sDepth[i].baselineDepth
+		&& sDepth[i].targetDepth > 1)
+	{
+		sDepth[i].targetDepth--;
+		sDepth[i].decayAccumSec = 0.0f;
+	}
+}
+
+
+/*************** HOST CONSUME CLIENT INPUTS ***********************/
+//
+// CMR7: top of the host frame, before HostSend. Resolves each remote client's input for THIS
+// frame from its queue: SUBSTITUTE on underrun (hold last real input, never advance the ack),
+// COALESCE a backlog down to D_i (OR-merging per-step edges), else APPLY exactly one packet.
+// The host's own slot and bot/dropped slots are skipped (driven by GetLocalKeyState / AI).
+//
+
+void Host_ConsumeClientInputs(void)
+{
+	if (!gIsNetworkHost)
+		return;
+
+	memset(sInputFlags, 0, sizeof(sInputFlags));
+
+	const uint32_t kMovementBits =
+		(1u << kControlBit_Forward) | (1u << kControlBit_Backward) | (1u << kControlBit_Brakes);
+
+			/* BOUNDED GRACE: re-poll a couple of times to catch near-miss kernel-buffered packets */
+
+	for (int g = 0; g < GRACE_RETRIES; g++)
+	{
+		Boolean anyEmpty = false;
+		for (int i = 0; i < MAX_PLAYERS; i++)
+		{
+			if (i == gMyNetworkPlayerNum || gPlayerInfo[i].isComputer)
+				continue;
+			if (Queue_Count(i) == 0)
+			{
+				anyEmpty = true;
+				break;
+			}
+		}
+		if (!anyEmpty)
+			break;
+		SDL_Delay(1);
+		Net_Pump();									// re-drain (host branch pumps client inputs into the queues)
+	}
+
+	for (int i = 0; i < MAX_PLAYERS; i++)
+	{
+		if (i == gMyNetworkPlayerNum)				// host reads its own input at Step 3
+			continue;
+		if (gPlayerInfo[i].isComputer)				// bot/dropped -> AI drives the bits
+			continue;
+
+		HostClientInputState* S = &sLastApplied[i];
+		int D = sDepth[i].targetDepth;
+		if (D < 1) D = 1;
+
+				/* DISCARD STALE PACKETS (dups / already-consumed pre-roll) */
+
+		NetClientControlInfoMessageType* p;
+		while ((p = Queue_Peek(i)) != NULL && S->valid && p->inputSeq <= S->lastAppliedSeq)	// S->valid guard: don't discard the very first packet (inputSeq 0) before any real input is applied
+			Queue_Pop(i);
+
+		int B = Queue_Count(i);
+
+		if (B == 0)
+		{
+					/* ---- SUBSTITUTE (underrun): hold last real input, never advance the ack ---- */
+
+			gPlayerInfo[i].controlBits		= S->valid ? S->controlBits : 0;
+			gPlayerInfo[i].controlBits_New	= 0;								// no new edges while silent
+			gPlayerInfo[i].analogSteering	= S->valid ? S->analogSteering : (OGLVector2D){0,0};
+			gPlayerInfo[i].net.pauseState	= S->valid ? S->pauseState : 0;		// HELD: a radio blip never spuriously unpauses
+
+			if (S->subStreak < 0xFFFF)
+				S->subStreak++;
+
+			if (S->subStreak > SUB_DECAY_AFTER)
+			{
+				// Graceful coast: decay the APPLIED bits/analog ONLY. Leave S->controlBits (the
+				// edge baseline) intact so a still-held button does not re-fire as a NEW edge on
+				// recovery (which would double-fire e.g. a weapon throw).
+				gPlayerInfo[i].analogSteering.x *= 0.9f;
+				gPlayerInfo[i].analogSteering.y *= 0.9f;
+				gPlayerInfo[i].controlBits &= ~kMovementBits;
+			}
+
+			sInputFlags[i] |= INPUT_FLAG_SUBSTITUTED;
+			if (sDepth[i].targetDepth < 8)
+				sDepth[i].targetDepth++;										// immediate underrun bump
+			continue;
+		}
+
+		if (B > D + 1)
+		{
+					/* ---- COALESCE down to D: OR-merge per-step edges, apply the newest ---- */
+
+			int toPop = B - D;
+			uint32_t prev = S->controlBits;
+			uint32_t merged = 0;
+			NetClientControlInfoMessageType last;
+			memset(&last, 0, sizeof(last));
+
+			for (int k = 0; k < toPop; k++)
+			{
+				p = Queue_Peek(i);
+				if (!p) break;
+				merged |= Host_DeriveEdges(prev, p->controlBits);	// preserve EVERY press across the window
+				prev = p->controlBits;
+				last = *p;
+				Queue_Pop(i);
+			}
+
+			gPlayerInfo[i].controlBits		= last.controlBits;
+			gPlayerInfo[i].controlBits_New	= merged;
+			gPlayerInfo[i].analogSteering	= last.analogSteering;
+			gPlayerInfo[i].net.pauseState	= last.pauseState;
+
+			Host_CommitApplied(i, &last);
+			sInputFlags[i] |= INPUT_FLAG_COALESCED;
+		}
+		else
+		{
+					/* ---- APPLY exactly one real packet ---- */
+
+			p = Queue_Peek(i);
+			gPlayerInfo[i].controlBits		= p->controlBits;
+			gPlayerInfo[i].controlBits_New	= Host_DeriveEdges(S->controlBits, p->controlBits);
+			gPlayerInfo[i].analogSteering	= p->analogSteering;
+			gPlayerInfo[i].net.pauseState	= p->pauseState;
+
+			Host_CommitApplied(i, p);
+			Queue_Pop(i);
+		}
+
+		Host_UpdateDepth(i);
+	}
+}
+
+
+/*************** HOST INIT INPUT CONTROL ***********************/
+//
+// Called once by the host right before the game loop. ResetNetGameTransientState() has
+// already zeroed the per-client state; here we seed each remote client's adaptive depth
+// from its WiFi/wired hint (wired -> D=2, WiFi -> D=6). The host slot and bots are left at
+// the default (0, treated as 1 by the consumer).
+//
+
+void Host_InitInputControl(void)
+{
+	for (int i = 0; i < MAX_PLAYERS; i++)
+	{
+		if (i == gMyNetworkPlayerNum || gPlayerInfo[i].isComputer)
+			continue;
+		sDepth[i].targetDepth = (sClientConnectionHint[i] == 1) ? 6 : 2;
+	}
+}
+
+
+/*************** SAMPLE AND SEND LOCAL INPUT (CLIENT, WALL-CLOCK) ***********************/
+//
+// CMR7 (G1): the client's uplink is paced by the wall clock, decoupled from host-packet
+// receipt, so a downlink stall never silences the uplink. Emits one input packet per F
+// seconds, bursting up to MAX_SAMPLE_BURST to refill the host's backlog after a stall, and
+// resyncing after a long wall-clock gap (app suspend) to avoid a flood of stale packets.
+//
+
+void SampleAndSendLocalInput(Boolean* outSchedulePause)
+{
+	GAME_ASSERT(gIsNetworkClient);
+
+	double F = (gTargetFPS > 0) ? (1.0 / gTargetFPS) : (1.0 / 60.0);
+	double now = (double) SDL_GetPerformanceCounter() / (double) SDL_GetPerformanceFrequency();
+
+	if (sNextSampleTime == 0.0 || (now - sNextSampleTime) > 0.250)	// first call / suspend resync
+		sNextSampleTime = now;
+
+	int burst = 0;
+	while (now >= sNextSampleTime && burst < MAX_SAMPLE_BURST)
+	{
+		ReadKeyboard();
+		GetLocalKeyState();
+		// GetNewNeedStateAnyP is edge-triggered: OR into the caller's flag so a burst can't drop the edge.
+		if (GetNewNeedStateAnyP(kNeed_UIPause))
+			*outSchedulePause = true;
+		gPlayerInfo[gMyNetworkPlayerNum].net.pauseState = *outSchedulePause;
+
+		ClientSend_ControlInfoToHost();				// inputSeq = gClientSendCounter[me]++
+
+		sNextSampleTime += F;
+		burst++;
+		now = (double) SDL_GetPerformanceCounter() / (double) SDL_GetPerformanceFrequency();
+	}
 }
 
 
@@ -1463,13 +2086,16 @@ NetPlayerCharTypeMessage	outMess;
 
 /***************** GET VEHICLE SELECTION FROM NET PLAYERS ***********************/
 
-void GetVehicleSelectionFromNetPlayers(void)
+// Returns true if the player aborted or the net game was torn down while waiting for the
+// other players' vehicle selections, so the caller can bail cleanly instead of starting a
+// broken match.
+Boolean GetVehicleSelectionFromNetPlayers(void)
 {
 	ClearPlayerSyncMask();
 	MarkPlayerSynced(NSpPlayer_GetMyID(gNetGame));		// we have our own local info already
 
 	gNetSequenceState = kNetSequence_WaitingForPlayerVehicles;
-	DoNetGatherScreen();
+	return DoNetGatherScreen();							// true == aborted/torn down
 }
 
 
@@ -1499,10 +2125,19 @@ Boolean HandleOtherNetMessage(NSpMessageHeader	*message)
 					/* A PLAYER UNEXPECTEDLY HAS LEFT THE GAME */
 
 		case	kNSpPlayerLeft:
-				PlayerUnexpectedlyLeavesGame((NSpPlayerLeftMessage *)message);
-				if (gGameOver)
+				if (gNetSequenceState == kNetSequence_GameLoop)
 				{
-					gNetSequenceState = kNetSequence_OfflineEverybodyLeft;
+					// CMR7 Stage 4 (G3): a running sim must convert frame-aligned, not at TCP-arrival time.
+					// The HOST schedules + re-broadcasts a kEvBecomeBot event; EVERY peer (host included)
+					// applies it from the shared table at the identical sim frame. A relayed leave on a
+					// CLIENT is ignored here — the host's broadcast event drives the conversion deterministically.
+					if (gIsNetworkHost)
+						ScheduleBecomeBotFromLeave((NSpPlayerLeftMessage *)message);
+				}
+				else
+				{
+					// Lobby / loading barriers: no running sim to desync, so convert immediately.
+					PlayerUnexpectedlyLeavesGame((NSpPlayerLeftMessage *)message);
 				}
 				break;
 
@@ -1532,6 +2167,11 @@ Boolean HandleOtherNetMessage(NSpMessageHeader	*message)
 					/* NULL PACKET */
 
 		case	kNetSyncMessage:
+				break;
+
+					/* CMR7 Stage 4: HEARTBEAT — lastHeard was already refreshed in the NetLow Get path */
+
+		case	kNetKeepAliveMessage:
 				break;
 
 				/* UNEXPECTED INTERNAL MESSAGE TYPES                                          */
@@ -1567,40 +2207,20 @@ Boolean HandleOtherNetMessage(NSpMessageHeader	*message)
 
 static void PlayerUnexpectedlyLeavesGame(NSpPlayerLeftMessage *mess)
 {
-int			i;
-NSpPlayerID	playerID = mess->playerID;
-
-	i = FindHumanByNSpPlayerID(playerID);
+	// CMR7 Stage 4: the IMMEDIATE (lobby / loading-barrier) leave path — no running sim to desync.
+	// In-game leaves go through the frame-aligned ScheduleBecomeBotFromLeave path instead.
+	int i = FindHumanByNSpPlayerID(mess->playerID);
 
 	if (i < 0)
 	{
 		// A leave for an unknown / already-removed player id: e.g. a client that dropped during
 		// the lobby before ids were assigned, or a duplicate leave. Ignore it rather than taking
 		// the whole session down with a fatal alert.
-		printf("PlayerUnexpectedlyLeavesGame: no matching player id #%d; ignoring.\n", (int) playerID);
+		printf("PlayerUnexpectedlyLeavesGame: no matching player id #%d; ignoring.\n", (int) mess->playerID);
 		return;
 	}
 
-
-	gPlayerInfo[i].isComputer = true;							// turn it into a computer player.
-	gPlayerInfo[i].isEliminated = true;							// also eliminate from battles
-	gPlayerInfo[i].net.pauseState = 0;							// unpause if they were paused
-	gNumGatheredPlayers--;										// one less net player in the game
-	// gNumRealPlayers--;										// DON'T decrement this, or the screen layout will change mid-game!
-
-	if (gNumRealPlayers <= 1)									// see if nobody to play with
-		gGameOver = true;
-
-			/* HANDLE SPECIFICS */
-
-	switch(gGameMode)
-	{
-		case	GAME_MODE_TAG1:
-		case	GAME_MODE_TAG2:
-				if (gPlayerInfo[i].isIt)
-					ChooseTaggedPlayer();
-				break;
-	}
+	ApplyBecomeBot(i);
 }
 
 

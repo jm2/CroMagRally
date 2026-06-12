@@ -4,16 +4,18 @@ name: Make Release Builds
 #  - release:published  -> builds run automatically when you publish a GitHub Release
 #                          (artifacts are uploaded to the run; download + attach to the release).
 #  - workflow_dispatch  -> run manually from the Actions tab for test/smoke builds.
-# Optional: to drive builds straight off a tag push instead of a published release,
-# uncomment the `push:` block below. Leaving both enabled can double-build if you
-# publish a release from the same tag, so pick one trigger model.
+# Triggers:
+#  - push of a v* tag (e.g. v3.1.0) -> builds run automatically (the usual release path).
+#  - release:published              -> also builds (e.g. if you publish a Release from the tag).
+#  - workflow_dispatch              -> run manually from the Actions tab for test/smoke builds.
+# Note: pushing a v* tag AND publishing a Release from that same tag will build twice.
 on:
+  push:
+    tags:
+      - 'v*'
   release:
     types: [published]
   workflow_dispatch:
-  # push:
-  #   tags:
-  #     - 'v*'
 
 permissions:
   contents: read

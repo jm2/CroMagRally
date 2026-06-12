@@ -110,4 +110,5 @@ void GameMain(void);
 void ToolBoxInit(void);
 void FadeOutArea(void);
 void MoveEverything(void);
+void UpdateGameModeSpecifics(void);		// CMR7: shared by Main.c game loop and the client pause-menu lockstep
 void InitDefaultPrefs(void);

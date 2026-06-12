@@ -724,12 +724,15 @@ float			speed;
 			/* SET IN MOTION */
 			/*****************/
 
-		speed = 8000.0f + VisualRandomFloat() * 1000.0f;
+		// The thrown rock's trajectory is collision-relevant (rocks can hit cars), so key the
+		// launch speed/heading/Delta.y on the catapult's heading via stateless ChaoticFloat
+		// (unique per-rock/per-draw modifier) instead of the unsynced VisualRandom stream.
+		speed = 8000.0f + ChaoticFloat(theNode->Rot.y, i*3 + 0) * 1000.0f;
 
-		OGLMatrix4x4_SetRotate_Y(&m, theNode->Rot.y + (VisualRandomFloat2() * .3f));
+		OGLMatrix4x4_SetRotate_Y(&m, theNode->Rot.y + (ChaoticFloat(theNode->Rot.y, i*3 + 1) - 0.5f) * 2.0f * .3f);
 		OGLVector3D_Transform(&throwVector,	&m, &newObj->Delta);
 
-		newObj->Delta.y += VisualRandomFloat() * .1f;
+		newObj->Delta.y += ChaoticFloat(theNode->Rot.y, i*3 + 2) * .1f;
 
 		newObj->Delta.x *= speed;															// give it speed
 		newObj->Delta.y *= speed;
@@ -945,9 +948,12 @@ OGLPoint3D			pt;
 
 		/* CALC VECTOR FROM GODDESS TO PLAYER */
 
-	boltVector.x = (gPlayerInfo[playerNum].coord.x + VisualRandomFloat2() * 300.0f) - x;
+	// The targeting offset decides WHERE the bolt strikes (damage gating) -> sim-affecting,
+	// so key it on the target player's coord + slot via stateless ChaoticFloat. The bolt-path
+	// jaggedness endpoints below stay on VisualRandom (pure visual).
+	boltVector.x = (gPlayerInfo[playerNum].coord.x + (ChaoticFloat(gPlayerInfo[playerNum].coord.x, playerNum) - 0.5f) * 2.0f * 300.0f) - x;
 	boltVector.y = gPlayerInfo[playerNum].coord.y - y;
-	boltVector.z = (gPlayerInfo[playerNum].coord.z + VisualRandomFloat2() * 300.0f) - z;
+	boltVector.z = (gPlayerInfo[playerNum].coord.z + (ChaoticFloat(gPlayerInfo[playerNum].coord.z, playerNum + 5) - 0.5f) * 2.0f * 300.0f) - z;
 
 	boltVector.x /= (float)(numSegments-1);							// divide vector length for multiple segments
 	boltVector.y /= (float)(numSegments-1);
@@ -1188,10 +1194,12 @@ NewParticleDefType		newParticleDef;
 
 	speed = dist * .9f;
 
-	OGLMatrix4x4_SetRotate_Y(&m2, theNode->Rot.y + (VisualRandomFloat2() * .1f));
+	// The cannonball's trajectory is collision-relevant, so key the launch jitter on the
+	// cannon's heading via stateless ChaoticFloat instead of the unsynced VisualRandom stream.
+	OGLMatrix4x4_SetRotate_Y(&m2, theNode->Rot.y + (ChaoticFloat(theNode->Rot.y, 0) - 0.5f) * 2.0f * .1f);
 	OGLVector3D_Transform(&throwVector,	&m2, &delta);
 
-	newObj->Delta.y += VisualRandomFloat() * .1f;
+	newObj->Delta.y += ChaoticFloat(theNode->Rot.y, 1) * .1f;
 
 	newObj->Delta.x = delta.x * speed;															// give it speed
 	newObj->Delta.y = delta.y * speed;
@@ -1490,9 +1498,12 @@ OGLPoint3D			pt;
 
 		/* CALC VECTOR FROM CAPSULE TO PLAYER */
 
-	boltVector.x = (gPlayerInfo[playerNum].coord.x + VisualRandomFloat2() * 300.0f) - x;
+	// The targeting offset decides WHERE the bolt strikes (damage gating) -> sim-affecting,
+	// so key it on the target player's coord + slot via stateless ChaoticFloat. The bolt-path
+	// jaggedness endpoints below stay on VisualRandom (pure visual).
+	boltVector.x = (gPlayerInfo[playerNum].coord.x + (ChaoticFloat(gPlayerInfo[playerNum].coord.x, playerNum) - 0.5f) * 2.0f * 300.0f) - x;
 	boltVector.y = gPlayerInfo[playerNum].coord.y - y;
-	boltVector.z = (gPlayerInfo[playerNum].coord.z + VisualRandomFloat2() * 300.0f) - z;
+	boltVector.z = (gPlayerInfo[playerNum].coord.z + (ChaoticFloat(gPlayerInfo[playerNum].coord.z, playerNum + 5) - 0.5f) * 2.0f * 300.0f) - z;
 
 	boltVector.x /= (float)(numSegments-1);							// divide vector length for multiple segments
 	boltVector.y /= (float)(numSegments-1);

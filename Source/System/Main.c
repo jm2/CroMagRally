@@ -42,7 +42,9 @@ static Boolean PlayGame_Tournament(void);
 static Boolean PlayGame_Tag(void);
 static Boolean PlayGame_Survival(void);
 static Boolean PlayGame_CaptureTheFlag(void);
-static void UpdateGameModeSpecifics(void);
+void UpdateGameModeSpecifics(void);
+
+static void StepGameSimulation(void);			// CMR7 Stage 3: one sim step (host/SP run once; client runs 0..K_max)
 
 static void TallyTokens(void);
 
@@ -59,6 +61,8 @@ static void TallyTokens(void);
 
 Byte				gDebugMode = 0;				// 0 == none, 1 = fps, 2 = all
 Boolean				gIsInGame = false;
+
+int					gClientCatchUpMax = 3;		// CMR7 Stage 3: client bounded catch-up K_max per render frame (weakest-Android fallback 2)
 
 uint32_t				gAutoFadeStatusBits;
 
@@ -955,6 +959,41 @@ static void CheckCheats(void)
 
 /**************** PLAY AREA ************************/
 
+/********************* STEP GAME SIMULATION **********************/
+//
+// One simulation step. CMR7 Stage 3 factors this out of the PlayArea inner loop so the
+// free-running client can run it 0..gClientCatchUpMax times per render frame (host and
+// single-player still run it exactly once). Behaviour is identical to the old inline block.
+//
+
+static void StepGameSimulation(void)
+{
+	// CMR7 Stage 4 (G3): apply frame-aligned events (become-bot) for the frame just sent/consumed —
+	// AFTER the per-frame seed exchange (HostSend / the client handler, both already done) and BEFORE
+	// MoveEverything, so any conditional RNG draw lands at the identical stream position on every peer.
+	ApplyPendingFrameEvents();
+
+	if (IsNetGamePaused())
+	{
+		gSimulationPaused = true;
+		SetupNetPauseScreen();
+		MoveObjects();
+		DoPlayerTerrainUpdate();
+	}
+	else
+	{
+		gSimulationPaused = false;
+		RemoveNetPauseScreen();
+
+		MoveEverything();
+		UpdateGameModeSpecifics();
+		DoPlayerTerrainUpdate();
+
+		gSimulationFrame++;
+	}
+}
+
+
 static void PlayArea(void)
 {
 	Boolean schedulePause = false;
@@ -1001,21 +1040,23 @@ static void PlayArea(void)
 	//==========================================================================
 
 	//
-	// WIFI JITTER FIX: CLIENT PRE-ROLL
-	// Send a burst of initial input packets to fill the Host's OS buffer.
-	// This prevents the Host from stalling (stuttering) if packets arrive with jitter.
+	// CMR7: replace the old ~500ms 30-frame pre-roll with D_init duplicate input packets.
+	// The client banks D_init REAL packets in the host's per-client queue so the very first
+	// consumed frame is real (wired seeds 2, WiFi seeds 6); each duplicate increments
+	// gClientSendCounter[me]. The host seeds its per-client adaptive depth to match.
 	//
-	if (gIsNetworkClient && gUseRedundancy)
+	if (gIsNetworkClient)
 	{
-		int framesToBuffer = 30;
-		if (gTargetFPS > 0)
-			framesToBuffer = (30 * gTargetFPS) / 60;
-
-		for (int i = 0; i < framesToBuffer; i++) // Scaled buffer to ~500ms equivalent
-		{
+		int dinit = (Net_GetConnectionHint() == 1) ? 6 : 2;
+		for (int i = 0; i < dinit; i++)
 			ClientSend_ControlInfoToHost();
-		}
 	}
+	else if (gIsNetworkHost)
+	{
+		Host_InitInputControl();				// seed per-client adaptive input-queue depth D_init
+	}
+
+	Net_RefreshLastHeard();						// CMR7 Stage 4: refresh liveness clocks so the long lobby/load gap can't trip a false drop
 
 	MakeFadeEvent(true);
 
@@ -1024,63 +1065,88 @@ static void PlayArea(void)
 	{
 		uint64_t startTick = SDL_GetPerformanceCounter();
 
+		Net_Pump();						// Stage 1: drain non-blocking send rings (cheap no-op outside net games)
+		NetCheck_ConnectionTimeouts();	// CMR7 Stage 4: per-connection lastHeard badge/drop policy (no-op outside net games)
+
 		//
-		// 1. INPUT & NETWORK SYNC
+		// 1. INPUT / NETWORK SYNC  +  2. SIMULATION
+		//
+		// Single-player and the host run exactly one sim step per render frame. The CMR7
+		// client is free-running (Stage 3): Net_Pump drains host packets into the ring, then
+		// it consumes up to gClientCatchUpMax this frame, stepping the sim once per applied
+		// packet (each replays its own host dt for a bit-identical trajectory). An empty ring
+		// => hold-last-frame: the unconditional render at Step 4 re-presents the prior image.
 		//
 		if (!gNetGameInProgress)
 		{
 			ReadKeyboard();									// read local keys
 			GetLocalKeyState();								// build a control state bitfield
 			schedulePause = GetNewNeedStateAnyP(kNeed_UIPause);
+
+			StepGameSimulation();
 		}
 		else if (gIsNetworkClient)
 		{
-			// Clients MUST wait for the Host's packet (Lockstep)
-			// This blocks until the packet for this frame arrives.
-			ClientReceive_ControlInfoFromHost();
+			Net_Pump();										// flush send rings + drain host packets into the ring
+
+			int guard = 0;
+			for (int k = 0; k < gClientCatchUpMax; )		// bounded catch-up (K_max)
+			{
+				HostConsumeResult r = Client_ConsumeHostPacketFromRing();
+				if (r == kHostConsume_Applied)
+				{
+					StepGameSimulation();					// one sim step per applied host packet
+					k++;
+				}
+				else if (r == kHostConsume_Dup)
+				{
+					if (++guard > 2*gClientCatchUpMax)		// defense vs a pathological dup storm
+						break;
+					// duplicate: no sim step, do not burn a k-slot
+				}
+				else
+				{
+					break;									// kHostConsume_Empty -> hold-last-frame this render frame
+				}
+			}
 		}
 		else
 		{
-			// Host must send the inputs for THIS frame before simulation
+			// CMR7 host frame: drain client inputs (non-blocking), resolve THIS frame's
+			// per-client input (substitute/coalesce — the host NEVER waits on a radio), then
+			// broadcast — all before simulation.
+			Net_Pump();
+			Host_ConsumeClientInputs();
 			HostSend_ControlInfoToClients();
+
+			StepGameSimulation();
 		}
 
 
 		//
-		// 2. SIMULATION
-		//
-		if (IsNetGamePaused())
-		{
-			gSimulationPaused = true;
-			SetupNetPauseScreen();
-			MoveObjects();
-			DoPlayerTerrainUpdate();
-		}
-		else
-		{
-			gSimulationPaused = false;
-			RemoveNetPauseScreen();
-
-			MoveEverything();
-			UpdateGameModeSpecifics();
-			DoPlayerTerrainUpdate();
-
-			gSimulationFrame++;
-		}
-
-
-		//
-		// 3. SEND CLIENT INPUT (For NEXT frame)
+		// 3. READ LOCAL INPUT (For NEXT frame) / SEND CLIENT INPUT
 		//
 		if (gNetGameInProgress)
 		{
-			ReadKeyboard();
-			GetLocalKeyState();
-			schedulePause = GetNewNeedStateAnyP(kNeed_UIPause);
-			gPlayerInfo[gMyNetworkPlayerNum].net.pauseState = schedulePause;
+			schedulePause = false;
 
 			if (gIsNetworkClient)
-				ClientSend_ControlInfoToHost();
+			{
+				// CMR7 (G1): wall-clock-paced sampler — the uplink cadence is decoupled from
+				// host-packet receipt, so a downlink stall never silences the uplink. It reads
+				// local input and sends one (or a small catch-up burst of) input packet(s).
+				SampleAndSendLocalInput(&schedulePause);
+				Net_Pump();									// flush the just-enqueued input packets
+			}
+			else
+			{
+				// Host reads its own input here for the NEXT frame (~1F latency preserved).
+				ReadKeyboard();
+				GetLocalKeyState();
+				if (GetNewNeedStateAnyP(kNeed_UIPause))
+					schedulePause = true;
+				gPlayerInfo[gMyNetworkPlayerNum].net.pauseState = schedulePause;
+			}
 		}
 
 
@@ -1111,18 +1177,9 @@ static void PlayArea(void)
 		}
 
 
-			/************************************/
-			/* NET HOST RECEIVE CLIENT KEY INFO */
-			/************************************/
-			//
-			// Odds are that the clients have all sent their control into to the Host by now,
-			// so the Host can read all of the client key info for use on the next frame.
-			//
-
-		if (gIsNetworkHost)
-		{
-			HostReceive_ControlInfoFromClients();		// get client info
-		}
+			// CMR7: the end-of-frame blocking HostReceive_ControlInfoFromClients() is DELETED.
+			// Host input intake now happens at top-of-frame via Net_Pump + Host_ConsumeClientInputs,
+			// so the host never blocks on any client's radio.
 
 
 			/**************/
@@ -1558,7 +1615,7 @@ static void CleanupLevel(void)
 
 /*************** UPDATE GAME MODE SPECIFICS **********************/
 
-static void UpdateGameModeSpecifics(void)
+void UpdateGameModeSpecifics(void)
 {
 short	i,t,winner;
 
@@ -1769,6 +1826,54 @@ void GameMain(void)
 			else
 			{
 				SDL_Log("Failed to create MulticastLock");
+			}
+
+			// CMR7 Stage 4: acquire a high-priority WifiLock so the radio stays out of power-save during
+			// net games (the MulticastLock above only keeps multicast/discovery alive). Prefer
+			// WIFI_MODE_FULL_LOW_LATENCY (=4, API 29+); fall back to WIFI_MODE_FULL_HIGH_PERF (=3) on
+			// older OSes / if the call throws. We hold it for the process via a GlobalRef, mirroring the
+			// MulticastLock. NOTE: this does NOT survive OS app-backgrounding — Android suspends the
+			// socket threads after ~8s in the background, so a backgrounded peer still goes silent and is
+			// converted to a bot by the lastHeard/keepalive policy regardless of this lock.
+			{
+				jmethodID createWifiLock = (*env)->GetMethodID(env, wifiManagerClass, "createWifiLock", "(ILjava/lang/String;)Landroid/net/wifi/WifiManager$WifiLock;");
+				jstring wifiTag = (*env)->NewStringUTF(env, "CroMagRally");
+
+				jobject wifiLock = NULL;
+				if (createWifiLock)
+				{
+					wifiLock = (*env)->CallObjectMethod(env, wifiManager, createWifiLock, 4 /*WIFI_MODE_FULL_LOW_LATENCY*/, wifiTag);
+
+					if ((*env)->ExceptionCheck(env) || !wifiLock)		// API<29 / threw: retry FULL_HIGH_PERF
+					{
+						(*env)->ExceptionClear(env);
+						wifiLock = (*env)->CallObjectMethod(env, wifiManager, createWifiLock, 3 /*WIFI_MODE_FULL_HIGH_PERF*/, wifiTag);
+						if ((*env)->ExceptionCheck(env))
+						{
+							(*env)->ExceptionClear(env);
+							wifiLock = NULL;
+						}
+					}
+				}
+
+				if (wifiLock)
+				{
+					jclass wifiLockClass = (*env)->GetObjectClass(env, wifiLock);
+					jmethodID wifiAcquire = (*env)->GetMethodID(env, wifiLockClass, "acquire", "()V");
+					(*env)->CallVoidMethod(env, wifiLock, wifiAcquire);
+
+					static jobject globalWifiLock = NULL;				// GlobalRef keeps the lock held for the process
+					globalWifiLock = (*env)->NewGlobalRef(env, wifiLock);
+
+					(*env)->DeleteLocalRef(env, wifiLockClass);
+					(*env)->DeleteLocalRef(env, wifiLock);
+				}
+				else
+				{
+					SDL_Log("Failed to create WifiLock");
+				}
+
+				(*env)->DeleteLocalRef(env, wifiTag);
 			}
 		}
 		else

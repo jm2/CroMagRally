@@ -52,6 +52,7 @@ extern Boolean					gDisableHiccupTimer;
 extern Boolean					gDrawLensFlare;
 extern Boolean					gDrawingOverlayPane;
 extern Boolean					gGameOver;
+extern int						gClientCatchUpMax;		// CMR7 Stage 3: client bounded catch-up K_max per render frame
 extern Boolean					gSimulationPaused;		// prevents gameplay objects from being simulated
 extern Boolean					gHideInfobar;
 extern Boolean					gIsInGame;

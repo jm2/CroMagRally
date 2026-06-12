@@ -18,10 +18,10 @@ typedef int sockfd_t;
 
 #define MAX_CLIENTS MAX_LOCAL_PLAYERS
 #define kNSpPlayerNameLength 32
-#define kNSpMaxPayloadLength 256
+#define kNSpMaxPayloadLength 512			// CMR7: bumped 256->512 to fit the wider host control msg (must change with the 4CC)
 #define kNSpMaxMessageLength (kNSpMaxPayloadLength + sizeof(NSpMessageHeader))
 
-#define kNSpCMRProtocol4CC 'CMR6'
+#define kNSpCMRProtocol4CC 'CMR7'			// CMR7 wire format; old 'CMR6' peers are cleanly rejected by the version check
 
 typedef enum
 {
@@ -171,6 +171,7 @@ int NSpGame_StopAdvertising(NSpGameReference gameRef);
 int NSpGame_AdvertiseTick(NSpGameReference gameRef, float dt);
 bool NSpGame_IsAdvertising(NSpGameReference gameRef);
 int NSpGame_Dispose(NSpGameReference inGame, int disposeFlags);
+void NSpGame_FlushSends(NSpGameReference gameRef);
 
 NSpSearchReference NSpSearch_StartSearchingForGameHosts(void);
 int NSpSearch_Dispose(NSpSearchReference searchRef);
@@ -182,3 +183,8 @@ const char* NSpSearch_GetHostAddress(NSpSearchReference searchRef, int gameNum);
 int NSpPlayer_Kick(NSpGameReference gameRef, NSpPlayerID kickedPlayerID);
 const char* NSpPlayer_GetName(NSpGameReference gameRef, NSpPlayerID playerID);
 NSpPlayerID NSpPlayer_GetMyID(NSpGameReference gameRef);
+
+// CMR7 Stage 4: per-connection liveness (ms, SDL_GetTicks). lastHeard/hostLastHeard are pure in-memory.
+uint32_t NSpPlayer_GetLastHeard(NSpGameReference gameRef, NSpPlayerID playerID);	// host: this client's last-received-bytes time (0 if unknown)
+uint32_t NSpGame_GetHostLastHeard(NSpGameReference gameRef);						// client: host's last-received-bytes time
+void NSpGame_TouchAllLastHeard(NSpGameReference gameRef);						// refresh all liveness clocks to now (game-loop entry)

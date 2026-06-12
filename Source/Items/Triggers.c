@@ -895,14 +895,9 @@ float	speed;
 	theNode->DeltaRot.z = (ChaoticFloat(speed, 2) - 0.5f) * 2.0f * speed;
 	theNode->DeltaRot.y = (ChaoticFloat(speed, 3) - 0.5f) * speed; // (raw * .5 * 2 = raw) 
 
-		/* MAKE CAR SPIN WILDLY */
-
-	// ChaoticFloat for car spin, centered around 0 so the kick can go either direction.
-	// The original sinf()-based spin was symmetric; the ChaoticFloat conversion dropped the
-	// -0.5 offset, biasing every cactus hit to spin the same way. ChaoticFloat is [0..1], so
-	// (ChaoticFloat - 0.5) * 2 maps to [-1..1] before scaling.
-	whoNode->DeltaRot.y = (ChaoticFloat(whoNode->Speed3D, whoNode->PlayerNum) - 0.5f) * 2.0f * 5.0f;
-	whoNode->DeltaRot.z = (ChaoticFloat(whoNode->Speed3D, whoNode->PlayerNum+10) - 0.5f) * 2.0f * 2.5f;
+		// The 1999 original spins only the cactus prop (theNode), not the car. The fork's
+		// car-spin on cactus hits (whoNode->DeltaRot) was a non-original addition; removed
+		// to stay true to the original gameplay.
 
 		gDelta.y += 1000.0f;				// pop up the guy who hit the cactus
 		
@@ -1438,8 +1433,10 @@ short	teamNum;
 
 			/* PUT TORCH ON BASE */
 
-	theTorch->Coord.x = theNode->Coord.x + VisualRandomFloat2() * 100.0f;
-	theTorch->Coord.z = theNode->Coord.z + VisualRandomFloat2() * 100.0f;
+	// The captured-torch placement sets capture/scoring geometry -> sim-affecting, so key it on
+	// the base coord + team via stateless ChaoticFloat instead of the unsynced VisualRandom stream.
+	theTorch->Coord.x = theNode->Coord.x + (ChaoticFloat(theNode->Coord.x, teamNum) - 0.5f) * 2.0f * 100.0f;
+	theTorch->Coord.z = theNode->Coord.z + (ChaoticFloat(theNode->Coord.z, teamNum + 1) - 0.5f) * 2.0f * 100.0f;
 	theTorch->Coord.y = theNode->Coord.y + gObjectGroupBBoxList[MODEL_GROUP_GLOBAL][GLOBAL_ObjType_TeamBaseRed].max.y;
 
 	UpdateObjectTransforms(theTorch);
