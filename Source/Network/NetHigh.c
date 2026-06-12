@@ -91,6 +91,8 @@ void Net_Pump(void)
 
 	if (gIsNetworkHost)
 		Host_PumpClientInputs();			// CMR7: non-blocking drain of client inputs into per-player queues
+	else if (gIsNetworkClient)
+		Client_PumpHostPackets();			// CMR7 Stage 3: non-blocking drain of host control packets into the ring
 }
 
 
@@ -262,6 +264,7 @@ void ResetNetGameTransientState(void)
 	gHostSendCounter = 0;
 	memset(gClientSendCounter, 0, sizeof(gClientSendCounter));
 	sNextSampleTime = 0.0;
+	ResetClientHostRing();					// CMR7 Stage 3: empty the client host-packet ring + reset hold timers
 }
 
 
@@ -1082,122 +1085,237 @@ static Boolean Client_InGame_HandleHostControlInfoMessage(NetHostControlInfoMess
 	return true;
 }
 
+
+#pragma mark - Client host-packet ring (CMR7 Stage 3)
+
+//
+// CMR7 Stage 3: the client no longer blocks waiting for the host's per-frame control
+// packet. Net_Pump drains every readable host packet (non-blocking) into this ordered
+// 32-slot ring (~530ms @60fps); the PlayArea loop then consumes up to K_max per render
+// frame, applying each via the VERBATIM Client_InGame_HandleHostControlInfoMessage and
+// stepping the sim once per applied packet. An empty ring => hold-last-frame.
+//
+// The ring is NEVER drained past full: unread bytes stay in the kernel socket buffer
+// (TCP backpressure) so a host control packet is never dropped — dropping a middle packet
+// would make the next one trip the handler's lost-packet fatal (frameCounter > counter).
+//
+
+#define CLIENT_HOST_RING_SIZE	32
+#define CLIENT_HOLD_BADGE_TICKS	15				// 250ms @60Hz of continuous host absence => show badge
+
+// A ring slot carries EITHER a host control packet OR a verbatim copy of a non-control host
+// message (e.g. kNSpPlayerLeft), so BOTH are applied in exact host-stream (TCP) order during
+// catch-up. Applying a sim-affecting non-control message inline while control frames sit
+// un-applied in the ring would draw the synced gSimRNG (ChooseTaggedPlayer) / mutate the
+// simulated-car set at the wrong stream position => randomSeed desync FATAL.
+typedef enum
+{
+	kRingEntry_Control = 0,				// host per-frame control packet (advances the sim)
+	kRingEntry_Other,					// any other host message, dispatched via HandleOtherNetMessage
+} HostRingEntryKind;
+
+typedef struct
+{
+	HostRingEntryKind	kind;
+	union
+	{
+		NetHostControlInfoMessageType	control;						// kRingEntry_Control
+		uint8_t							other[kNSpMaxMessageLength];	// kRingEntry_Other: verbatim message bytes
+	} u;																// union align (>=4) keeps `other` valid for NSpMessageHeader*
+} HostRingEntry;
+
+typedef struct
+{
+	int								head;			// next slot to consume
+	int								tail;			// next slot to fill
+	HostRingEntry					slots[CLIENT_HOST_RING_SIZE];
+} HostPacketRing;									// empty: head==tail; full: (tail+1)%N==head
+
+static HostPacketRing	sClientHostRing;			// static => zero-init; reset in ResetClientHostRing
+static uint32_t			sLastHostArrivalTick = 0;	// tick of the most recent host packet PUSHED to the ring
+
+static inline Boolean HostRing_Full(void)
+{
+	return ((sClientHostRing.tail + 1) % CLIENT_HOST_RING_SIZE) == sClientHostRing.head;
+}
+
+static Boolean HostRing_PushControl(const NetHostControlInfoMessageType* msg)
+{
+	if (HostRing_Full())
+		return false;
+	HostRingEntry* e = &sClientHostRing.slots[sClientHostRing.tail];
+	e->kind = kRingEntry_Control;
+	e->u.control = *msg;
+	sClientHostRing.tail = (sClientHostRing.tail + 1) % CLIENT_HOST_RING_SIZE;
+	return true;
+}
+
+static Boolean HostRing_PushOther(const NSpMessageHeader* msg)
+{
+	if (HostRing_Full())
+		return false;
+	uint32_t len = msg->messageLen;
+	if (len < sizeof(NSpMessageHeader))		len = sizeof(NSpMessageHeader);		// never under-copy the header
+	if (len > kNSpMaxMessageLength)			len = kNSpMaxMessageLength;			// clamp a garbage length
+	HostRingEntry* e = &sClientHostRing.slots[sClientHostRing.tail];
+	e->kind = kRingEntry_Other;
+	memcpy(e->u.other, msg, len);
+	sClientHostRing.tail = (sClientHostRing.tail + 1) % CLIENT_HOST_RING_SIZE;
+	return true;
+}
+
+static Boolean HostRing_Pop(HostRingEntry* out)
+{
+	if (sClientHostRing.head == sClientHostRing.tail)
+		return false;
+	*out = sClientHostRing.slots[sClientHostRing.head];
+	sClientHostRing.head = (sClientHostRing.head + 1) % CLIENT_HOST_RING_SIZE;
+	return true;
+}
+
+// Clear the ring + hold timers so a second net game in the same process starts empty.
+void ResetClientHostRing(void)
+{
+	sClientHostRing.head = 0;
+	sClientHostRing.tail = 0;
+	sLastHostArrivalTick = TickCount();
+}
+
+//
+// Drain every readable host message into the ring (non-blocking). We only pull from the
+// socket while the ring has space, so a host control packet is never dropped (TCP
+// backpressure handles a sustained-full ring). Called from Net_Pump's client branch — the
+// only in-game client socket drain.
+//
+// CRITICAL ORDERING: every NON-control host message is ALSO staged into the same ordered ring
+// (not dispatched inline) so it is applied in exact host-stream order relative to the control
+// frames during catch-up. A relayed kNSpPlayerLeft runs PlayerUnexpectedlyLeavesGame ->
+// ChooseTaggedPlayer, a synced gSimRNG draw that also flips isComputer/isEliminated and the
+// simulated-car set. Handling it inline (while control frames N-1/N still sit un-applied in the
+// ring) would perturb gSimRNG at an EARLIER stream position than the host did, tripping the
+// next per-frame randomSeed check (kNetSequence_SeedDesync FATAL). Only kNSpGameTerminated,
+// which merely tears the session down and never touches gSimRNG / the sim set, stays inline.
+//
+void Client_PumpHostPackets(void)
+{
+	if (!gIsNetworkClient || !gNetGame)
+		return;
+
+	while (!HostRing_Full())									// only Get() while we can store it
+	{
+		NSpMessageHeader* inMess = NSpMessage_Get(gNetGame);	// non-blocking recv
+
+		if (inMess == NULL)
+			break;												// socket drained
+
+		if (inMess->what == kNetHostControlInfoMessage)
+		{
+			HostRing_PushControl((NetHostControlInfoMessageType*) inMess);	// guaranteed space (ring not full)
+			sLastHostArrivalTick = TickCount();								// arrival time for the hold badge
+		}
+		else if (inMess->what == kNSpGameTerminated)
+		{
+			HandleOtherNetMessage(inMess);						// teardown only (no gSimRNG / sim-set touch): act now
+		}
+		else
+		{
+			HostRing_PushOther(inMess);							// PlayerLeft / sync / etc.: apply in stream order
+		}
+
+		NSpMessage_Release(gNetGame, inMess);
+	}
+}
+
+//
+// Pop ONE staged host packet and apply it via the verbatim handler. Returns Applied
+// (counter advanced -> caller steps the sim), Dup (old/duplicate, dropped by the handler
+// -> no sim step), or Empty (ring drained). Does NOT step the simulation itself.
+//
+HostConsumeResult Client_ConsumeHostPacketFromRing(void)
+{
+	HostRingEntry entry;
+
+	if (!HostRing_Pop(&entry))
+		return kHostConsume_Empty;
+
+	if (entry.kind == kRingEntry_Other)
+	{
+		// A non-control host message (e.g. kNSpPlayerLeft) staged in exact stream order. Dispatch it
+		// at this FIFO position so any gSimRNG draw / sim-state change (ChooseTaggedPlayer, isComputer)
+		// lands where the host applied it. It neither advances the host counter nor steps the sim, so
+		// report Dup: the catch-up loop keeps draining the ring without burning a K_max slot or stepping.
+		HandleOtherNetMessage((NSpMessageHeader*) entry.u.other);
+		return kHostConsume_Dup;
+	}
+
+	Boolean applied = Client_InGame_HandleHostControlInfoMessage(&entry.u.control);	// VERBATIM apply (may also fatal inside)
+	return applied ? kHostConsume_Applied : kHostConsume_Dup;
+}
+
+//
+// True once no host packet has arrived for ~250ms of continuous absence. Keyed on ARRIVAL
+// time (not stepped==0) so a frame that only popped duplicates still counts as having
+// "heard" the host. Suppressed during the start-light countdown.
+//
+Boolean Client_IsHoldBadgeVisible(void)
+{
+	if (!gIsNetworkClient)
+		return false;
+	if (gNoCarControls)									// suppress during start-light countdown
+		return false;
+	return (TickCount() - sLastHostArrivalTick) > CLIENT_HOLD_BADGE_TICKS;
+}
+
+
+//
+// CMR7 Stage 3: RETAINED bounded shim — used ONLY by Paused.c and the loading barriers
+// (the in-game loop is now free-running via Net_Pump + the ring catch-up loop). It pumps
+// the network, applies EXACTLY ONE host packet, then returns; it NEVER steps the sim (the
+// pause callback drives its own MoveObjects, so stepping here would double-step). The old
+// zero-sleep spin is gone: an empty ring yields a slice instead of pegging a core.
+//
 void ClientReceive_ControlInfoFromHost(void)
 {
-NSpMessageHeader 					*inMess = NULL;
 uint32_t							tick;
-Boolean								gotIt = false;
 
 	GAME_ASSERT(gIsNetworkClient);
 
 	tick = TickCount();														// init tick for timeout
 
-	while (!gotIt)
+	while (true)
 	{
-		inMess = NSpMessage_Get(gNetGame);									// get message
+		Net_Pump();															// drain host packets into the ring + flush send rings
 
-		if (inMess)
+		HostConsumeResult r = Client_ConsumeHostPacketFromRing();
+		if (r == kHostConsume_Applied)
+			return;															// applied exactly one host frame
+		if (r == kHostConsume_Dup)
+			continue;														// duplicate: try the next one immediately
+
+			/* RING EMPTY — YIELD INSTEAD OF A ZERO-SLEEP SPIN */
+
+		SDL_PumpEvents();			// keep the OS/window responsive while we block for the host packet
+		SDL_Delay(1);				// yield a slice instead of pegging a core in a zero-sleep spin
+
+			/* SEE IF WE ARE NOT GETTING THE PACKET */
+
+		if ((TickCount() - tick) > (DATA_TIMEOUT*60))	// see if we've been waiting longer than n seconds
 		{
-				/* WE GOT A PACKET */
-
-			switch (inMess->what)
+			gTimeoutCounter++;								// keep track of how often this happens
+			if (gTimeoutCounter > 3)
 			{
-				case kNetHostControlInfoMessage:
-					gotIt = true;
-					Client_InGame_HandleHostControlInfoMessage((NetHostControlInfoMessageType*) inMess);
-					break;
-
-				default:
-					if (HandleOtherNetMessage(inMess))
-					{
-						gotIt = true;
-					}
-					break;
+				NetGameFatalError(kNetSequence_ErrorNoResponseFromHost);
+				return;
 			}
 
-			NSpMessage_Release(gNetGame, inMess);
-			inMess = NULL;
-		}
-		else
-		{
-			SDL_PumpEvents();			// keep the OS/window responsive while we block for the host packet
-			SDL_Delay(1);				// yield a slice instead of pegging a core in a zero-sleep spin
-			Net_Pump();					// keep the uplink ring draining while blocked (avoids host<->client mutual wait)
-
-				/* SEE IF WE ARE NOT GETTING THE PACKET */
-				//
-				// If this happens, then it is possible that Net Sprocket lost a packet.  There is no way to know who's packet got lost
-				// so go ahead and send our most recent packet again in case it was us.  The Host will throw out any dupes that it gets.
-				//
-				// [SOURCE PORT NOTE: I don't think we should resend packets since we're using TCP for everything]
-
-			if ((TickCount() - tick) > (DATA_TIMEOUT*60))	// see if we've been waiting longer than n seconds
-			{
-				gTimeoutCounter++;								// keep track of how often this happens
-				if (gTimeoutCounter > 3)
-				{
-					NetGameFatalError(kNetSequence_ErrorNoResponseFromHost);
-					return;
-				}
-
-#if 0	// SOURCE PORT: DON'T RESEND - We're using TCP!
-				NSpMessage_Send(gNetGame, &gClientOutMess.h, kNSpSendFlag_Registered);	// resend the last message
-#endif
-
-				tick = TickCount();														// reset tick
-			}
+			tick = TickCount();														// reset tick
 		}
 	}
 }
 
 
-/**************** CLIENT CHECK IF MORE PACKETS WAITING *****************/
-//
-// Returns true if there is another Host Control Info packet waiting in the buffer.
-//
-Boolean Client_CheckIfMorePacketsWaiting(void)
-{
-	if (!gNetGame)
-		return false;
-		
-	// Peek at the socket to see if there is data
-	// Note: NSpMessage_Get does a recv(), so we just try to get a message.
-	// Since we are non-blocking, this is effectively a peek if we don't break the message handling.
-	// However, NSpMessage_Get consumes the message.
-	// So we need to handle it OR peek.
-	
-	// Actually, looking at NSpMessage_GetAsClient loop in Main.c:
-	// The game loop calls ClientReceive_ControlInfoFromHost blocking.
-	// We want to know if we should loop *again*.
-	// BUT ClientReceive_ControlInfoFromHost *consumes* the message.
-	
-	// The plan says: "Refactor the game loop... if (morePackets) ClientReceive_PollControlInfo()"
-	// But ClientReceive_ControlInfoFromHost handles the message internally.
-	
-	// Let's implement this by peeking NSpMessage_Get and if it returns a specific message type, we handle it and return true.
-	
-	NSpMessageHeader* message = NSpMessage_Get(gNetGame);
-	if (message)
-	{
-		if (message->what == kNetHostControlInfoMessage)
-		{
-			// We got another frame! Handle it immediately.
-			Client_InGame_HandleHostControlInfoMessage((NetHostControlInfoMessageType*) message);
-			NSpMessage_Release(gNetGame, message);
-			return true;
-		}
-		else
-		{
-			// Some other message, handle it standard way
-			HandleOtherNetMessage(message);
-			NSpMessage_Release(gNetGame, message);
-			return false; // Not a control info packet, so don't skip frame for this
-		}
-	}
-	
-	return false;
-}
-
+// (CMR7 Stage 3: Client_CheckIfMorePacketsWaiting DELETED — dead since the free-running
+// receive rewrite; host packets are now drained into the ring by Client_PumpHostPackets.)
 
 
 /************** CLIENT SEND CONTROL INFO TO HOST *********************/

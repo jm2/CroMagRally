@@ -123,6 +123,14 @@ typedef struct
 
 //===============================================================================
 
+// CMR7 Stage 3: result of consuming one staged host control packet from the client ring.
+typedef enum
+{
+	kHostConsume_Empty		= 0,			// ring empty
+	kHostConsume_Dup		= 1,			// popped but the handler dropped it (old/dup) — no sim step
+	kHostConsume_Applied	= 2,			// popped + applied (counter advanced) — caller steps the sim
+} HostConsumeResult;
+
 
 void InitNetworkManager(void);
 void ShutdownNetworkManager(void);
@@ -133,8 +141,11 @@ void HostWaitForPlayersToPrepareLevel(void);
 
 void HostSend_ControlInfoToClients(void);
 void ClientSend_ControlInfoToHost(void);
-void ClientReceive_ControlInfoFromHost(void);
-Boolean Client_CheckIfMorePacketsWaiting(void);
+void ClientReceive_ControlInfoFromHost(void);	// CMR7 Stage 3: retained bounded shim — Paused.c / loading barriers only
+void Client_PumpHostPackets(void);				// CMR7 Stage 3: non-blocking drain of host control packets into the client ring
+HostConsumeResult Client_ConsumeHostPacketFromRing(void);	// CMR7 Stage 3: pop one + apply via the verbatim handler
+Boolean Client_IsHoldBadgeVisible(void);		// CMR7 Stage 3: subtle net badge after ~250ms of host-packet absence
+void ResetClientHostRing(void);					// CMR7 Stage 3: clear the client host-packet ring between net games
 
 void Host_PumpClientInputs(void);				// CMR7: non-blocking drain of client inputs into per-player queues
 void Host_ConsumeClientInputs(void);			// CMR7: depth controller + substitution + coalesce + single-apply

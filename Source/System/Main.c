@@ -44,6 +44,8 @@ static Boolean PlayGame_Survival(void);
 static Boolean PlayGame_CaptureTheFlag(void);
 void UpdateGameModeSpecifics(void);
 
+static void StepGameSimulation(void);			// CMR7 Stage 3: one sim step (host/SP run once; client runs 0..K_max)
+
 static void TallyTokens(void);
 
 
@@ -59,6 +61,8 @@ static void TallyTokens(void);
 
 Byte				gDebugMode = 0;				// 0 == none, 1 = fps, 2 = all
 Boolean				gIsInGame = false;
+
+int					gClientCatchUpMax = 3;		// CMR7 Stage 3: client bounded catch-up K_max per render frame (weakest-Android fallback 2)
 
 uint32_t				gAutoFadeStatusBits;
 
@@ -955,6 +959,36 @@ static void CheckCheats(void)
 
 /**************** PLAY AREA ************************/
 
+/********************* STEP GAME SIMULATION **********************/
+//
+// One simulation step. CMR7 Stage 3 factors this out of the PlayArea inner loop so the
+// free-running client can run it 0..gClientCatchUpMax times per render frame (host and
+// single-player still run it exactly once). Behaviour is identical to the old inline block.
+//
+
+static void StepGameSimulation(void)
+{
+	if (IsNetGamePaused())
+	{
+		gSimulationPaused = true;
+		SetupNetPauseScreen();
+		MoveObjects();
+		DoPlayerTerrainUpdate();
+	}
+	else
+	{
+		gSimulationPaused = false;
+		RemoveNetPauseScreen();
+
+		MoveEverything();
+		UpdateGameModeSpecifics();
+		DoPlayerTerrainUpdate();
+
+		gSimulationFrame++;
+	}
+}
+
+
 static void PlayArea(void)
 {
 	Boolean schedulePause = false;
@@ -1027,20 +1061,46 @@ static void PlayArea(void)
 		Net_Pump();						// Stage 1: drain non-blocking send rings (cheap no-op outside net games)
 
 		//
-		// 1. INPUT & NETWORK SYNC
+		// 1. INPUT / NETWORK SYNC  +  2. SIMULATION
+		//
+		// Single-player and the host run exactly one sim step per render frame. The CMR7
+		// client is free-running (Stage 3): Net_Pump drains host packets into the ring, then
+		// it consumes up to gClientCatchUpMax this frame, stepping the sim once per applied
+		// packet (each replays its own host dt for a bit-identical trajectory). An empty ring
+		// => hold-last-frame: the unconditional render at Step 4 re-presents the prior image.
 		//
 		if (!gNetGameInProgress)
 		{
 			ReadKeyboard();									// read local keys
 			GetLocalKeyState();								// build a control state bitfield
 			schedulePause = GetNewNeedStateAnyP(kNeed_UIPause);
+
+			StepGameSimulation();
 		}
 		else if (gIsNetworkClient)
 		{
-			// Clients MUST wait for the Host's packet (Lockstep)
-			// This blocks until the packet for this frame arrives.
-			// (Stage 2 keeps this blocking shim; Stage 3 makes the client free-running.)
-			ClientReceive_ControlInfoFromHost();
+			Net_Pump();										// flush send rings + drain host packets into the ring
+
+			int guard = 0;
+			for (int k = 0; k < gClientCatchUpMax; )		// bounded catch-up (K_max)
+			{
+				HostConsumeResult r = Client_ConsumeHostPacketFromRing();
+				if (r == kHostConsume_Applied)
+				{
+					StepGameSimulation();					// one sim step per applied host packet
+					k++;
+				}
+				else if (r == kHostConsume_Dup)
+				{
+					if (++guard > 2*gClientCatchUpMax)		// defense vs a pathological dup storm
+						break;
+					// duplicate: no sim step, do not burn a k-slot
+				}
+				else
+				{
+					break;									// kHostConsume_Empty -> hold-last-frame this render frame
+				}
+			}
 		}
 		else
 		{
@@ -1050,29 +1110,8 @@ static void PlayArea(void)
 			Net_Pump();
 			Host_ConsumeClientInputs();
 			HostSend_ControlInfoToClients();
-		}
 
-
-		//
-		// 2. SIMULATION
-		//
-		if (IsNetGamePaused())
-		{
-			gSimulationPaused = true;
-			SetupNetPauseScreen();
-			MoveObjects();
-			DoPlayerTerrainUpdate();
-		}
-		else
-		{
-			gSimulationPaused = false;
-			RemoveNetPauseScreen();
-
-			MoveEverything();
-			UpdateGameModeSpecifics();
-			DoPlayerTerrainUpdate();
-
-			gSimulationFrame++;
+			StepGameSimulation();
 		}
 
 
