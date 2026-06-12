@@ -1210,12 +1210,18 @@ void Client_PumpHostPackets(void)
 
 		if (inMess->what == kNetHostControlInfoMessage)
 		{
-			HostRing_PushControl((NetHostControlInfoMessageType*) inMess);	// guaranteed space (ring not full)
-			sLastHostArrivalTick = TickCount();								// arrival time for the hold badge
+			if (inMess->messageLen >= sizeof(NetHostControlInfoMessageType))		// don't copy a short message up to the full struct (mirror the host-side guard)
+			{
+				HostRing_PushControl((NetHostControlInfoMessageType*) inMess);	// guaranteed space (ring not full)
+				sLastHostArrivalTick = TickCount();								// arrival time for the hold badge
+			}
+			// else: malformed/short control frame — drop it (released below)
 		}
 		else if (inMess->what == kNSpGameTerminated)
 		{
 			HandleOtherNetMessage(inMess);						// teardown only (no gSimRNG / sim-set touch): act now
+			NSpMessage_Release(gNetGame, inMess);				// release before the loop reuses gNetGame (now nil after teardown)
+			break;												// session torn down — stop draining
 		}
 		else
 		{
@@ -1532,7 +1538,7 @@ void Host_ConsumeClientInputs(void)
 				/* DISCARD STALE PACKETS (dups / already-consumed pre-roll) */
 
 		NetClientControlInfoMessageType* p;
-		while ((p = Queue_Peek(i)) != NULL && p->inputSeq <= S->lastAppliedSeq)
+		while ((p = Queue_Peek(i)) != NULL && S->valid && p->inputSeq <= S->lastAppliedSeq)	// S->valid guard: don't discard the very first packet (inputSeq 0) before any real input is applied
 			Queue_Pop(i);
 
 		int B = Queue_Count(i);

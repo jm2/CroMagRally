@@ -35,6 +35,7 @@ typedef struct
 	uint8_t				reserved;							// CMR7: was useRedundancy (retired; per-client adaptive depth replaces it)
 	uint16_t			targetFPS;							// The FPS cap for the game (min of all players)
 }NetConfigMessage;
+_Static_assert(sizeof(NetConfigMessage) <= kNSpMaxMessageLength, "config msg fits");
 
 		/* SYNC MESSAGE */
 
@@ -119,6 +120,7 @@ typedef struct
 	int16_t				refreshRate;						// Client's monitor refresh rate
 	int16_t				connectionType;						// 0 = Wired, 1 = WiFi
 }NetPlayerCharTypeMessage;
+_Static_assert(sizeof(NetPlayerCharTypeMessage) <= kNSpMaxMessageLength, "char-type msg fits");
 
 
 //===============================================================================
