@@ -6,7 +6,9 @@
   <name>Cro-Mag Rally</name>
   <summary>The wildest racing game since man invented the wheel!</summary>
   <summary xml:lang="fr">Le jeu de course le plus déjanté depuis l’invention de la roue !</summary>
-  <developer_name>Pangea Software, Inc., Iliyas Jorio</developer_name>
+  <developer id="io.jor">
+    <name>Pangea Software, Inc., Iliyas Jorio</name>
+  </developer>
 
   <description>
     <p>In Cro-Mag Rally you are a speed-hungry caveman named Brog who races through the Stone, Bronze, and Iron Ages in primitive vehicles such as the Geode Cruiser, Bone Buggy, Logmobile, Trojan Horse, and many others. Brog has at his disposal an arsenal of primitive weaponry ranging from Bone Bombs to Chinese Bottle Rockets and Heat Seeking Homing Pigeons.</p>
@@ -61,6 +63,17 @@
   <url type="bugtracker">https://github.com/jorio/CroMagRally/issues</url>
 
   <releases>
+    <release version="3.1.0" date="2026-06-12">
+      <url>https://github.com/jorio/CroMagRally/releases/tag/3.1.0</url>
+      <description>
+        <p>New in this release:</p>
+        <ul>
+          <li>Online multiplayer over LAN/Wi-Fi with free-running lockstep netplay</li>
+          <li>Cross-architecture deterministic physics, so x86 and ARM peers stay in sync</li>
+          <li>Native Linux packages: AppImage, Debian, RPM, Arch, and Flatpak</li>
+        </ul>
+      </description>
+    </release>
     <release version="3.0.1" date="2024-02-07">
       <url>https://github.com/jorio/CroMagRally/releases/tag/3.0.0</url>
       <description>

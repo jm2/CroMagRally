@@ -31,7 +31,7 @@ jobs:
           - { name: x86_64, os: ubuntu-22.04 }
           - { name: aarch64, os: ubuntu-22.04-arm }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with: {submodules: 'recursive'}
       - name: Get build dependencies from APT
         # cf. https://github.com/libsdl-org/SDL/blob/main/docs/README-linux.md
@@ -50,7 +50,7 @@ jobs:
       - run: python3 build.py --configure
       - run: python3 build.py --build
       - run: python3 build.py --package
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{env.ARTIFACT_NAME}}
           path: dist/
@@ -60,7 +60,7 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with: {submodules: 'recursive'}
       - run: |
           $ARTIFACT_NAME = python3 build.py --print-artifact-name
@@ -69,7 +69,7 @@ jobs:
       - run: python3 build.py --configure -G 'Visual Studio 17 2022'
       - run: python3 build.py --build
       - run: python3 build.py --package
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{env.ARTIFACT_NAME}}
           path: dist/
@@ -81,7 +81,7 @@ jobs:
     runs-on: windows-11-arm
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with: {submodules: 'recursive'}
       - run: |
           $ARTIFACT_NAME = python3 build.py --print-artifact-name -A ARM64
@@ -90,7 +90,7 @@ jobs:
       - run: python3 build.py --configure -G 'Visual Studio 17 2022' -A ARM64
       - run: python3 build.py --build
       - run: python3 build.py --package
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{env.ARTIFACT_NAME}}
           path: dist/
@@ -100,13 +100,20 @@ jobs:
     runs-on: macos-latest  # as of January 2025, this still supports the macOS 10.13 deployment target
     timeout-minutes: 15
     env:
+      # Surfaced at job level so each signing step's `if:` can detect whether the Apple
+      # secrets are configured (a step's own step-level env is NOT visible to its `if:`).
+      # When they're absent -- e.g. on a fork without the certs -- the job still builds and
+      # uploads an UNSIGNED DMG instead of failing on the very first step.
       CODE_SIGN_IDENTITY: ${{ secrets.APPLE_CODE_SIGN_IDENTITY }}
+      APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
     steps:
-      - uses: apple-actions/import-codesign-certs@v3
+      - name: Import code-signing certificate
+        if: ${{ env.APPLE_CERT_P12_BASE64 != '' }}
+        uses: apple-actions/import-codesign-certs@v7
         with:
           p12-file-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
           p12-password: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with: {submodules: 'recursive'}
       - name: Get artifact name
         run: echo "ARTIFACT_NAME=$(python3 build.py --print-artifact-name)" >> $GITHUB_ENV
@@ -115,12 +122,14 @@ jobs:
       - run: python3 build.py --build
       - run: python3 build.py --package
       - name: Notarize
+        if: ${{ env.APPLE_CERT_P12_BASE64 != '' }}
         run: |
           xcrun notarytool store-credentials GameNotarizationProfile --apple-id ${{ secrets.APPLE_NOTARIZATION_USERNAME }} --password ${{ secrets.APPLE_NOTARIZATION_PASSWORD }} --team-id ${{ secrets.APPLE_DEVELOPMENT_TEAM }}
           xcrun notarytool submit "dist/$ARTIFACT_NAME" --keychain-profile GameNotarizationProfile --wait
       - name: Staple
+        if: ${{ env.APPLE_CERT_P12_BASE64 != '' }}
         run: xcrun stapler staple "dist/$ARTIFACT_NAME"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{env.ARTIFACT_NAME}}
           path: dist/
@@ -134,17 +143,17 @@ jobs:
       # keystore secret is configured (step-level env is not visible to its own if:).
       ANDROID_SIGNING_KEY: ${{ secrets.ANDROID_SIGNING_KEY }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with: {submodules: 'recursive'}   # extern/Pomme + extern/gl4es are required by CMakeLists
 
       - name: Set up JDK 17   # AGP 8.7.3 / Gradle 9.2.1 require JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Install SDK platform, build-tools and NDK
         run: |
@@ -181,7 +190,7 @@ jobs:
         env:
           BUILD_TOOLS_VERSION: "35.0.0"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: CroMagRally-3.0.2-android
           path: AndroidBuild/app/build/outputs/apk/release/*.apk
@@ -191,7 +200,7 @@ jobs:
     runs-on: macos-latest          # macOS 14/15 image: Xcode 15/16 + iOS SDK + CMake preinstalled
     timeout-minutes: 30            # SDL3-static-from-source + game via Xcode can take ~15-25 min
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with: {submodules: 'recursive'}   # extern/Pomme + extern/gl4es (gl4es required for iOS GL ES)
 
       - uses: maxim-lobanov/setup-xcode@v1   # optional: pin Xcode (README wants 15+)
@@ -233,7 +242,7 @@ jobs:
           cp -R "build-ios-device/Release-iphoneos/CroMagRally.app" Payload/
           zip -qry "CroMagRally-${GAME_VERSION}-ios-unsigned.ipa" Payload
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: CroMagRally-${{ env.GAME_VERSION }}-ios-unsigned
           path: CroMagRally-${{ env.GAME_VERSION }}-ios-unsigned.ipa
@@ -244,7 +253,7 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with: {submodules: 'recursive'}
 
       # macos-latest already includes a recent Xcode with the tvOS SDK + simulators.
@@ -264,7 +273,7 @@ jobs:
       # from the Build step, and add an xcodebuild -archive / -exportArchive step
       # with a tvOS provisioning profile + ExportOptions.plist. The repo does not
       # currently script .ipa export, so that step must be authored separately.
-      # - uses: apple-actions/import-codesign-certs@v3
+      # - uses: apple-actions/import-codesign-certs@v7
       #   with:
       #     p12-file-base64: ${{ secrets.APPLE_DISTRIBUTION_CERTIFICATE_P12_BASE64 }}
       #     p12-password: ${{ secrets.APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD }}
@@ -294,8 +303,180 @@ jobs:
           cmake --build build-tvos-device --config Release \
             -- CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: CroMagRally-tvOS
           path: build-tvos-device/Release-appletvos/CroMagRally.app
           compression-level: 0
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Native Linux packages (deb / rpm / Arch / Flatpak), x86_64 + aarch64.
+  # deb/rpm/arch build inside their target distro (containers) so runtime deps
+  # and glibc match; flatpak uses host-native flatpak-builder (builds aarch64
+  # natively on the arm runner). All jobs bundle the pinned SDL 3.2.8 except
+  # Arch, which depends on the system 'sdl3'. Artifact-only, matching this
+  # workflow's `contents: read` posture (download + attach to the Release).
+  # ──────────────────────────────────────────────────────────────────────────
+
+  build-linux-deb:
+    name: Debian package (${{ matrix.platform.arch }})
+    runs-on: ${{ matrix.platform.runner }}
+    timeout-minutes: 40
+    container:
+      image: debian:trixie
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - { arch: x86_64,  runner: ubuntu-24.04 }
+          - { arch: aarch64, runner: ubuntu-24.04-arm }
+    steps:
+      # git must exist BEFORE checkout, or actions/checkout can't fetch the Pomme submodule.
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates git python3 cmake make g++ pkg-config file dpkg-dev \
+            libx11-dev libxext-dev libxcursor-dev libxi-dev libxrandr-dev libxfixes-dev \
+            libxss-dev libxkbcommon-dev libwayland-dev wayland-protocols libdecor-0-dev \
+            libgl-dev libegl-dev libgles-dev libdrm-dev libgbm-dev \
+            libasound2-dev libpulse-dev libdbus-1-dev libudev-dev libpipewire-0.3-dev
+      - run: git config --global --add safe.directory '*'
+      - uses: actions/checkout@v6
+        with: {submodules: 'recursive'}
+      - name: Build SDL + game, package as .deb
+        run: python3 build.py --dependencies --configure --build --deb
+      - uses: actions/upload-artifact@v7
+        with:
+          name: CroMagRally-linux-${{ matrix.platform.arch }}-deb
+          path: dist/*.deb
+          compression-level: 0
+
+  build-linux-rpm:
+    name: RPM package (${{ matrix.platform.arch }})
+    runs-on: ${{ matrix.platform.runner }}
+    timeout-minutes: 40
+    container:
+      image: fedora:42
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - { arch: x86_64,  runner: ubuntu-24.04 }
+          - { arch: aarch64, runner: ubuntu-24.04-arm }
+    steps:
+      - name: Install build dependencies
+        run: |
+          dnf install -y \
+            git python3 cmake make gcc gcc-c++ pkgconf-pkg-config file rpm-build \
+            libX11-devel libXext-devel libXcursor-devel libXi-devel libXrandr-devel \
+            libXfixes-devel libXScrnSaver-devel libxkbcommon-devel \
+            wayland-devel wayland-protocols-devel libdecor-devel libdrm-devel mesa-libgbm-devel \
+            mesa-libGL-devel mesa-libEGL-devel mesa-libGLES-devel \
+            alsa-lib-devel pulseaudio-libs-devel pipewire-devel dbus-devel systemd-devel
+      - run: git config --global --add safe.directory '*'
+      - uses: actions/checkout@v6
+        with: {submodules: 'recursive'}
+      - name: Build SDL + game, package as .rpm
+        run: python3 build.py --dependencies --configure --build --rpm
+      - uses: actions/upload-artifact@v7
+        with:
+          name: CroMagRally-linux-${{ matrix.platform.arch }}-rpm
+          path: dist/*.rpm
+          compression-level: 0
+
+  build-linux-arch:
+    # x86_64 only: the official archlinux image has no arm64 variant.
+    name: Arch package (x86_64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    container:
+      image: archlinux:base-devel
+    steps:
+      - name: Install build dependencies
+        run: pacman -Syu --noconfirm git cmake ninja sdl3 libglvnd
+      - run: git config --global --add safe.directory '*'
+      - uses: actions/checkout@v6
+        with: {submodules: 'recursive'}
+      - name: Build Arch package (makepkg refuses to run as root)
+        run: |
+          useradd -m builder
+          echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+          cp -a "$GITHUB_WORKSPACE" /home/builder/src
+          cp packaging/PKGBUILD /home/builder/src/PKGBUILD
+          # Pin pkgver to the in-tree game version so the package matches the build.
+          VERSION=$(grep -m1 'set(GAME_VERSION' CMakeLists.txt | sed -E 's/.*"([^"]+)".*/\1/')
+          sed -i "s/^pkgver=.*/pkgver=${VERSION}/" /home/builder/src/PKGBUILD
+          chown -R builder:builder /home/builder/src
+          su builder -c "cd /home/builder/src && BUILDDIR=/tmp/mk makepkg -sf --noconfirm --skipchecksums"
+          mkdir -p dist
+          cp /home/builder/src/*.pkg.tar.zst "dist/CroMagRally-${VERSION}-linux-x86_64.pkg.tar.zst"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: CroMagRally-linux-x86_64-arch
+          path: dist/*.pkg.tar.zst
+          compression-level: 0
+
+  build-linux-flatpak:
+    name: Flatpak (${{ matrix.platform.arch }})
+    runs-on: ${{ matrix.platform.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - { arch: x86_64,  runner: ubuntu-24.04 }
+          - { arch: aarch64, runner: ubuntu-24.04-arm }
+    steps:
+      - uses: actions/checkout@v6
+        with: {submodules: 'recursive'}   # extern/Pomme is copied into the flatpak `type: dir` source
+      - name: Install flatpak + flatpak-builder on the host
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          # Headless bare-metal flatpak-builder needs polkit to allow the `runner` user.
+          sudo mkdir -p /etc/polkit-1/rules.d
+          sudo tee /etc/polkit-1/rules.d/99-flatpak.rules >/dev/null << 'EOF'
+          polkit.addRule(function(action, subject) {
+              if (action.id.startsWith("org.freedesktop.Flatpak.") && subject.user === "runner") {
+                  return polkit.Result.YES;
+              }
+          });
+          EOF
+          sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+      - name: Get game version
+        run: echo "GAME_VERSION=$(grep -m1 'set(GAME_VERSION' CMakeLists.txt | sed -E 's/.*\"([^\"]+)\".*/\1/')" >> "$GITHUB_ENV"
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: CroMagRally-${{ env.GAME_VERSION }}-linux-${{ matrix.platform.arch }}.flatpak
+          manifest-path: packaging/flatpak/io.jor.cromagrally.yml
+          cache-key: flatpak-${{ matrix.platform.arch }}-${{ hashFiles('packaging/flatpak/io.jor.cromagrally.yml') }}
+          arch: ${{ matrix.platform.arch }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: CroMagRally-linux-${{ matrix.platform.arch }}-flatpak
+          path: CroMagRally-${{ env.GAME_VERSION }}-linux-${{ matrix.platform.arch }}.flatpak
+          compression-level: 0
+
+  checksums:
+    name: SHA256 checksums (Linux)
+    runs-on: ubuntu-24.04
+    needs: [build-linux-appimage, build-linux-deb, build-linux-rpm, build-linux-arch, build-linux-flatpak]
+    if: always()   # still checksum whatever succeeded even if one package job failed
+    steps:
+      - name: Download all Linux artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+      - name: Generate SHA256SUMS.txt
+        run: |
+          cd artifacts
+          find . -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \
+            -o -name '*.pkg.tar.zst' -o -name '*.flatpak' \) \
+            -exec sha256sum {} + | sed 's|  \./|  |' | sort -k2 > ../SHA256SUMS.txt
+          cat ../SHA256SUMS.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: SHA256SUMS
+          path: SHA256SUMS.txt
+          if-no-files-found: warn

@@ -117,6 +117,12 @@ if SYSTEM == "Linux":
     parser.add_argument("--no-appimage", default=False, action="store_true",
         help="don't generate an AppImage in step 4")
 
+    parser.add_argument("--deb", default=False, action="store_true",
+        help="package as a .deb via CPack (implies a full build if no steps are given)")
+
+    parser.add_argument("--rpm", default=False, action="store_true",
+        help="package as an .rpm via CPack (implies a full build if no steps are given)")
+
 args = parser.parse_args()
 
 dist_dir = os.path.abspath(args.dist_dir)
@@ -359,7 +365,8 @@ class MacProject(Project):
 
 
 class LinuxProject(Project):
-    def __init__(self, dir_name, config_name, custom_sdl_path, as_appimage):
+    # package_format: "appimage" (default), "appdir" (--no-appimage), "deb", or "rpm"
+    def __init__(self, dir_name, config_name, custom_sdl_path, package_format):
         super().__init__(dir_name)
 
         self.gen_args += ["-DCMAKE_BUILD_TYPE=" + config_name]
@@ -372,14 +379,24 @@ class LinuxProject(Project):
         else:
             self.use_system_sdl = True
 
-        self.as_appimage = as_appimage
+        self.package_format = package_format
+
+        # deb/rpm are produced by CPack from the FHS install rules, which are gated behind
+        # -DCMR_INSTALL=ON. They bundle the pinned, from-source SDL we just built; if the
+        # user opted into system SDL, don't ship a private copy of it.
+        if package_format in ("deb", "rpm"):
+            self.gen_args += ["-DCMR_INSTALL=ON"]
+            if self.use_system_sdl:
+                self.gen_args += ["-DCMR_BUNDLE_SDL=OFF"]
 
     def get_artifact_name(self, extension=None):
         if extension is None:
-            if self.as_appimage:
-                extension = ".AppImage"
-            else:
-                extension = ".AppDir"
+            extension = {
+                "appimage": ".AppImage",
+                "appdir":   ".AppDir",
+                "deb":      ".deb",
+                "rpm":      ".rpm",
+            }[self.package_format]
 
         return f"{game_name}-{game_ver}-linux-{MACHINE}{extension}"
 
@@ -401,7 +418,11 @@ class LinuxProject(Project):
             call(["cmake", "--install", sdl_build_dir])
 
     def package(self):
-        if self.as_appimage:
+        if self.package_format in ("deb", "rpm"):
+            self.package_cpack()
+            return
+
+        if self.package_format == "appimage":
             appdir = cache_dir + "/" + self.get_artifact_name(extension=".AppDir")
         else:
             appdir = self.get_artifact_path()
@@ -434,12 +455,34 @@ class LinuxProject(Project):
                 shutil.copy(file, f"{appdir}/usr/lib", follow_symlinks=False)
 
         # Invoke appimagetool
-        if self.as_appimage:
+        if self.package_format == "appimage":
             appimagetool_path = get_package(f"https://github.com/AppImage/appimagetool/releases/download/{appimagetool_ver}/appimagetool-{MACHINE}.AppImage")
             os.chmod(appimagetool_path, 0o755)
 
             rm_if_exists(self.get_artifact_path())
             call([appimagetool_path, appdir, self.get_artifact_path()])
+
+    def package_cpack(self):
+        # CPack runs the FHS install() rules into a staging tree and builds the package.
+        # The CPackConfig.cmake was written into the build dir by include(CPack), so run
+        # cpack from there. We bundle the from-source SDL 3.2.8, so the resulting deb/rpm
+        # is self-contained (see the CMR_INSTALL block in CMakeLists.txt).
+        generator = "DEB" if self.package_format == "deb" else "RPM"
+        ext = self.package_format  # "deb" or "rpm"
+
+        # Clear any package left by a previous run so the glob below is unambiguous.
+        for old in glob.glob(f"{self.dir_name}/*.{ext}"):
+            rm_if_exists(old)
+
+        call(["cpack", "-G", generator], cwd=self.dir_name)
+
+        produced = glob.glob(f"{self.dir_name}/*.{ext}")
+        if not produced:
+            die(f"CPack did not produce a .{ext} in {self.dir_name}")
+
+        rm_if_exists(self.get_artifact_path())
+        shutil.move(produced[0], self.get_artifact_path())
+        log(f"Created {self.get_artifact_path()}")
 
 #----------------------------------------------------------------
 
@@ -460,7 +503,15 @@ if __name__ == "__main__":
         custom_sdl_path = ""
         if not args.system_sdl:
             custom_sdl_path = f"{libs_dir}/SDL3-{sdl_ver}/install"
-        project = LinuxProject(build_dir, "RelWithDebInfo", custom_sdl_path, not args.no_appimage)
+        if args.deb:
+            package_format = "deb"
+        elif args.rpm:
+            package_format = "rpm"
+        elif args.no_appimage:
+            package_format = "appdir"
+        else:
+            package_format = "appimage"
+        project = LinuxProject(build_dir, "RelWithDebInfo", custom_sdl_path, package_format)
     else:
         die(f"Unsupported system for configure step: {SYSTEM}")
 
@@ -480,6 +531,15 @@ if __name__ == "__main__":
         sys.exit(0)
 
     fatlog(f"{game_name} {game_ver} build script")
+
+    # --deb / --rpm (Linux) select the package format and imply the package step; on their
+    # own they run the whole pipeline so `build.py --deb` just works.
+    if getattr(args, "deb", False) or getattr(args, "rpm", False):
+        args.package = True
+        if not (args.dependencies or args.configure or args.build):
+            args.dependencies = True
+            args.configure = True
+            args.build = True
 
     if not (args.dependencies or args.configure or args.build or args.package):
         log("No build steps specified, running all of them.")

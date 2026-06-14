@@ -1,0 +1,35 @@
+#!/bin/sh
+# Cro-Mag Rally launcher for FHS / Flatpak installs (deb, rpm, flatpak).
+#
+# The game's data-finder (Source/Boot.cpp, FindGameData) looks for its assets either
+# next to the executable or, failing that, in a "Data" directory under the *current
+# working directory*. A native install splits those apart -- the binary lives in
+# <prefix>/lib/cromagrally while the assets live in <prefix>/share/cromagrally/Data --
+# so this wrapper resolves its own install prefix, changes into the data directory, and
+# then execs the real binary. The `cd` is precisely what satisfies the cwd-relative
+# "Data" lookup, which is why no source change to the game is needed.
+#
+# It is prefix-relative on purpose: the same script works whether installed under /usr
+# (deb/rpm) or /app (Flatpak), and whether invoked by bare name on $PATH, by an absolute
+# path, or through a symlink.
+
+self=$0
+case $self in
+	*/*) : ;;                              # already a path
+	*)   self=$(command -v -- "$self") ;;  # bare name: resolve via $PATH
+esac
+
+# Canonicalize through any symlinks (GNU readlink -f; the targets are all Linux).
+if command -v readlink >/dev/null 2>&1; then
+	resolved=$(readlink -f -- "$self" 2>/dev/null) && self=$resolved
+fi
+
+bindir=$(CDPATH= cd -- "$(dirname -- "$self")" && pwd -P)   # <prefix>/bin
+prefix=$(CDPATH= cd -- "$bindir/.." && pwd -P)              # <prefix>
+
+cd -- "$prefix/share/cromagrally" || {
+	echo "cromagrally: cannot enter data directory $prefix/share/cromagrally" >&2
+	exit 1
+}
+
+exec "$prefix/lib/cromagrally/CroMagRally" "$@"
