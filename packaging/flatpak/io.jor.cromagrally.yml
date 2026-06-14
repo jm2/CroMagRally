@@ -18,9 +18,8 @@ finish-args:
   - --socket=wayland
   - --socket=fallback-x11
   - --share=ipc               # X11 shared-memory
-  - --device=dri              # OpenGL acceleration
-  - --device=input            # game controllers (/dev/input/event*); use --device=all if a
-                              # hidraw-only pad (some PlayStation/Switch controllers) misbehaves
+  - --device=all              # OpenGL (dri) + game controllers; this flatpak has no granular
+                              # 'input' device type (valid types are dri, all, kvm, shm)
   - --socket=pulseaudio
   - --share=network           # LAN / Wi-Fi netplay (TCP+UDP, default port 49959)
 
