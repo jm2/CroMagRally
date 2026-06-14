@@ -19,6 +19,11 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // Disable AAPT2 PNG crunching on release. Debug never crunches, so a bitmap that
+            // AAPT2's cruncher rejects only ever breaks `assembleRelease` (this is exactly how
+            // the misnamed banner JPEG slipped past CI for so long). Keeping it off makes the
+            // two build types behave consistently and guards against a future stray asset.
+            crunchPngs false
         }
     }
     lint {

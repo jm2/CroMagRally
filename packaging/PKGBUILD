@@ -1,0 +1,38 @@
+# Maintainer: John-Michael Mulesa <jmulesa@gmail.com>
+#
+# Arch package for Cro-Mag Rally. Unlike the deb/rpm/flatpak builds (which bundle the pinned
+# SDL 3.2.8), Arch is rolling and always ships a current SDL3, so we depend on the system
+# 'sdl3' and do NOT vendor a copy (-DCMR_BUNDLE_SDL=OFF) -- namcap/AUR policy frowns on bundled
+# libraries, and SDL does no game-physics math, so the lockstep determinism (enforced by
+# -ffp-contract=off in CMakeLists.txt) is unaffected by the SDL version.
+#
+# Built in CI for x86_64 only: the official archlinux Docker image has no arm64 variant.
+pkgname=cromagrally
+pkgver=3.1.0
+pkgrel=1
+pkgdesc="The wildest racing game since man invented the wheel!"
+arch=('x86_64')
+url="https://github.com/jorio/CroMagRally"
+license=('CC-BY-NC-SA-4.0')
+depends=('sdl3' 'libglvnd' 'hicolor-icon-theme')
+makedepends=('cmake' 'ninja' 'git')
+options=('!lto')          # keep floating-point behavior predictable (pairs with -ffp-contract=off)
+source=()                 # built in-tree from $startdir; submodules must already be populated
+
+build() {
+	cd "$startdir"
+	cmake -S . -B build-arch -G Ninja \
+		-DCMAKE_BUILD_TYPE=RelWithDebInfo \
+		-DCMR_INSTALL=ON \
+		-DBUILD_SDL_FROM_SOURCE=OFF \
+		-DCMR_BUNDLE_SDL=OFF \
+		-DCMAKE_INSTALL_PREFIX=/usr
+	cmake --build build-arch
+}
+
+package() {
+	cd "$startdir"
+	# CMR_INSTALL already places the license at /usr/share/licenses/cromagrally/LICENSE.md,
+	# which is the Arch convention, so DESTDIR install is all that's needed.
+	DESTDIR="$pkgdir" cmake --install build-arch
+}

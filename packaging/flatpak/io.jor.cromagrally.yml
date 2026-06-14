@@ -1,0 +1,61 @@
+# Flatpak manifest for Cro-Mag Rally.
+#
+# The game is plain SDL3 + OpenGL (no GTK/GNOME), so it targets the freedesktop runtime.
+# That runtime ships SDL2, NOT SDL3, so we build the pinned SDL 3.2.8 from source as its
+# own module first -- this also keeps SDL byte-identical to the AppImage/deb/rpm builds,
+# which matters for the deterministic lockstep netcode.
+#
+# Build locally with:
+#   flatpak-builder --user --install --force-clean build-dir packaging/flatpak/io.jor.cromagrally.yml
+#   flatpak run io.jor.cromagrally
+app-id: io.jor.cromagrally
+runtime: org.freedesktop.Platform
+runtime-version: "24.08"
+sdk: org.freedesktop.Sdk
+command: cromagrally
+
+finish-args:
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc               # X11 shared-memory
+  - --device=dri              # OpenGL acceleration
+  - --device=input            # game controllers (/dev/input/event*); use --device=all if a
+                              # hidraw-only pad (some PlayStation/Switch controllers) misbehaves
+  - --socket=pulseaudio
+  - --share=network           # LAN / Wi-Fi netplay (TCP+UDP, default port 49959)
+
+modules:
+  # SDL 3.2.8 -- not provided by the 24.08 runtime (which only has SDL2).
+  - name: sdl3
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DSDL_SHARED=ON
+      - -DSDL_STATIC=OFF
+      - -DSDL_TESTS=OFF
+      - -DSDL_EXAMPLES=OFF
+    cleanup:
+      - /include
+      - /lib/cmake
+      - /lib/pkgconfig
+      - '*.a'
+    sources:
+      - type: archive
+        url: https://libsdl.org/release/SDL3-3.2.8.tar.gz
+        sha256: 13388fabb361de768ecdf2b65e52bb27d1054cae6ccb6942ba926e378e00db03
+
+  # The game. CMR_INSTALL lays out the FHS tree under /app (binary in /app/lib/cromagrally,
+  # assets in /app/share/cromagrally/Data, launcher at /app/bin/cromagrally). SDL is the
+  # module above (already in /app/lib), so don't build or bundle another copy.
+  - name: cromagrally
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=RelWithDebInfo
+      - -DCMR_INSTALL=ON
+      - -DBUILD_SDL_FROM_SOURCE=OFF
+      - -DCMR_BUNDLE_SDL=OFF
+    sources:
+      # Repo root (this manifest lives in packaging/flatpak/). extern/Pomme must be present,
+      # so clone with `git submodule update --init --recursive` before building.
+      - type: dir
+        path: ../..

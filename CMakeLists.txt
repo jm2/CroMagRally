@@ -476,3 +476,144 @@ endif()
 
 # Copy documentation to output folder
 configure_file(${CMAKE_SOURCE_DIR}/packaging/ReadMe.txt.in ${CMAKE_CURRENT_BINARY_DIR}/ReadMe.txt)
+
+#------------------------------------------------------------------------------
+# LINUX FHS INSTALL + deb/rpm PACKAGING (opt-in; no effect on other builds)
+#------------------------------------------------------------------------------
+# Enabled with -DCMR_INSTALL=ON for the Linux native packages: deb/rpm via CPack,
+# Arch via packaging/PKGBUILD, Flatpak via packaging/flatpak/io.jor.cromagrally.yml.
+# When OFF (the default) nothing below runs, so the AppImage / Windows / macOS /
+# iOS / tvOS / Android builds are byte-for-byte unaffected.
+option(CMR_INSTALL "Generate FHS install rules + deb/rpm (CPack) packaging" OFF)
+
+# Copy SDL3 into the package's own private libdir. ON for self-contained packages that
+# build SDL from source (deb/rpm bundle the pinned SDL 3.2.8). Turn OFF when a system
+# SDL3 is used -- Arch ships 'sdl3'; Flatpak's SDL3 module already lives in /app/lib --
+# so we never ship a stray copy of a library the platform already provides.
+option(CMR_BUNDLE_SDL "Bundle SDL3 into the package's private libdir" ON)
+
+if(CMR_INSTALL)
+	if(NOT UNIX OR APPLE)
+		message(FATAL_ERROR "CMR_INSTALL is only supported for Linux (FHS) packaging")
+	endif()
+
+	# Deliberately the literal "lib/cromagrally", NOT GNUInstallDirs/CMAKE_INSTALL_LIBDIR:
+	# on Fedora/Arch the latter is "lib64", but the launcher wrapper hard-codes "lib" and
+	# the $ORIGIN rpath makes the lib-vs-lib64 distinction irrelevant for the private payload.
+	set(CMR_PRIVATE_LIBDIR "lib/cromagrally")
+
+	# The installed binary finds its sibling/bundled SDL via $ORIGIN; for system-SDL builds
+	# (Arch/Flatpak) $ORIGIN is harmless and the loader falls through to the standard paths.
+	set_target_properties(${GAME_TARGET} PROPERTIES
+		INSTALL_RPATH "$ORIGIN"
+		INSTALL_RPATH_USE_LINK_PATH OFF		# don't bake the CI's from-source SDL path into the binary
+		BUILD_WITH_INSTALL_RPATH OFF)		# keep the build-tree rpath so in-place runs still work
+
+	# Executable (arch-dependent payload)
+	install(TARGETS ${GAME_TARGET} RUNTIME DESTINATION ${CMR_PRIVATE_LIBDIR})
+
+	# Bundled SDL3 (self-contained packages only). SDL3::SDL3 is an alias/interface that
+	# installs nothing -- the real shared imported target is SDL3::SDL3-shared. Glob its own
+	# libdir so the full libSDL3.so.0.x.x <- libSDL3.so.0 <- libSDL3.so symlink chain ships.
+	if(CMR_BUNDLE_SDL AND TARGET SDL3::SDL3-shared)
+		set(_sdl_so "")
+		get_target_property(_sdl_cfgs SDL3::SDL3-shared IMPORTED_CONFIGURATIONS)
+		if(_sdl_cfgs)
+			foreach(_c IN LISTS _sdl_cfgs)
+				get_target_property(_loc SDL3::SDL3-shared IMPORTED_LOCATION_${_c})
+				if(_loc)
+					set(_sdl_so "${_loc}")
+					break()
+				endif()
+			endforeach()
+		endif()
+		if(NOT _sdl_so)
+			get_target_property(_sdl_so SDL3::SDL3-shared IMPORTED_LOCATION)
+		endif()
+		if(_sdl_so)
+			get_filename_component(_sdl_libdir "${_sdl_so}" DIRECTORY)
+			install(DIRECTORY "${_sdl_libdir}/" DESTINATION ${CMR_PRIVATE_LIBDIR}
+				FILES_MATCHING PATTERN "libSDL3.so*")
+		else()
+			message(WARNING "CMR_BUNDLE_SDL is ON but SDL3::SDL3-shared has no IMPORTED_LOCATION; SDL will not be bundled")
+		endif()
+	endif()
+
+	# Launcher wrapper -> <prefix>/bin/cromagrally
+	install(PROGRAMS "${CMAKE_SOURCE_DIR}/packaging/cromagrally-launcher"
+		DESTINATION bin RENAME cromagrally)
+
+	# Game assets -> <prefix>/share/cromagrally/Data (no trailing slash keeps the Data/ level,
+	# which is exactly what the launcher's cwd-relative lookup expects). Normalize permissions
+	# so packaged files are a clean 0644 / dirs 0755 regardless of the source tree.
+	install(DIRECTORY "${GAME_DATADIR}" DESTINATION share/cromagrally
+		FILE_PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
+		DIRECTORY_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+
+	# Desktop entry: patch Exec=CroMagRally -> Exec=cromagrally (the installed wrapper). Patch a
+	# build-dir copy so the committed .desktop stays intact for the AppImage path in build.py.
+	file(READ "${CMAKE_SOURCE_DIR}/packaging/${GAME_IDENTIFIER}.desktop" _cmr_desktop)
+	string(REPLACE "Exec=${GAME_TARGET}" "Exec=cromagrally" _cmr_desktop "${_cmr_desktop}")
+	file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/xdg/${GAME_IDENTIFIER}.desktop" CONTENT "${_cmr_desktop}")
+	install(FILES "${CMAKE_BINARY_DIR}/xdg/${GAME_IDENTIFIER}.desktop" DESTINATION share/applications)
+
+	# AppStream metainfo (modern .metainfo.xml name)
+	install(FILES "${CMAKE_SOURCE_DIR}/packaging/${GAME_IDENTIFIER}.appdata.xml"
+		DESTINATION share/metainfo RENAME "${GAME_IDENTIFIER}.metainfo.xml")
+
+	# Icon: the 512x512 "alternate" (wheel/name) artwork, installed under the app-id name so
+	# the desktop file's Icon=io.jor.cromagrally resolves via the hicolor theme.
+	install(FILES "${CMAKE_SOURCE_DIR}/packaging/${GAME_IDENTIFIER}-alternateicon.png"
+		DESTINATION share/icons/hicolor/512x512/apps RENAME "${GAME_IDENTIFIER}.png")
+
+	# Docs + license
+	install(FILES "${CMAKE_SOURCE_DIR}/CHANGELOG.md" "${CMAKE_SOURCE_DIR}/README.md"
+		DESTINATION share/doc/cromagrally)
+	install(FILES "${CMAKE_SOURCE_DIR}/LICENSE.md"
+		DESTINATION share/licenses/cromagrally)		# Arch convention; harmless elsewhere
+
+	#--------------------------------------------------------------------------
+	# CPack: one config emits both .deb and .rpm (Arch/Flatpak don't use CPack)
+	#--------------------------------------------------------------------------
+	set(CPACK_PACKAGE_NAME "cromagrally")
+	set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+	set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "The wildest racing game since man invented the wheel!")
+	set(CPACK_PACKAGE_VENDOR "Pangea Software, Inc. / Iliyas Jorio")
+	set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/jorio/CroMagRally")
+	set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE.md")
+	set(CPACK_STRIP_FILES ON)
+	set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
+	# DEB + RPM both require a non-empty maintainer/contact. Override at configure time with
+	# -DCPACK_PACKAGE_CONTACT="Your Name <you@example.com>" when packaging from a fork.
+	if(NOT CPACK_PACKAGE_CONTACT)
+		set(CPACK_PACKAGE_CONTACT "John-Michael Mulesa <jmulesa@gmail.com>")
+	endif()
+
+	# ---- DEB ----
+	set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
+	set(CPACK_DEBIAN_PACKAGE_MAINTAINER "${CPACK_PACKAGE_CONTACT}")
+	set(CPACK_DEBIAN_PACKAGE_SECTION "games")
+	set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
+	set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "${CPACK_PACKAGE_HOMEPAGE_URL}")
+	# CRITICAL: dpkg-shlibdeps would abort generation on the private, non-system libSDL3.so.0,
+	# so it's off and we declare runtime deps by hand.
+	set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS OFF)
+	set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6, libstdc++6, libgcc-s1, libgl1")
+	# SDL dlopen()s these at runtime (not in DT_NEEDED), and only one of X11/Wayland is needed
+	# on any given host, so they are Recommends rather than hard Depends.
+	set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "libx11-6, libxext6, libxcursor1, libxi6, libxrandr2, libxfixes3, libwayland-client0, libxkbcommon0, libasound2 | libasound2t64, libpulse0")
+
+	# ---- RPM ----
+	set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
+	set(CPACK_RPM_PACKAGE_LICENSE "CC-BY-NC-SA-4.0")
+	set(CPACK_RPM_PACKAGE_GROUP "Amusements/Games")
+	set(CPACK_RPM_PACKAGE_URL "${CPACK_PACKAGE_HOMEPAGE_URL}")
+	# Keep autoreqprov ON: the bundled libSDL3's self-Provides cancels the exe's self-Require,
+	# and we still get correct libc/libstdc++/libGL auto-Requires for free. The dlopen'd sonames
+	# aren't in DT_NEEDED, so append them by hand (the (64bit) marker covers x86_64 and aarch64).
+	set(CPACK_RPM_PACKAGE_AUTOREQPROV ON)
+	set(CPACK_RPM_PACKAGE_REQUIRES "libX11.so.6()(64bit), libwayland-client.so.0()(64bit), libxkbcommon.so.0()(64bit), libasound.so.2()(64bit), libpulse.so.0()(64bit)")
+
+	set(CPACK_GENERATOR "DEB;RPM")
+	include(CPack)
+endif()
