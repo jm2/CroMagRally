@@ -146,6 +146,9 @@ jobs:
       - uses: actions/checkout@v6
         with: {submodules: 'recursive'}   # extern/Pomme + extern/gl4es are required by CMakeLists
 
+      - name: Extract game version
+        run: echo "GAME_VERSION=$(grep -m1 'set(GAME_VERSION' CMakeLists.txt | sed -E 's/.*\"([^\"]+)\".*/\1/')" >> "$GITHUB_ENV"
+
       - name: Set up JDK 17   # AGP 8.7.3 / Gradle 9.2.1 require JDK 17
         uses: actions/setup-java@v5
         with:
@@ -190,10 +193,21 @@ jobs:
         env:
           BUILD_TOOLS_VERSION: "35.0.0"
 
+      - name: Stage release APK with a versioned name
+        # Prefer a signed APK if the keystore secret produced one; otherwise ship the
+        # unsigned APK. Either way, normalize to a single, correctly-versioned asset
+        # (the upload name was previously hard-coded to a stale 3.0.2).
+        run: |
+          dir=AndroidBuild/app/build/outputs/apk/release
+          apk=$(ls "$dir"/*signed*.apk 2>/dev/null | head -n1 || true)
+          if [ -z "$apk" ]; then apk=$(ls "$dir"/*.apk | head -n1); fi
+          cp "$apk" "CroMagRally-${GAME_VERSION}-android.apk"
+          echo "Staged $apk -> CroMagRally-${GAME_VERSION}-android.apk"
+
       - uses: actions/upload-artifact@v7
         with:
-          name: CroMagRally-3.0.2-android
-          path: AndroidBuild/app/build/outputs/apk/release/*.apk
+          name: CroMagRally-${{ env.GAME_VERSION }}-android
+          path: CroMagRally-${{ env.GAME_VERSION }}-android.apk
           compression-level: 0
 
   build-ios:
@@ -256,6 +270,9 @@ jobs:
       - uses: actions/checkout@v6
         with: {submodules: 'recursive'}
 
+      - name: Extract game version
+        run: echo "GAME_VERSION=$(grep -m1 'set(GAME_VERSION' CMakeLists.txt | sed -E 's/.*\"([^\"]+)\".*/\1/')" >> "$GITHUB_ENV"
+
       # macos-latest already includes a recent Xcode with the tvOS SDK + simulators.
       # Pin only if you need reproducibility across runner image updates.
       - name: Select Xcode
@@ -303,10 +320,18 @@ jobs:
           cmake --build build-tvos-device --config Release \
             -- CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
 
+      - name: Package unsigned tvOS app
+        # The build emits a raw, unsigned .app *directory*; zip it into a single
+        # versioned file so it round-trips as one release asset (a folder artifact
+        # comes back from download-artifact with its .app wrapper stripped).
+        run: |
+          cd build-tvos-device/Release-appletvos
+          zip -qry "$GITHUB_WORKSPACE/CroMagRally-${GAME_VERSION}-tvos-unsigned.zip" CroMagRally.app
+
       - uses: actions/upload-artifact@v7
         with:
-          name: CroMagRally-tvOS
-          path: build-tvos-device/Release-appletvos/CroMagRally.app
+          name: CroMagRally-${{ env.GAME_VERSION }}-tvos-unsigned
+          path: CroMagRally-${{ env.GAME_VERSION }}-tvos-unsigned.zip
           compression-level: 0
 
   # ──────────────────────────────────────────────────────────────────────────
@@ -480,3 +505,65 @@ jobs:
           name: SHA256SUMS
           path: SHA256SUMS.txt
           if-no-files-found: warn
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Attach the built artifacts to the GitHub Release.
+  #
+  # The build jobs above only upload to the *workflow run* (actions/upload-artifact);
+  # that store is separate from a Release's assets, so without this job a green run
+  # leaves the Release empty. This job downloads every run artifact, flattens it to a
+  # single asset set, generates a complete SHA256SUMS, and attaches everything to the
+  # Release for the tag. It needs `contents: write`, scoped to this job only so the
+  # build jobs keep the top-level least-privilege `contents: read`.
+  #
+  # Runs only on a v* tag push or a published Release (both set github.ref to the tag);
+  # skipped for plain workflow_dispatch smoke builds. To backfill a release whose run
+  # predates this job, re-run from the tag (re-publish the Release, or dispatch this
+  # workflow with the v* tag selected as the ref).
+  # ──────────────────────────────────────────────────────────────────────────
+  publish-release:
+    name: Attach artifacts to the Release
+    needs:
+      - build-linux-appimage
+      - build-windows
+      - build-windows-arm64
+      - build-macos
+      - build-android
+      - build-ios
+      - build-tvos
+      - build-linux-deb
+      - build-linux-rpm
+      - build-linux-arch
+      - build-linux-flatpak
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write   # job-level override of the top-level `contents: read`
+    steps:
+      - name: Download every build artifact from this run
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+      - name: Collect a flat upload set + complete checksums
+        run: |
+          set -euo pipefail
+          mkdir -p upload
+          # Each artifact lands in artifacts/<artifact-name>/<file>. Every build job now
+          # uploads exactly one release-ready file, so flatten by basename. Skip the
+          # Linux-only SHA256SUMS.txt; a complete one is regenerated below. Fail loudly
+          # on a basename collision rather than silently dropping an asset.
+          while IFS= read -r f; do
+            b=$(basename "$f")
+            if [ -e "upload/$b" ]; then
+              echo "::error::Duplicate artifact basename would be overwritten: $b" >&2
+              exit 1
+            fi
+            cp "$f" "upload/$b"
+          done < <(find artifacts -type f ! -name 'SHA256SUMS.txt')
+          ( cd upload && sha256sum * | sort -k2 > SHA256SUMS.txt )
+          echo "Release assets:"; ls -la upload
+      - name: Attach to the Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: upload/*
+          fail_on_unmatched_files: true
