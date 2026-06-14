@@ -16,7 +16,9 @@ url="https://github.com/jorio/CroMagRally"
 license=('CC-BY-NC-SA-4.0')
 depends=('sdl3' 'libglvnd' 'hicolor-icon-theme')
 makedepends=('cmake' 'ninja' 'git')
-options=('!lto')          # keep floating-point behavior predictable (pairs with -ffp-contract=off)
+options=('!lto' '!debug') # !lto keeps FP behavior predictable (pairs with -ffp-contract=off);
+                          # !debug stops makepkg emitting a second cromagrally-debug package
+                          # (two .pkg.tar.zst would break the single-file copy in CI)
 source=()                 # built in-tree from $startdir; submodules must already be populated
 
 build() {

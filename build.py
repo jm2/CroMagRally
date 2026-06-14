@@ -342,7 +342,10 @@ class MacProject(Project):
             shutil.copytree(f"{mount_point}/{sdl3_framework}", sdl3_framework_target_path, symlinks=True)
             call(["hdiutil", "detach", mount_point, "-quiet"])
 
-        if "CODE_SIGN_IDENTITY" in os.environ:
+        # Check the value, not just presence: CI sets CODE_SIGN_IDENTITY to a (possibly empty)
+        # secret, and signing with an empty identity fails ("item could not be found in the
+        # keychain"). An empty/unset value means "don't sign" -> produce an unsigned build.
+        if os.environ.get("CODE_SIGN_IDENTITY"):
             call(["codesign", "--force", "--timestamp", "--sign", os.environ["CODE_SIGN_IDENTITY"], sdl3_framework_target_path])
         else:
             print("SDL will not be codesigned. Set the CODE_SIGN_IDENTITY environment variable if you want to sign it.")
