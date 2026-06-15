@@ -76,6 +76,16 @@ if(NOT MSVC)
 	add_compile_options(-ffp-contract=off)
 endif()
 
+# Android 16 KB page-size support. Google Play requires API-35+ apps to support 16 KB
+# memory pages, and devices already running in 16 KB page mode crash when loading a
+# 4 KB-aligned shared object. NDK r27 still links 4 KB-aligned by default, so force
+# 16 KB ELF segment alignment for every shared object we ship -- the game's
+# libCroMagRally.so and the from-source libSDL3.so. Directory-scoped, so it propagates
+# to the SDL subdirectory added below; a harmless no-op for the static libs.
+if(ANDROID)
+	add_link_options("-Wl,-z,max-page-size=16384" "-Wl,-z,common-page-size=16384")
+endif()
+
 #------------------------------------------------------------------------------
 # FIND SDL
 #------------------------------------------------------------------------------
@@ -139,6 +149,17 @@ if(ANDROID OR CMAKE_SYSTEM_NAME STREQUAL "iOS" OR CMAKE_SYSTEM_NAME STREQUAL "tv
 	
 	# Build gl4es as a static lib
 	add_subdirectory(extern/gl4es)
+
+	# gl4es hard-codes its archive output to ${CMAKE_SOURCE_DIR}/lib, which resolves to the
+	# repo root here -- a single directory shared by every per-arch/SDK build tree, so one
+	# configuration's libGL.a would clobber another's. (The build scripts used to paper over
+	# this with `rm -rf lib`.) Redirect the static lib into this build tree so each
+	# configuration keeps its own copy and no stray repo-root lib/ is ever created.
+	if(TARGET GL)
+		set_target_properties(GL PROPERTIES
+			ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/gl4es"
+			LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/gl4es")
+	endif()
 endif()
 
 if(NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT CMAKE_SYSTEM_NAME STREQUAL "tvOS")

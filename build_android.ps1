@@ -89,12 +89,6 @@ function Build-Abi {
     $JniLibsDir = "$AndroidDir/app/src/main/jniLibs/$Abi"
     
     Write-Host "=== Building for $Abi in $BuildDir ==="
-    
-    # Clean up potentially stale/incompatible libraries
-    if (Test-Path "lib") {
-        Write-Host "Cleaning up local lib directory..."
-        Remove-Item "lib" -Recurse -Force
-    }
 
     # Configure
     Write-Host "Configuring $BuildDir..."
