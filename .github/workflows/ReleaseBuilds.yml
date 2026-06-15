@@ -163,11 +163,6 @@ jobs:
           sdkmanager --install "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018"
           echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> "$GITHUB_ENV"
 
-      - name: Drop committed local.properties
-        # It is checked in pointing at /opt/android-sdk which does not exist on the runner;
-        # removing it makes AGP fall back to $ANDROID_SDK_ROOT set by setup-android.
-        run: rm -f AndroidBuild/local.properties
-
       - name: Build native libs + assets (CMake/NDK, Release)
         # build_android.sh: fetches & sha256-verifies SDL3 3.2.8, builds libCroMagRally.so +
         # libSDL3.so for x86_64 and arm64-v8a (CMAKE_BUILD_TYPE=Release, android-24), copies
@@ -224,37 +219,14 @@ jobs:
       - name: Extract game version
         run: echo "GAME_VERSION=$(grep -m1 'set(GAME_VERSION' CMakeLists.txt | sed -E 's/.*\"([^\"]+)\".*/\1/')" >> "$GITHUB_ENV"
 
-      # build_ios.sh clones SDL3 into extern/SDL when missing; it clones main (unpinned).
-      # Pin a release tag for reproducibility, matching the desktop build's SDL 3.2.8.
-      - name: Fetch SDL3 source
-        run: git clone --depth 1 --branch release-3.2.8 https://github.com/libsdl-org/SDL.git extern/SDL
-
-      # Mirrors build_ios.sh "device" target (arm64 / iphoneos, deployment 13.0, static SDL).
-      - name: Configure (CMake -> Xcode, iOS device)
-        run: |
-          cmake -G Xcode -S . -B build-ios-device \
-            -DCMAKE_SYSTEM_NAME=iOS \
-            -DCMAKE_OSX_SYSROOT=iphoneos \
-            -DCMAKE_OSX_ARCHITECTURES=arm64 \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
-            -DBUILD_SDL_FROM_SOURCE=ON \
-            -DSDL_STATIC=ON \
-            -DSDL_SHARED=OFF \
-            -DCMAKE_BUILD_TYPE=Release
-
-      # build_ios.sh runs `cmake --build ... --config Release`; we add CODE_SIGNING_ALLOWED=NO so the
-      # hosted runner can produce a device build with NO Apple certs (unsigned).
-      - name: Build (unsigned device .app)
-        run: |
-          cmake --build build-ios-device --config Release -- \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" CODE_SIGN_ENTITLEMENTS=""
-
-      # Wrap the .app in the conventional Payload/ layout (unsigned .ipa) for sideload/re-sign tools.
-      - name: Package unsigned IPA
-        run: |
-          mkdir -p Payload
-          cp -R "build-ios-device/Release-iphoneos/CroMagRally.app" Payload/
-          zip -qry "CroMagRally-${GAME_VERSION}-ios-unsigned.ipa" Payload
+      # Single source of truth: run the same script developers use. It pins SDL
+      # release-3.2.8, builds the unsigned device .app (CODE_SIGNING_ALLOWED=NO keeps a
+      # cert-less runner green), and packages the sideloadable unsigned .ipa.
+      - name: Build + package unsigned iOS .ipa
+        env:
+          CODE_SIGNING_ALLOWED: "NO"
+          PACKAGE: "1"
+        run: ./build_ios.sh device
 
       - uses: actions/upload-artifact@v7
         with:
@@ -280,53 +252,18 @@ jobs:
         with:
           xcode-version: latest-stable
 
-      # SDL3 is NOT a submodule; build_tvos.sh clones it into extern/SDL.
-      - name: Fetch SDL3 source
-        run: git clone --depth 1 https://github.com/libsdl-org/SDL.git extern/SDL
-
-      # ---- OPTIONAL: signed, distributable build -------------------------------
-      # To produce a SIGNED Apple TV build (installable on hardware / App Store /
-      # TestFlight) uncomment the cert import below, drop CODE_SIGNING_ALLOWED=NO
-      # from the Build step, and add an xcodebuild -archive / -exportArchive step
-      # with a tvOS provisioning profile + ExportOptions.plist. The repo does not
-      # currently script .ipa export, so that step must be authored separately.
-      # - uses: apple-actions/import-codesign-certs@v7
-      #   with:
-      #     p12-file-base64: ${{ secrets.APPLE_DISTRIBUTION_CERTIFICATE_P12_BASE64 }}
-      #     p12-password: ${{ secrets.APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD }}
-      # --------------------------------------------------------------------------
-
-      # Configure for Apple TV hardware (appletvos / arm64), derived from the
-      # 'device' branch of build_tvos.sh.
-      - name: Configure (CMake / Xcode generator)
-        run: |
-          rm -rf lib
-          cmake -G Xcode -S . -B build-tvos-device \
-            -DCMAKE_SYSTEM_NAME=tvOS \
-            -DCMAKE_OSX_SYSROOT=appletvos \
-            -DCMAKE_OSX_ARCHITECTURES=arm64 \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
-            -DBUILD_SDL_FROM_SOURCE=ON \
-            -DSDL_STATIC=ON \
-            -DSDL_SHARED=OFF \
-            -DSDL_OPENGLES=ON \
-            -DCMAKE_BUILD_TYPE=Release
-
-      # Code signing disabled so the job is green on a hosted runner with no Apple
-      # secrets. The resulting .app is UNSIGNED (compiles + bundles game Data, but
-      # is not installable on real Apple TV hardware).
-      - name: Build
-        run: |
-          cmake --build build-tvos-device --config Release \
-            -- CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
-
-      - name: Package unsigned tvOS app
-        # The build emits a raw, unsigned .app *directory*; zip it into a single
-        # versioned file so it round-trips as one release asset (a folder artifact
-        # comes back from download-artifact with its .app wrapper stripped).
-        run: |
-          cd build-tvos-device/Release-appletvos
-          zip -qry "$GITHUB_WORKSPACE/CroMagRally-${GAME_VERSION}-tvos-unsigned.zip" CroMagRally.app
+      # Single source of truth: run the same script developers use. It pins SDL
+      # release-3.2.8, builds the unsigned Apple TV .app (CODE_SIGNING_ALLOWED=NO), and
+      # zips it into a single versioned asset.
+      #
+      # For a SIGNED, store-distributable build you'd add an
+      # apple-actions/import-codesign-certs step + xcodebuild -archive/-exportArchive with
+      # a tvOS provisioning profile -- out of scope for this repo's sideload-only target.
+      - name: Build + package unsigned tvOS app
+        env:
+          CODE_SIGNING_ALLOWED: "NO"
+          PACKAGE: "1"
+        run: ./build_tvos.sh device
 
       - uses: actions/upload-artifact@v7
         with:

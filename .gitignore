@@ -11,6 +11,7 @@ lib/
 *.user
 
 AndroidBuild/.gradle
+AndroidBuild/local.properties
 AndroidBuild/app/src/main/assets
 AndroidBuild/app/src/main/jniLibs
 Data/files.txt

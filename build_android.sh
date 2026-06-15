@@ -118,34 +118,18 @@ build_abi() {
     JNI_LIBS_DIR="$ANDROID_DIR/app/src/main/jniLibs/$ABI"
     
     echo "=== Building for $ABI in $BUILD_DIR ==="
-    
-    # Clean up potentially stale/incompatible libraries (like rogue libGL.a)
-    if [ -d "lib" ]; then
-        echo "Cleaning up local lib directory..."
-        rm -rf lib
-    fi
 
     # Configure
     echo "Configuring $BUILD_DIR..."
     mkdir -p $BUILD_DIR
     cd $BUILD_DIR
-    if [ "$ABI" == "arm64-v8a" ]; then
-            cmake -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM=android-24 \
-            -DBUILD_SDL_FROM_SOURCE=ON \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DSDL3_DIR=extern/SDL3-3.2.8 \
-            ..
-    else
-            cmake -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=x86_64 \
-            -DANDROID_PLATFORM=android-24 \
-            -DBUILD_SDL_FROM_SOURCE=ON \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DSDL3_DIR=extern/SDL3-3.2.8 \
-            ..
-    fi
+    cmake -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
+        -DANDROID_ABI=$ABI \
+        -DANDROID_PLATFORM=android-24 \
+        -DBUILD_SDL_FROM_SOURCE=ON \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DSDL3_DIR=extern/SDL3-3.2.8 \
+        ..
     cd ..
 
     cmake --build $BUILD_DIR --config Release
@@ -156,7 +140,26 @@ build_abi() {
     cp $BUILD_DIR/extern/SDL3-3.2.8/libSDL3.so $JNI_LIBS_DIR/libSDL3.so
 }
 
-# 0. Copy Assets
+# Build the requested ABIs. ABIS defaults to the device + emulator pair; the PR compile
+# gate overrides it (ABIS=arm64-v8a SKIP_GRADLE=1) for a fast native-only smoke build.
+ABIS="${ABIS:-x86_64 arm64-v8a}"
+for ABI in $ABIS; do
+    case "$ABI" in
+        arm64-v8a) BUILD_DIR="build-android" ;;     # device
+        x86_64)    BUILD_DIR="build-android-x86" ;;  # emulator
+        *)         BUILD_DIR="build-android-$ABI" ;;
+    esac
+    build_abi "$ABI" "$BUILD_DIR"
+done
+
+# SKIP_GRADLE=1 stops here: native libs are built (enough for a compile check) but the
+# APK is not assembled, so the asset copy + Gradle + install/launch below are skipped.
+if [ "${SKIP_GRADLE:-0}" == "1" ]; then
+    echo "=== SKIP_GRADLE=1: native libraries built; skipping APK assembly. ==="
+    exit 0
+fi
+
+# Copy assets. Android can't enumerate its asset dir at runtime, so ship a file list.
 echo "=== Generating Data/files.txt ==="
 find Data -type f > Data/files.txt
 
@@ -165,13 +168,7 @@ echo "=== Copying Assets to $ASSETS_DIR ==="
 mkdir -p $ASSETS_DIR
 cp -r Data $ASSETS_DIR/
 
-# 1. Build x86_64 (Emulator)
-build_abi "x86_64" "build-android-x86"
-
-# 2. Build arm64-v8a (Device)
-build_abi "arm64-v8a" "build-android"
-
-echo "=== 3. Assembling Debug APK (Gradle) ==="
+echo "=== Assembling Debug APK (Gradle) ==="
 cd $ANDROID_DIR
 ./gradlew assembleDebug
 cd ..
