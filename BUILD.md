@@ -73,3 +73,47 @@ If you want to build the game **manually** instead, the rest of this document de
     ```
     If you'd like to enable runtime sanitizers, append `-DSANITIZE=1` to the **first** `cmake` call above.
 1. The game gets built in `build/CroMagRally`. Enjoy!
+
+## How to build for mobile (iOS / tvOS / Android)
+
+The mobile/TV builds are produced by dedicated scripts (they are **not** part of `build.py`). They target **sideloading / GitHub Releases**, not the App Store or Google Play. SDL3 is pinned to the same release the desktop build uses — for iOS/tvOS it is git-cloned into `extern/SDL` (override the tag with `SDL_REF=...`); for Android it is downloaded and SHA256-verified into `extern/SDL3-3.2.8`.
+
+### iOS / tvOS (macOS with Xcode 15+ required)
+
+```
+./build_ios.sh  simulator    # or: device
+./build_tvos.sh simulator    # or: device
+```
+
+A device build can be packaged as a sideloadable **unsigned** artifact:
+
+```
+PACKAGE=1 CODE_SIGNING_ALLOWED=NO ./build_ios.sh  device   # -> CroMagRally-<ver>-ios-unsigned.ipa
+PACKAGE=1 CODE_SIGNING_ALLOWED=NO ./build_tvos.sh device   # -> CroMagRally-<ver>-tvos-unsigned.zip
+```
+
+The unsigned `.ipa` / `.app` must be re-signed (AltStore / Sideloadly, or your own Apple ID in Xcode) before it will install on hardware. See [iOSBuild/README.md](iOSBuild/README.md) for the full iOS walkthrough, manual CMake steps, and troubleshooting.
+
+### Android (Android SDK + NDK r27+ required)
+
+```
+./build_android.sh           # builds x86_64 + arm64-v8a, then assembles a debug APK
+./build_android.sh run       # also installs + launches on a connected device/emulator
+```
+
+`JAVA_HOME`, `ANDROID_HOME`, and the NDK are auto-detected from a standard Android Studio install; set them explicitly if the build can't find them. Windows users can run `build_android.ps1`. Environment knobs: `ABIS="arm64-v8a"` limits which ABIs are built, and `SKIP_GRADLE=1` stops after the native libraries (used by the CI compile gate).
+
+## CI release signing secrets
+
+`.github/workflows/ReleaseBuilds.yml` signs/notarizes release artifacts when these GitHub Actions secrets are configured. If they're absent (e.g. on a fork), the jobs still succeed and upload **unsigned** artifacts.
+
+| Secret | Used for |
+|--------|----------|
+| `APPLE_CODE_SIGN_IDENTITY` | macOS `.app` / SDL codesigning identity |
+| `APPLE_DEVELOPER_CERTIFICATE_P12_BASE64` / `…_PASSWORD` | macOS signing certificate (base64 `.p12` + password) |
+| `APPLE_NOTARIZATION_USERNAME` / `…_PASSWORD` | macOS notarization (notarytool) |
+| `APPLE_DEVELOPMENT_TEAM` | macOS notarization team ID |
+| `ANDROID_SIGNING_KEY` | base64 Android release keystore |
+| `ANDROID_KEY_ALIAS` / `ANDROID_KEYSTORE_PASSWORD` / `ANDROID_KEY_PASSWORD` | Android keystore alias + passwords |
+
+(Note: `SECRETS.md` in the repo root documents in-game cheat codes, **not** these CI secrets.)
