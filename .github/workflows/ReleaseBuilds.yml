@@ -477,6 +477,11 @@ jobs:
           manifest-path: packaging/flatpak/io.jor.cromagrally.yml
           cache-key: flatpak-${{ matrix.platform.arch }}-${{ hashFiles('packaging/flatpak/io.jor.cromagrally.yml') }}
           arch: ${{ matrix.platform.arch }}
+          # This action auto-uploads the bundle as a workflow artifact by default; turn it
+          # off so the explicit upload-artifact step below is the ONLY flatpak artifact.
+          # Otherwise each .flatpak is uploaded twice and publish-release sees the same
+          # basename from two artifacts (which failed the v3.1.0 release attach).
+          upload-artifact: false
       - uses: actions/upload-artifact@v7
         with:
           name: CroMagRally-linux-${{ matrix.platform.arch }}-flatpak
@@ -550,12 +555,18 @@ jobs:
           mkdir -p upload
           # Each artifact lands in artifacts/<artifact-name>/<file>. Every build job now
           # uploads exactly one release-ready file, so flatten by basename. Skip the
-          # Linux-only SHA256SUMS.txt; a complete one is regenerated below. Fail loudly
-          # on a basename collision rather than silently dropping an asset.
+          # Linux-only SHA256SUMS.txt; a complete one is regenerated below.
           while IFS= read -r f; do
             b=$(basename "$f")
             if [ -e "upload/$b" ]; then
-              echo "::error::Duplicate artifact basename would be overwritten: $b" >&2
+              # Same basename already collected. If the bytes are identical it's a harmless
+              # duplicate (e.g. an action that also auto-uploads its own bundle) -> skip it.
+              # Only a genuine content conflict between two different files is an error.
+              if cmp -s "$f" "upload/$b"; then
+                echo "Duplicate identical artifact, skipping: $b"
+                continue
+              fi
+              echo "::error::Two different artifacts share basename $b" >&2
               exit 1
             fi
             cp "$f" "upload/$b"
