@@ -481,6 +481,12 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 		Source/Network/NetValidation.c
 		Source/System/TextUtils.c)
 	target_include_directories(CroMagRallyValidationTests PRIVATE ${GAME_SRCDIR}/Headers)
+	if(MSVC)
+		target_compile_definitions(CroMagRallyValidationTests PRIVATE
+			WIN32_LEAN_AND_MEAN
+			NOGDI
+			NOUSER)
+	endif()
 	if(SANITIZE)
 		target_compile_options(CroMagRallyValidationTests PRIVATE
 			-fsanitize=alignment,address,leak,undefined

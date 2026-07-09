@@ -49,7 +49,7 @@ jobs:
 
       - name: Configure sanitizer validation tests
         if: matrix.platform.name == 'Linux/GCC'
-        run: cmake -S . -B build-sanitize -DCMAKE_BUILD_TYPE=Debug -DBUILD_SDL_FROM_SOURCE=ON -DSDL3_DIR=extern/SDL -DSANITIZE=ON
+        run: cmake -S . -B build-sanitize -DCMAKE_BUILD_TYPE=Debug -DBUILD_SDL_FROM_SOURCE=ON -DSDL3_DIR=extern/SDL3-3.2.8 -DSANITIZE=ON
 
       - name: Run sanitizer validation tests
         if: matrix.platform.name == 'Linux/GCC'
