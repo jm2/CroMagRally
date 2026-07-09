@@ -5,6 +5,7 @@ plugins {
 android {
     namespace "io.jor.cromagrally"
     compileSdkVersion 35
+    buildToolsVersion "37.0.0"
     defaultConfig {
         applicationId "io.jor.cromagrally"
         minSdkVersion 24
@@ -16,7 +17,7 @@ android {
     buildTypes {
         release {
             minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             // Disable AAPT2 PNG crunching on release. Debug never crunches, so a bitmap that
             // AAPT2's cruncher rejects only ever breaks `assembleRelease` (this is exactly how
             // the misnamed banner JPEG slipped past CI for so long). Keeping it off makes the
@@ -25,7 +26,8 @@ android {
         }
     }
     lint {
-        abortOnError false
+        abortOnError true
+        baseline = file("lint-baseline.xml")
     }
 }
 

@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <stdarg.h>
+
 void	DoAlert(const char* format, ...);
 POMME_NORETURN void DoFatalAlert(const char* format, ...);
 POMME_NORETURN void CleanQuit(void);
@@ -36,6 +38,7 @@ float VisualRandomFloat2(void); // Now maps to LocalRNG
 void MyFlushEvents(void);
 size_t snprintfcat(char* buf, size_t bufSize, char const* fmt, ...);
 void AdvanceTextCursor(int snprintfReturnCode, char** cursor, size_t* remainingSize);
+int VFormatTextWithPlaceholder(const char* text, char* buf, size_t bufSize, const char* format, va_list args);
 
 #define ShowSystemErr(err) DoFatalAlert("Fatal system error: %d", err)
 #define ShowSystemErr_NonFatal(err) DoFatalAlert("System error: %d", err)

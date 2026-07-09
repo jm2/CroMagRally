@@ -74,9 +74,13 @@ static void UpdateNetGatherPrompt(void)
 			output = "ERROR: NO RESPONSE FROM CLIENTS.";
 			break;
 
-		case kNetSequence_ErrorNoResponseFromHost:
-			output = "ERROR: NO RESPONSE FROM HOST.";
-			break;
+			case kNetSequence_ErrorNoResponseFromHost:
+				output = "ERROR: NO RESPONSE FROM HOST.";
+				break;
+
+			case kNetSequence_ErrorProtocolViolation:
+				output = "ERROR: NETWORK PROTOCOL VIOLATION.";
+				break;
 
 		case kNetSequence_ErrorLostPacket:
 			output = "ERROR: LOST PACKET.";
@@ -303,5 +307,4 @@ static int DoNetGatherControls(void)
 
 	return 0;
 }
-
 

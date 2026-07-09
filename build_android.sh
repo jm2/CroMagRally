@@ -161,10 +161,11 @@ fi
 
 # Copy assets. Android can't enumerate its asset dir at runtime, so ship a file list.
 echo "=== Generating Data/files.txt ==="
-find Data -type f > Data/files.txt
+LC_ALL=C find Data -type f ! -name files.txt | LC_ALL=C sort > Data/files.txt
 
 ASSETS_DIR="$ANDROID_DIR/app/src/main/assets"
 echo "=== Copying Assets to $ASSETS_DIR ==="
+rm -rf "$ASSETS_DIR"
 mkdir -p $ASSETS_DIR
 cp -r Data $ASSETS_DIR/
 

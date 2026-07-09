@@ -133,14 +133,17 @@ function Build-Abi {
 Write-Host "=== Generating Data/files.txt ==="
 $BasePath = (Get-Item .).FullName
 $BasePathLength = $BasePath.Length + 1
-$Files = Get-ChildItem -Path "Data" -Recurse -File | ForEach-Object { 
+$Files = Get-ChildItem -Path "Data" -Recurse -File |
+    Where-Object { $_.Name -ne "files.txt" } |
+    ForEach-Object {
     $_.FullName.Substring($BasePathLength).Replace("\", "/")
-}
+} | Sort-Object
 # Write with Unix line endings for consistency if needed, but defaults are usually fine.
 Set-Content -Path "Data/files.txt" -Value $Files -Force
 
 $AssetsDir = "$AndroidDir/app/src/main/assets"
 Write-Host "=== Copying Assets to $AssetsDir ==="
+Remove-Item -Path $AssetsDir -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $AssetsDir | Out-Null
 Copy-Item -Path "Data" -Destination "$AssetsDir" -Recurse -Force
 

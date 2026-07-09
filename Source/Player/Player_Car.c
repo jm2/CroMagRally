@@ -232,7 +232,9 @@ static const float shadowScale[NUM_LAND_CAR_TYPES] =
 
 };
 
+	GAME_ASSERT(playerNum >= 0 && playerNum < MAX_PLAYERS);
 	carType = gPlayerInfo[playerNum].vehicleType;
+	GAME_ASSERT(carType >= 0 && carType < NUM_LAND_CAR_TYPES);
 
 
 		/* CREATE CAR BODY AS MAIN OBJECT FOR PLAYER */
@@ -287,9 +289,11 @@ static const float shadowScale[NUM_LAND_CAR_TYPES] =
 
 void SetPhysicsForVehicleType(short playerNum)
 {
+	GAME_ASSERT(playerNum >= 0 && playerNum < MAX_PLAYERS);
 	CarStatsType *info = &gPlayerInfo[playerNum].carStats;
 
 	const int	t = gPlayerInfo[playerNum].vehicleType;								// get vehicle type
+	GAME_ASSERT(t >= 0 && t < NUM_LAND_CAR_TYPES);
 	const float	userCarStatMultiplier = 1.0f / 8.0f;
 
 	float speed			= userCarStatMultiplier * gUserPhysics.carStats[t].speed;
@@ -2707,15 +2711,15 @@ void CreateCarWheelsAndHead(ObjNode *theCar, short playerNum)
 short			i, carType, sex;
 ObjNode			*wheel,*link;
 
-	if (playerNum >= MAX_PLAYERS)
-		DoFatalAlert("CreateCarWheelsAndHead: playerNum >= MAX_PLAYERS");
+		if (playerNum < 0 || playerNum >= MAX_PLAYERS)
+			DoFatalAlert("CreateCarWheelsAndHead: invalid playerNum");
 
 	sex = gPlayerInfo[playerNum].sex;							// get player sex
-	if (sex > 1)
-		DoFatalAlert("CreateCarWheelsAndHead: sx > 1");
+	if (sex < 0 || sex > 1)
+		DoFatalAlert("CreateCarWheelsAndHead: invalid sex");
 
 	carType = gPlayerInfo[playerNum].vehicleType;				// get car type
-	GAME_ASSERT(carType < NUM_LAND_CAR_TYPES);
+	GAME_ASSERT(carType >= 0 && carType < NUM_LAND_CAR_TYPES);
 
 	link = theCar;
 
@@ -2779,6 +2783,7 @@ ObjNode			*wheel,*link;
 			/************************/
 
 	int skinID = gPlayerInfo[playerNum].skin;
+	GAME_ASSERT(skinID >= 0 && skinID < NUM_CAVEMAN_SKINS);
 	wheel->Skeleton->overrideTexture = gCavemanSkins[sex][skinID];
 
 
@@ -3324,15 +3329,15 @@ static const OGLPoint3D	headOffsets[NUM_LAND_CAR_TYPES] =
 };
 
 
-	if (playerNum >= gNumTotalPlayers)
-		DoFatalAlert("AlignWheelsAndHeadOnCar: playerNum >= gNumTotalPlayers");
+		if (playerNum < 0 || playerNum >= gNumTotalPlayers)
+			DoFatalAlert("AlignWheelsAndHeadOnCar: invalid playerNum");
 
 	carType = gPlayerInfo[playerNum].vehicleType;				// get car type
 	onWater = gPlayerInfo[playerNum].onWater;
 
 	carMatrix = &theCar->BaseTransformMatrix;					// point to car's transform matrix
 
-	GAME_ASSERT(carType < NUM_LAND_CAR_TYPES);
+	GAME_ASSERT(carType >= 0 && carType < NUM_LAND_CAR_TYPES);
 
 
 			/* GET OBJ NODES OF ALL OF THE WHEELS */
@@ -3592,8 +3597,6 @@ new_group:
 
 
 }
-
-
 
 
 

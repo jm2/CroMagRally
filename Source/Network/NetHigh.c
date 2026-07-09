@@ -12,6 +12,7 @@
 
 #include "game.h"
 #include "network.h"
+#include "net_validation.h"
 #include "miscscreens.h"
 #include <stdlib.h>
 #include <stdio.h>
@@ -31,10 +32,11 @@
 /**********************/
 
 static OSErr HostSendGameConfigInfo(void);
-static void HandleGameConfigMessage(NetConfigMessage *inMessage);
+static Boolean HandleGameConfigMessage(NetConfigMessage *inMessage);
 static Boolean HandleOtherNetMessage(NSpMessageHeader	*message);
 static Boolean HandleOtherNetMessage(NSpMessageHeader	*message);
 static void PlayerUnexpectedlyLeavesGame(NSpPlayerLeftMessage *mess);
+static int FindHumanByNSpPlayerID(NSpPlayerID playerID);
 int Net_GetConnectionHint(void);
 
 /****************************/
@@ -325,6 +327,27 @@ static int FindHumanByNSpPlayerID(NSpPlayerID playerID)
 			/* NOT FOUND */
 
 	return -1;
+}
+
+static Boolean ValidatePlayerCharMessage(const NetPlayerCharTypeMessage* mess)
+{
+	int expectedPlayer = FindHumanByNSpPlayerID(mess->h.from);
+	return NetValidatePlayerCharPayload(mess, expectedPlayer, gNumRealPlayers);
+}
+
+static Boolean ValidateClientControlMessage(const NetClientControlInfoMessageType* mess)
+{
+	int expectedPlayer = FindHumanByNSpPlayerID(mess->h.from);
+	return NetValidateClientControlPayload(mess, expectedPlayer, gNumRealPlayers);
+}
+
+static void RejectProtocolMessage(const NSpMessageHeader* message)
+{
+	printf("Protocol violation from player %d: %s\n", (int) message->from, NSp4CCString(message->what));
+	if (gIsNetworkHost)
+		NSpPlayer_DisconnectForProtocolViolation(gNetGame, message->from);
+	else
+		NetGameFatalError(kNetSequence_ErrorProtocolViolation);
 }
 
 
@@ -631,6 +654,8 @@ void EndNetworkGame(void)
 {
 OSErr	iErr;
 
+	SetNetworkPowerMode(false);
+
 #if 0
 	if ((!gNetGameInProgress) || (!gNetGame))								// only if we're running a net game
 		return;
@@ -763,10 +788,12 @@ bool UpdateNetSequence(void)
 
 			if (message) switch (message->what)
 			{
-				case	kNetConfigureMessage:										// GOT GAME START INFO
-					HandleGameConfigMessage((NetConfigMessage*) message);
-					gNetSequenceState = kNetSequence_ClientJoinedGame;
-					break;
+					case	kNetConfigureMessage:										// GOT GAME START INFO
+						if (HandleGameConfigMessage((NetConfigMessage*) message))
+							gNetSequenceState = kNetSequence_ClientJoinedGame;
+						else
+							RejectProtocolMessage(message);
+						break;
 
 //				case 	kNSpGameTerminated:											// Host terminated the game :(
 //					break;
@@ -814,11 +841,14 @@ bool UpdateNetSequence(void)
 					{
 						NetPlayerCharTypeMessage *mess = (NetPlayerCharTypeMessage *) message;
 
-						if (message->messageLen < sizeof(NetPlayerCharTypeMessage)		// reject a short message cast up to this struct
-							|| !IsValidPlayerNum(mess->playerNum))						// reject an out-of-range player index from the wire
+						if (!ValidatePlayerCharMessage(mess))
 						{
+							RejectProtocolMessage(message);
 							break;
 						}
+
+						if (gIsNetworkHost)
+							NSpMessage_Send(gNetGame, message, kNSpSendFlag_Registered);
 
 						gPlayerInfo[mess->playerNum].vehicleType = mess->vehicleType;	// save this player's type
 						gPlayerInfo[mess->playerNum].sex = mess->sex;					// save this player's sex
@@ -929,6 +959,7 @@ bool UpdateNetSequence(void)
 Boolean SetupNetworkHosting(void)
 {
 	ResetNetGameTransientState();			// start from a clean slate (belt-and-suspenders vs EndNetworkGame)
+	SetNetworkPowerMode(true);
 	gNetSequenceState = kNetSequence_HostOffline;
 	gTargetFPS = OGL_GetMonitorRefreshRate();
 	sClientConnectionHint[0] = (Net_GetConnectionHint() == 1) ? 1 : 0;	// CMR7: host is always player 0; per-client D_init seed
@@ -952,6 +983,7 @@ Boolean SetupNetworkHosting(void)
 
 	if (!gNetGame)
 	{
+		SetNetworkPowerMode(false);
 		gNetSequenceState = kNetSequence_Error;
 		// Don't goto failure; show the error to the player
 		DoNetGatherScreen();
@@ -960,6 +992,7 @@ Boolean SetupNetworkHosting(void)
 
 	if (kNSpRC_OK != NSpGame_StartAdvertising(gNetGame))
 	{
+		SetNetworkPowerMode(false);
 		gNetSequenceState = kNetSequence_Error;
 		DoNetGatherScreen();
 		return true;
@@ -982,6 +1015,7 @@ Boolean SetupNetworkHosting(void)
 
 failure:
 	NSpGame_Dispose(gNetGame, 0);
+	SetNetworkPowerMode(false);
 
 	return true;
 }
@@ -998,6 +1032,7 @@ Boolean SetupNetworkJoin(void)
 OSStatus			status = noErr;
 
 	ResetNetGameTransientState();			// start from a clean slate
+	SetNetworkPowerMode(true);
 
 	gNetSequenceState = kNetSequence_ClientOffline;
 
@@ -1012,7 +1047,10 @@ OSStatus			status = noErr;
 		gNetSequenceState = kNetSequence_Error;
 	}
 
-	return DoNetGatherScreen();
+	Boolean cancelled = DoNetGatherScreen();
+	if (cancelled)
+		SetNetworkPowerMode(false);
+	return cancelled;
 }
 
 
@@ -1098,23 +1136,16 @@ NetConfigMessage		message;
 // Called while polling in Client_WaitForGameConfigInfoDialogCallback.
 //
 
-void HandleGameConfigMessage(NetConfigMessage* inMessage)
+static Boolean HandleGameConfigMessage(NetConfigMessage* inMessage)
 {
-	if (inMessage->h.messageLen < sizeof(NetConfigMessage))		// reject a short/truncated config message
-		return;
+	if (!NetValidateConfigPayload(inMessage))
+		return false;
 
 	gGameMode 			= inMessage->gameMode;
 	gTheAge 			= inMessage->age;
 	gTrackNum 			= inMessage->trackNum;
 	gNumRealPlayers 	= inMessage->numPlayers;
 	gMyNetworkPlayerNum = inMessage->playerNum;
-
-	// Defensive: the host supplies these, but a corrupt/hostile value must not drive OOB
-	// array access (the loop below and later gPlayerInfo[gMyNetworkPlayerNum] indexing).
-	if (gNumRealPlayers < 1 || gNumRealPlayers > MAX_PLAYERS)
-		gNumRealPlayers = MAX_PLAYERS;
-	if (!IsValidPlayerNum(gMyNetworkPlayerNum))
-		gMyNetworkPlayerNum = 0;
 
 	gNumGatheredPlayers = gNumRealPlayers;					// live human count; decremented as players leave (drives the everybody-left check)
 
@@ -1133,6 +1164,7 @@ void HandleGameConfigMessage(NetConfigMessage* inMessage)
 	{
 		gPlayerInfo[i].net.nspPlayerID = NSpGame_GetNthActivePlayerID(gNetGame, i);
 	}
+	return true;
 }
 
 
@@ -1659,13 +1691,12 @@ void Host_PumpClientInputs(void)
 		{
 			NetClientControlInfoMessageType* cMsg = (NetClientControlInfoMessageType*) inMess;
 
-			// Drop malformed / out-of-range / self / bot-slot packets before any array index.
-			if (inMess->messageLen >= sizeof(NetClientControlInfoMessageType)
-				&& IsValidPlayerNum(cMsg->playerNum)
-				&& cMsg->playerNum != gMyNetworkPlayerNum
-				&& !gPlayerInfo[cMsg->playerNum].isComputer)
-			{
-				int p = cMsg->playerNum;
+				// Drop malformed / out-of-range / self / bot-slot packets before any array index.
+				if (ValidateClientControlMessage(cMsg)
+					&& cMsg->playerNum != gMyNetworkPlayerNum
+					&& !gPlayerInfo[cMsg->playerNum].isComputer)
+				{
+					int p = cMsg->playerNum;
 
 						/* FEED THE INTER-ARRIVAL JITTER RING (drives adaptive depth D_i) */
 
@@ -1680,8 +1711,12 @@ void Host_PumpClientInputs(void)
 				}
 				sDepth[p].lastArrivalPC = now;
 
-				Queue_Push(p, cMsg);
-			}
+					Queue_Push(p, cMsg);
+				}
+				else
+				{
+					RejectProtocolMessage(inMess);
+				}
 		}
 		else
 		{

@@ -160,15 +160,30 @@ static void Boot(int argc, char **argv) {
 #if defined(__ANDROID__)
   // On Android, extract assets to internal storage because the game expects a
   // real filesystem
-  const char *prefPath = SDL_GetPrefPath("Pangea Software", "CroMagRally");
+  char *prefPath = SDL_GetPrefPath("Pangea Software", "CroMagRally");
   if (prefPath) {
     fs::path destDir = fs::path(prefPath) / "Data";
+    fs::path stagingDir = fs::path(prefPath) / "Data.new";
+    fs::path versionFile = destDir / ".asset-version";
 
-    // Simple check: if Data/System/gamecontrollerdb.txt exists, assume we
-    // extracted already. A more robust check would use a version file.
-    if (!fs::exists(destDir / "System" / "gamecontrollerdb.txt")) {
-      SDL_Log("Extracting assets to %s...", destDir.c_str());
-      fs::create_directories(destDir);
+    bool assetsCurrent = false;
+    size_t versionSize = 0;
+    void *versionData = SDL_LoadFile(
+        reinterpret_cast<const char *>(versionFile.u8string().c_str()),
+        &versionSize);
+    if (versionData) {
+      assetsCurrent =
+          std::string(static_cast<const char *>(versionData), versionSize) ==
+              GAME_VERSION &&
+          fs::exists(destDir / "System" / "gamecontrollerdb.txt");
+      SDL_free(versionData);
+    }
+
+    if (!assetsCurrent) {
+      SDL_Log("Extracting assets for version %s...", GAME_VERSION);
+      fs::remove_all(stagingDir);
+      fs::create_directories(stagingDir);
+      bool extractionOK = true;
 
       // Read file list
       size_t fileSize;
@@ -187,30 +202,65 @@ static void Boot(int argc, char **argv) {
           if (line.back() == '\r')
             line.pop_back();
 
-          // line is like "Data/System/foo.dat"
-          // We want to read "line" from assets, and write to prefPath/line
+          fs::path assetPath = fs::path(line).lexically_normal();
+          bool safePath = !assetPath.is_absolute() && line.rfind("Data/", 0) == 0;
+          for (const fs::path &component : assetPath) {
+            if (component == "..") {
+              safePath = false;
+              break;
+            }
+          }
+          if (!safePath) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "Unsafe asset path in manifest: %s", line.c_str());
+            extractionOK = false;
+            break;
+          }
 
           // Create parent directories
-          fs::path filePath = fs::path(prefPath) / line;
+          fs::path filePath = stagingDir / line.substr(5);
           fs::create_directories(filePath.parent_path());
 
           // Copy
           size_t dataSize;
           void *data = SDL_LoadFile(line.c_str(), &dataSize);
           if (data) {
-            SDL_SaveFile(
-                reinterpret_cast<const char *>(filePath.u8string().c_str()),
-                data, dataSize);
+            if (!SDL_SaveFile(
+                    reinterpret_cast<const char *>(filePath.u8string().c_str()),
+                    data, dataSize)) {
+              SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                           "Failed to save extracted asset: %s", line.c_str());
+              extractionOK = false;
+            }
             SDL_free(data);
           } else {
-            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                        "Failed to load asset: %s", line.c_str());
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "Failed to load asset: %s", line.c_str());
+            extractionOK = false;
           }
+          if (!extractionOK)
+            break;
         }
       } else {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "Could not find Data/files.txt in assets!");
+        extractionOK = false;
       }
+
+      fs::path stagingVersionFile = stagingDir / ".asset-version";
+      extractionOK = extractionOK &&
+          SDL_SaveFile(
+              reinterpret_cast<const char *>(stagingVersionFile.u8string().c_str()),
+              GAME_VERSION, SDL_strlen(GAME_VERSION));
+
+      if (!extractionOK) {
+        fs::remove_all(stagingDir);
+        SDL_free(prefPath);
+        throw std::runtime_error("Couldn't extract Android game assets.");
+      }
+
+      fs::remove_all(destDir);
+      fs::rename(stagingDir, destDir);
     } else {
       SDL_Log("Assets already extracted to %s", destDir.c_str());
     }
@@ -218,10 +268,14 @@ static void Boot(int argc, char **argv) {
 #endif
 
   fs::path dataPath = FindGameData(executablePath);
-  SDL_Log("Boot: Data path found: %s", dataPath. c_str());
+  auto dataPath8 = dataPath.u8string();
+  SDL_Log("Boot: Data path found: %s",
+          reinterpret_cast<const char *>(dataPath8.c_str()));
 #if defined(__ANDROID__)
   if (prefPath) {
     dataPath = fs::path(prefPath) / "Data";
+    SDL_free(prefPath);
+    prefPath = nullptr;
   }
 #endif
 
@@ -317,7 +371,8 @@ retryVideo:
   SDL_Init(SDL_INIT_GAMEPAD);
   auto gamecontrollerdbPath8 =
       (dataPath / "System" / "gamecontrollerdb.txt").u8string();
-  SDL_Log("Boot: Loading gamepad db from: %s", gamecontrollerdbPath8.c_str());
+  SDL_Log("Boot: Loading gamepad db from: %s",
+          reinterpret_cast<const char *>(gamecontrollerdbPath8.c_str()));
   if (-1 == SDL_AddGamepadMappingsFromFile(
                 (const char *)gamecontrollerdbPath8.c_str())) {
     SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_WARNING, GAME_FULL_NAME,

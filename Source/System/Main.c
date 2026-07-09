@@ -1778,6 +1778,124 @@ short	i,t,winner;
 }
 
 
+#if defined(__ANDROID__)
+static jobject gAndroidMulticastLock = NULL;
+static jobject gAndroidWifiLock = NULL;
+
+static Boolean AndroidClearException(JNIEnv* env, const char* operation)
+{
+	if (!(*env)->ExceptionCheck(env))
+		return false;
+	(*env)->ExceptionClear(env);
+	SDL_Log("Android network power operation failed: %s", operation);
+	return true;
+}
+
+static void AndroidReleaseLock(JNIEnv* env, jobject* lock, const char* operation)
+{
+	if (!*lock)
+		return;
+	jclass lockClass = (*env)->GetObjectClass(env, *lock);
+	jmethodID release = lockClass ? (*env)->GetMethodID(env, lockClass, "release", "()V") : NULL;
+	if (release)
+		(*env)->CallVoidMethod(env, *lock, release);
+	AndroidClearException(env, operation);
+	if (lockClass)
+		(*env)->DeleteLocalRef(env, lockClass);
+	(*env)->DeleteGlobalRef(env, *lock);
+	*lock = NULL;
+}
+#endif
+
+void SetNetworkPowerMode(Boolean enabled)
+{
+#if defined(__ANDROID__)
+	JNIEnv* env = (JNIEnv*) SDL_GetAndroidJNIEnv();
+	jobject activity = (jobject) SDL_GetAndroidActivity();
+	if (!env || !activity)
+		return;
+
+	if (!enabled)
+	{
+		AndroidReleaseLock(env, &gAndroidWifiLock, "WifiLock.release");
+		AndroidReleaseLock(env, &gAndroidMulticastLock, "MulticastLock.release");
+		return;
+	}
+	if (gAndroidMulticastLock && gAndroidWifiLock)
+		return;
+
+	jclass contextClass = (*env)->FindClass(env, "android/content/Context");
+	jfieldID wifiServiceField = contextClass
+		? (*env)->GetStaticFieldID(env, contextClass, "WIFI_SERVICE", "Ljava/lang/String;")
+		: NULL;
+	jstring wifiService = wifiServiceField
+		? (jstring) (*env)->GetStaticObjectField(env, contextClass, wifiServiceField)
+		: NULL;
+	jmethodID getSystemService = contextClass
+		? (*env)->GetMethodID(env, contextClass, "getSystemService", "(Ljava/lang/String;)Ljava/lang/Object;")
+		: NULL;
+	jobject wifiManager = getSystemService && wifiService
+		? (*env)->CallObjectMethod(env, activity, getSystemService, wifiService)
+		: NULL;
+	if (AndroidClearException(env, "getSystemService") || !wifiManager)
+		goto cleanup;
+
+	jclass managerClass = (*env)->GetObjectClass(env, wifiManager);
+	jstring tag = (*env)->NewStringUTF(env, "CroMagRally");
+
+	jmethodID makeMulticast = (*env)->GetMethodID(env, managerClass,
+		"createMulticastLock", "(Ljava/lang/String;)Landroid/net/wifi/WifiManager$MulticastLock;");
+	jobject multicast = !gAndroidMulticastLock && makeMulticast
+		? (*env)->CallObjectMethod(env, wifiManager, makeMulticast, tag)
+		: NULL;
+	if (!gAndroidMulticastLock && !AndroidClearException(env, "createMulticastLock") && multicast)
+	{
+		jclass lockClass = (*env)->GetObjectClass(env, multicast);
+		jmethodID acquire = (*env)->GetMethodID(env, lockClass, "acquire", "()V");
+		if (acquire)
+			(*env)->CallVoidMethod(env, multicast, acquire);
+		if (!AndroidClearException(env, "MulticastLock.acquire"))
+			gAndroidMulticastLock = (*env)->NewGlobalRef(env, multicast);
+		(*env)->DeleteLocalRef(env, lockClass);
+		(*env)->DeleteLocalRef(env, multicast);
+	}
+
+	jmethodID makeWifi = (*env)->GetMethodID(env, managerClass,
+		"createWifiLock", "(ILjava/lang/String;)Landroid/net/wifi/WifiManager$WifiLock;");
+	jobject wifi = !gAndroidWifiLock && makeWifi
+		? (*env)->CallObjectMethod(env, wifiManager, makeWifi, 4, tag)
+		: NULL;
+	if (!gAndroidWifiLock && (AndroidClearException(env, "create low-latency WifiLock") || !wifi))
+	{
+		wifi = makeWifi ? (*env)->CallObjectMethod(env, wifiManager, makeWifi, 3, tag) : NULL;
+		AndroidClearException(env, "create high-performance WifiLock");
+	}
+	if (!gAndroidWifiLock && wifi)
+	{
+		jclass lockClass = (*env)->GetObjectClass(env, wifi);
+		jmethodID acquire = (*env)->GetMethodID(env, lockClass, "acquire", "()V");
+		if (acquire)
+			(*env)->CallVoidMethod(env, wifi, acquire);
+		if (!AndroidClearException(env, "WifiLock.acquire"))
+			gAndroidWifiLock = (*env)->NewGlobalRef(env, wifi);
+		(*env)->DeleteLocalRef(env, lockClass);
+		(*env)->DeleteLocalRef(env, wifi);
+	}
+
+	(*env)->DeleteLocalRef(env, tag);
+	(*env)->DeleteLocalRef(env, managerClass);
+cleanup:
+	if (wifiManager)
+		(*env)->DeleteLocalRef(env, wifiManager);
+	if (wifiService)
+		(*env)->DeleteLocalRef(env, wifiService);
+	if (contextClass)
+		(*env)->DeleteLocalRef(env, contextClass);
+#else
+	(void) enabled;
+#endif
+}
+
 /************************************************************/
 /******************** PROGRAM MAIN ENTRY  *******************/
 /************************************************************/
@@ -1788,113 +1906,6 @@ void GameMain(void)
 				/**************/
 				/* BOOT STUFF */
 				/**************/
-
-#ifdef __ANDROID__
-	// Acquire MulticastLock to allow UDP discovery
-	JNIEnv *env = (JNIEnv *)SDL_GetAndroidJNIEnv();
-	jobject activity = (jobject)SDL_GetAndroidActivity();
-	if (env && activity)
-	{
-		// Context.WIFI_SERVICE
-		jclass contextClass = (*env)->FindClass(env, "android/content/Context");
-		jfieldID wifiServiceField = (*env)->GetStaticFieldID(env, contextClass, "WIFI_SERVICE", "Ljava/lang/String;");
-		jstring wifiServiceString = (jstring)(*env)->GetStaticObjectField(env, contextClass, wifiServiceField);
-		
-		// context.getSystemService(Context.WIFI_SERVICE) -> WifiManager
-		jmethodID getSystemService = (*env)->GetMethodID(env, contextClass, "getSystemService", "(Ljava/lang/String;)Ljava/lang/Object;");
-		jobject wifiManager = (*env)->CallObjectMethod(env, activity, getSystemService, wifiServiceString);
-
-		if (wifiManager)
-		{
-			jclass wifiManagerClass = (*env)->GetObjectClass(env, wifiManager);
-			
-			// wifiManager.createMulticastLock("CroMagRally")
-			jmethodID createMulticastLock = (*env)->GetMethodID(env, wifiManagerClass, "createMulticastLock", "(Ljava/lang/String;)Landroid/net/wifi/WifiManager$MulticastLock;");
-			jstring tag = (*env)->NewStringUTF(env, "CroMagRally");
-			jobject lock = (*env)->CallObjectMethod(env, wifiManager, createMulticastLock, tag);
-
-			if (lock)
-			{
-				jclass lockClass = (*env)->GetObjectClass(env, lock);
-				jmethodID acquire = (*env)->GetMethodID(env, lockClass, "acquire", "()V");
-				(*env)->CallVoidMethod(env, lock, acquire);
-
-				// Create GlobalRef to keep lock active
-				static jobject globalLock = NULL;
-				globalLock = (*env)->NewGlobalRef(env, lock);
-			}
-			else
-			{
-				SDL_Log("Failed to create MulticastLock");
-			}
-
-			// CMR7 Stage 4: acquire a high-priority WifiLock so the radio stays out of power-save during
-			// net games (the MulticastLock above only keeps multicast/discovery alive). Prefer
-			// WIFI_MODE_FULL_LOW_LATENCY (=4, API 29+); fall back to WIFI_MODE_FULL_HIGH_PERF (=3) on
-			// older OSes / if the call throws. We hold it for the process via a GlobalRef, mirroring the
-			// MulticastLock. NOTE: this does NOT survive OS app-backgrounding — Android suspends the
-			// socket threads after ~8s in the background, so a backgrounded peer still goes silent and is
-			// converted to a bot by the lastHeard/keepalive policy regardless of this lock.
-			{
-				jmethodID createWifiLock = (*env)->GetMethodID(env, wifiManagerClass, "createWifiLock", "(ILjava/lang/String;)Landroid/net/wifi/WifiManager$WifiLock;");
-				jstring wifiTag = (*env)->NewStringUTF(env, "CroMagRally");
-
-				jobject wifiLock = NULL;
-				if (createWifiLock)
-				{
-					wifiLock = (*env)->CallObjectMethod(env, wifiManager, createWifiLock, 4 /*WIFI_MODE_FULL_LOW_LATENCY*/, wifiTag);
-
-					if ((*env)->ExceptionCheck(env) || !wifiLock)		// API<29 / threw: retry FULL_HIGH_PERF
-					{
-						(*env)->ExceptionClear(env);
-						wifiLock = (*env)->CallObjectMethod(env, wifiManager, createWifiLock, 3 /*WIFI_MODE_FULL_HIGH_PERF*/, wifiTag);
-						if ((*env)->ExceptionCheck(env))
-						{
-							(*env)->ExceptionClear(env);
-							wifiLock = NULL;
-						}
-					}
-				}
-
-				if (wifiLock)
-				{
-					jclass wifiLockClass = (*env)->GetObjectClass(env, wifiLock);
-					jmethodID wifiAcquire = (*env)->GetMethodID(env, wifiLockClass, "acquire", "()V");
-					(*env)->CallVoidMethod(env, wifiLock, wifiAcquire);
-
-					static jobject globalWifiLock = NULL;				// GlobalRef keeps the lock held for the process
-					globalWifiLock = (*env)->NewGlobalRef(env, wifiLock);
-
-					(*env)->DeleteLocalRef(env, wifiLockClass);
-					(*env)->DeleteLocalRef(env, wifiLock);
-				}
-				else
-				{
-					SDL_Log("Failed to create WifiLock");
-				}
-
-				(*env)->DeleteLocalRef(env, wifiTag);
-			}
-		}
-		else
-		{
-			SDL_Log("Failed to get WifiManager");
-		}
-
-		// Clean up locals
-		(*env)->DeleteLocalRef(env, contextClass);
-		(*env)->DeleteLocalRef(env, wifiServiceString);
-		if (wifiManager) (*env)->DeleteLocalRef(env, wifiManager);
-		(*env)->DeleteLocalRef(env, activity); 
-	}
-	else
-	{
-		SDL_Log("Failed to get JNIEnv or Activity");
-	}
-	
-	// Safety: clear any pending JNI exceptions so we don't crash SDL later
-	if (env) (*env)->ExceptionClear(env);
-#endif
 
 	ToolBoxInit();
 
@@ -1987,7 +1998,4 @@ void GameMain(void)
 		PlayGame();
 	}
 }
-
-
-
 

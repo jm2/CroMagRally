@@ -181,6 +181,7 @@ NSpGameReference NSpSearch_JoinGame(NSpSearchReference searchRef, int gameNum);
 const char* NSpSearch_GetHostAddress(NSpSearchReference searchRef, int gameNum);
 
 int NSpPlayer_Kick(NSpGameReference gameRef, NSpPlayerID kickedPlayerID);
+int NSpPlayer_DisconnectForProtocolViolation(NSpGameReference gameRef, NSpPlayerID playerID);
 const char* NSpPlayer_GetName(NSpGameReference gameRef, NSpPlayerID playerID);
 NSpPlayerID NSpPlayer_GetMyID(NSpGameReference gameRef);
 

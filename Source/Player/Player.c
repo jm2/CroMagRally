@@ -179,6 +179,8 @@ Boolean	taken[NUM_LAND_CAR_TYPES];
 	{
 		if (!gPlayerInfo[i].isComputer)								// check for human player
 		{
+			GAME_ASSERT(gPlayerInfo[i].vehicleType >= 0);
+			GAME_ASSERT(gPlayerInfo[i].vehicleType < NUM_LAND_CAR_TYPES);
 			taken[gPlayerInfo[i].vehicleType] = true;				// mark this used
 		}
 	}
@@ -758,7 +760,6 @@ ObjNode *obj;
 		obj = obj->ChainNode;
 	}
 }
-
 
 
 

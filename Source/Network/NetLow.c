@@ -32,6 +32,7 @@ typedef int socklen_t;
 
 #include "game.h"
 #include "network.h"
+#include "net_validation.h"
 
 int gNetPort = 49959;
 #define LOBBY_BROADCAST_INTERVAL 1.0f
@@ -44,9 +45,13 @@ int gNetPort = 49959;
 
 #if _WIN32
 #define kSocketError_WouldBlock			WSAEWOULDBLOCK
+#define kSocketError_InProgress			WSAEINPROGRESS
+#define kSocketError_AlreadyConnected	WSAEISCONN
 #define kSocketError_AddressInUse		WSAEADDRINUSE
 #else
 #define kSocketError_WouldBlock			EAGAIN
+#define kSocketError_InProgress			EINPROGRESS
+#define kSocketError_AlreadyConnected	EISCONN
 #define kSocketError_AddressInUse		EADDRINUSE
 #endif
 
@@ -141,6 +146,7 @@ static void NSpPlayer_Clear(NSpPlayer* player);
 static void NSpPlayer_DeferLeaveNotify(NSpPlayer* peer);
 static int SendBytesBlocking(sockfd_t sockfd, NSpMessageHeader* header);
 static int SendOrEnqueue(sockfd_t sockfd, SendRing* ring, NSpMessageHeader* header);
+static bool ConnectWithTimeout(sockfd_t sockfd, const struct sockaddr* addr, socklen_t addrLen, uint32_t timeoutMs);
 
 static NSpPlayerID NSpGame_ClientSlotToID(NSpGameReference gameRef, int slot);
 static int NSpGame_ClientIDToSlot(NSpGameReference gameRef, NSpPlayerID id);
@@ -413,6 +419,45 @@ static struct in_addr GetSubnetBroadcastAddress(void)
 
 #pragma mark - Join lobby
 
+static bool ConnectWithTimeout(sockfd_t sockfd, const struct sockaddr* addr, socklen_t addrLen, uint32_t timeoutMs)
+{
+	if (connect(sockfd, addr, addrLen) == 0)
+		return true;
+
+	int err = GetSocketError();
+	if (err != kSocketError_WouldBlock && err != kSocketError_InProgress)
+		return err == kSocketError_AlreadyConnected;
+
+	uint64_t deadline = SDL_GetTicks() + timeoutMs;
+	while (SDL_GetTicks() < deadline)
+	{
+		fd_set writeSet;
+		fd_set errorSet;
+		FD_ZERO(&writeSet);
+		FD_ZERO(&errorSet);
+		FD_SET(sockfd, &writeSet);
+		FD_SET(sockfd, &errorSet);
+
+		struct timeval timeout = {.tv_sec = 0, .tv_usec = 50000};
+		int ready = select((int) sockfd + 1, NULL, &writeSet, &errorSet, &timeout);
+		if (ready > 0)
+		{
+			int socketError = 0;
+			socklen_t socketErrorLen = sizeof(socketError);
+			if (getsockopt(sockfd, SOL_SOCKET, SO_ERROR, (void*) &socketError, &socketErrorLen) != 0)
+				return false;
+			return socketError == 0 || socketError == kSocketError_AlreadyConnected;
+		}
+		if (ready < 0)
+			return false;
+
+		DoSDLMaintenance();
+	}
+
+	printf("%s: connection timed out after %u ms\n", __func__, timeoutMs);
+	return false;
+}
+
 static NSpGameReference JoinLobby(const LobbyInfo* lobby)
 {
 	printf("%s: %s\n", __func__, FormatAddress(lobby->hostAddr));
@@ -433,18 +478,9 @@ static NSpGameReference JoinLobby(const LobbyInfo* lobby)
 		.sin_addr.s_addr = lobby->hostAddr.sin_addr.s_addr,
 	};
 
-	int connectRC = connect(sockfd, (const struct sockaddr*) &bindAddr, sizeof(bindAddr));
-
-	if (connectRC == -1)
+	if (!ConnectWithTimeout(sockfd, (const struct sockaddr*) &bindAddr, sizeof(bindAddr), 3000))
 	{
 		printf("%s: connect failed: %d\n", __func__, GetSocketError());
-		goto fail;
-	}
-
-	// make it blocking AFTER connecting
-	if (!MakeSocketNonBlocking(sockfd))
-	{
-		printf("%s: non-blocking failed: %d\n", __func__, GetSocketError());
 		goto fail;
 	}
 
@@ -596,7 +632,7 @@ static sockfd_t CreateTCPSocket(bool bindIt)
 		goto fail;
 	}
 
-	if (bindIt && !MakeSocketNonBlocking(sockfd))
+	if (!MakeSocketNonBlocking(sockfd))
 	{
 		goto fail;
 	}
@@ -814,33 +850,6 @@ bye:
 	return outMessage;
 }
 
-// The host only relays application (game) broadcasts to all players. Internal NSp control
-// messages are point-to-point; forwarding one would let a malicious/buggy client deliver e.g.
-// kNSpError or kNSpJoinDenied to every peer and trip a fatal handler. Never relay those.
-static bool IsRelayableBroadcast(int32_t what)
-{
-	switch (what)
-	{
-		case kNSpError:
-		case kNSpUndefinedMessage:
-		case kNSpJoinRequest:
-		case kNSpJoinApproved:
-		case kNSpJoinDenied:
-		case kNSpPlayerJoined:
-		case kNSpPlayerLeft:
-		case kNSpHostChanged:
-		case kNSpGameTerminated:
-		case kNSpGroupCreated:
-		case kNSpGroupDeleted:
-		case kNSpPlayerAddedToGroup:
-		case kNSpPlayerRemovedFromGroup:
-		case kNSpPlayerTypeChanged:
-			return false;		// internal/reserved type — never relay
-		default:
-			return true;		// application/game message
-	}
-}
-
 static NSpMessageHeader* NSpMessage_GetAsHost(NSpGame* game)
 {
 	NSpMessageHeader* message = NULL;
@@ -883,9 +892,21 @@ static NSpMessageHeader* NSpMessage_GetAsHost(NSpGame* game)
 			continue;
 		}
 
-		message = PollSocket(player->sockfd, &brokenPipe);
+			message = PollSocket(player->sockfd, &brokenPipe);
 
-		if (brokenPipe)
+			if (message
+				&& (!NetValidateInboundEnvelope(kNetInbound_Host, message)
+					|| (player->state == kNSpPlayerState_AwaitingHandshake && message->what != kNSpJoinRequest)
+					|| (player->state == kNSpPlayerState_ConnectedPeer && message->what == kNSpJoinRequest)))
+			{
+				printf("%s: protocol violation from player %d: type=%s len=%u\n",
+					__func__, (int) player->id, NSp4CCString(message->what), message->messageLen);
+				NSpMessage_Release(game, message);
+				message = NULL;
+				brokenPipe = true;
+			}
+
+			if (brokenPipe)
 		{
 			GAME_ASSERT(!message);
 
@@ -917,12 +938,7 @@ static NSpMessageHeader* NSpMessage_GetAsHost(NSpGame* game)
 			message->from = player->id;
 			GAME_ASSERT(NSpGame_IsValidPlayerID(game, message->from));
 
-			// Forward broadcast messages (game messages only — never internal control types)
-			if (message->to == kNSpAllPlayers && IsRelayableBroadcast(message->what))
-			{
-				// TODO: if we ever do UDP, we'll need to decide what to do with the flags below
-				NSpMessage_Send(game, message, kNSpSendFlag_Registered);
-			}
+				// Application broadcasts are relayed by NetHigh only after semantic validation.
 		}
 	}
 
@@ -936,6 +952,15 @@ static NSpMessageHeader* NSpMessage_GetAsClient(NSpGame* game)
 
 	// Get the message
 	message = PollSocket(game->clientToHostSocket, &brokenPipe);
+
+	if (message && !NetValidateInboundEnvelope(kNetInbound_Client, message))
+	{
+		printf("%s: protocol violation from host: type=%s len=%u\n",
+			__func__, NSp4CCString(message->what), message->messageLen);
+		NSpMessage_Release(game, message);
+		message = NULL;
+		brokenPipe = true;
+	}
 
 	if (brokenPipe)
 	{
@@ -2241,6 +2266,21 @@ int NSpPlayer_Kick(NSpGameReference gameRef, NSpPlayerID kickedPlayerID)
 		}
 	}
 
+	return kNSpRC_OK;
+}
+
+int NSpPlayer_DisconnectForProtocolViolation(NSpGameReference gameRef, NSpPlayerID playerID)
+{
+	NSpGame* game = NSpGame_Unbox(gameRef);
+	if (!game || !game->isHosting)
+		return kNSpRC_NoGame;
+
+	NSpPlayer* player = NSpGame_GetPlayerFromID(gameRef, playerID);
+	if (!player || player->state == kNSpPlayerState_Offline || player->state == kNSpPlayerState_Me)
+		return kNSpRC_InvalidPlayer;
+
+	printf("%s: disconnecting player %d\n", __func__, (int) playerID);
+	NSpPlayer_DeferLeaveNotify(player);
 	return kNSpRC_OK;
 }
 

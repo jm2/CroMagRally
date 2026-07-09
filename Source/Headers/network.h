@@ -2,6 +2,8 @@
 // network.h
 //
 
+#pragma once
+
 #include "main.h"
 #include "netsprocket.h"
 
@@ -168,6 +170,7 @@ void ApplyPendingFrameEvents(void);				// CMR7 Stage 4: apply frame-aligned even
 void NetCheck_ConnectionTimeouts(void);			// CMR7 Stage 4: per-frame lastHeard badge/drop policy (host + client)
 void Net_MaybeSendKeepAlive(void);				// CMR7 Stage 4: throttled header-only heartbeat (lobby/barriers keep radios awake)
 void Net_RefreshLastHeard(void);				// CMR7 Stage 4: reset all liveness clocks to now (game-loop entry)
+void SetNetworkPowerMode(Boolean enabled);		// Android network-session WiFi/multicast locks; no-op elsewhere
 
 void PlayerBroadcastVehicleType(void);
 Boolean GetVehicleSelectionFromNetPlayers(void);
@@ -212,6 +215,7 @@ enum
 	kNetSequence_ErrorLostPacket,
 	kNetSequence_ErrorNoResponseFromClients,
 	kNetSequence_ErrorNoResponseFromHost,
+	kNetSequence_ErrorProtocolViolation,
 };
 
 

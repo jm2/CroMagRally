@@ -470,6 +470,30 @@ if(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT CMAKE_SYSTEM_NAME STREQUAL "tvOS
 		COMMAND ${CMAKE_COMMAND} -E copy_directory "${GAME_DATADIR}" "${GAME_DATA_TARGET_LOCATION}")
 endif()
 
+#------------------------------------------------------------------------------
+# TESTS
+#------------------------------------------------------------------------------
+
+include(CTest)
+if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT CMAKE_SYSTEM_NAME STREQUAL "tvOS")
+	add_executable(CroMagRallyValidationTests
+		Tests/ValidationTests.c
+		Source/Network/NetValidation.c
+		Source/System/TextUtils.c)
+	target_include_directories(CroMagRallyValidationTests PRIVATE ${GAME_SRCDIR}/Headers)
+	if(SANITIZE)
+		target_compile_options(CroMagRallyValidationTests PRIVATE
+			-fsanitize=alignment,address,leak,undefined
+			-fno-omit-frame-pointer)
+		target_link_libraries(CroMagRallyValidationTests PRIVATE asan ubsan)
+	endif()
+	target_link_libraries(CroMagRallyValidationTests PRIVATE Pomme SDL3::SDL3)
+	if(NOT APPLE AND NOT WIN32)
+		target_link_libraries(CroMagRallyValidationTests PRIVATE m)
+	endif()
+	add_test(NAME validation COMMAND CroMagRallyValidationTests)
+endif()
+
 # macOS-specific post-build (skip for iOS/tvOS)
 if(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT CMAKE_SYSTEM_NAME STREQUAL "tvOS")
 	set(INFO_PLIST "${GAME_DATA_TARGET_LOCATION}/../Info.plist")
