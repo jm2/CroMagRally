@@ -115,7 +115,7 @@ else()
 	# Build from source
 	# Force SDL3 to use the vendored source path if not specified
 	if(NOT DEFINED SDL3_DIR OR SDL3_DIR MATCHES "SDL3.framework")
-		set(SDL3_DIR "${CMAKE_SOURCE_DIR}/extern/SDL")
+		set(SDL3_DIR "${CMAKE_SOURCE_DIR}/extern/SDL3-3.2.8")
 	endif()
 	message("Building SDL3 from source: " ${SDL3_DIR})
 	add_subdirectory("${SDL3_DIR}" EXCLUDE_FROM_ALL)

@@ -2,6 +2,43 @@
 set -e
 
 # Configuration
+ANDROID_COMPILE_PLATFORM="android-35"
+ANDROID_BUILD_TOOLS_VERSION="37.0.0"
+
+is_android_sdk_usable() {
+    local sdk_dir="$1"
+
+    if [ -z "$sdk_dir" ] || [ ! -d "$sdk_dir" ]; then
+        return 1
+    fi
+
+    if [ "${SKIP_GRADLE:-0}" == "1" ]; then
+        return 0
+    fi
+
+    [ -d "$sdk_dir/platforms/$ANDROID_COMPILE_PLATFORM" ] \
+        && [ -d "$sdk_dir/build-tools/$ANDROID_BUILD_TOOLS_VERSION" ]
+}
+
+find_android_sdk() {
+    for sdk_dir in \
+        "$HOME/Library/Android/sdk" \
+        "$HOME/Android/Sdk" \
+        "$LOCALAPPDATA/Android/Sdk"
+    do
+        if is_android_sdk_usable "$sdk_dir"; then
+            echo "$sdk_dir"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+is_android_ndk_usable() {
+    local ndk_dir="$1"
+    [ -n "$ndk_dir" ] && [ -f "$ndk_dir/build/cmake/android.toolchain.cmake" ]
+}
 
 # Auto-detect JAVA_HOME if not set
 if [ -z "$JAVA_HOME" ]; then
@@ -22,23 +59,32 @@ if [ -z "$JAVA_HOME" ]; then
     fi
 fi
 
-# Auto-detect ANDROID_HOME if not set
-if [ -z "$ANDROID_HOME" ]; then
-    # macOS
-    if [ -d "$HOME/Library/Android/sdk" ]; then
-        export ANDROID_HOME="$HOME/Library/Android/sdk"
-    # Linux
-    elif [ -d "$HOME/Android/Sdk" ]; then
-        export ANDROID_HOME="$HOME/Android/Sdk"
-    fi
-    
+# Auto-detect ANDROID_HOME if not set, or if the inherited SDK is incomplete
+# for Gradle APK assembly. Native-only smoke builds (SKIP_GRADLE=1) only require
+# an NDK, so any existing SDK directory is acceptable there.
+if ! is_android_sdk_usable "$ANDROID_HOME"; then
     if [ ! -z "$ANDROID_HOME" ]; then
+        echo "Ignoring incomplete ANDROID_HOME: $ANDROID_HOME"
+    fi
+
+    DETECTED_ANDROID_HOME=$(find_android_sdk || true)
+    if [ ! -z "$DETECTED_ANDROID_HOME" ]; then
+        export ANDROID_HOME="$DETECTED_ANDROID_HOME"
+        export ANDROID_SDK_ROOT="$ANDROID_HOME"
         echo "Auto-detected ANDROID_HOME: $ANDROID_HOME"
     fi
 fi
 
+if [ ! -z "$ANDROID_HOME" ] && [ "$ANDROID_SDK_ROOT" != "$ANDROID_HOME" ]; then
+    export ANDROID_SDK_ROOT="$ANDROID_HOME"
+fi
+
 # Auto-detect NDK if not set (but ANDROID_HOME is present)
-if [ -z "$ANDROID_NDK_HOME" ] && [ ! -z "$ANDROID_HOME" ]; then
+if ! is_android_ndk_usable "$ANDROID_NDK_HOME" && is_android_ndk_usable "$ANDROID_NDK_ROOT"; then
+    export ANDROID_NDK_HOME="$ANDROID_NDK_ROOT"
+fi
+
+if ! is_android_ndk_usable "$ANDROID_NDK_HOME" && [ ! -z "$ANDROID_HOME" ]; then
     NDK_ROOT="$ANDROID_HOME/ndk"
     if [ -d "$NDK_ROOT" ]; then
         # Find the directory with the highest version number
@@ -48,6 +94,16 @@ if [ -z "$ANDROID_NDK_HOME" ] && [ ! -z "$ANDROID_HOME" ]; then
             echo "Auto-detected ANDROID_NDK_HOME: $ANDROID_NDK_HOME"
         fi
     fi
+fi
+
+if [ -z "$ANDROID_HOME" ]; then
+    echo "Error: ANDROID_HOME is not set and no usable Android SDK was auto-detected."
+    exit 1
+fi
+
+if ! is_android_ndk_usable "$ANDROID_NDK_HOME"; then
+    echo "Error: ANDROID_NDK_HOME is not set or does not contain build/cmake/android.toolchain.cmake."
+    exit 1
 fi
 
 ANDROID_DIR="AndroidBuild"
@@ -128,7 +184,7 @@ build_abi() {
         -DANDROID_PLATFORM=android-24 \
         -DBUILD_SDL_FROM_SOURCE=ON \
         -DCMAKE_BUILD_TYPE=Release \
-        -DSDL3_DIR=extern/SDL3-3.2.8 \
+        -DSDL3_DIR=$SDL_DIR \
         ..
     cd ..
 

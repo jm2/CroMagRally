@@ -43,9 +43,17 @@ jobs:
 
       - run: ${{matrix.platform.prefix}} python3 build.py --dependencies --configure --build ${{matrix.platform.extraflags}}
 
-      - name: Run validation tests
+      - name: Run validation tests (Linux)
         if: runner.os == 'Linux'
         run: ctest --test-dir build --output-on-failure
+
+      - name: Run validation tests (Windows)
+        if: runner.os == 'Windows'
+        run: ctest --test-dir build --build-config Release --output-on-failure
+
+      - name: Run validation tests (macOS)
+        if: runner.os == 'macOS'
+        run: ctest --test-dir build --build-config RelWithDebInfo --output-on-failure
 
       - name: Configure sanitizer validation tests
         if: matrix.platform.name == 'Linux/GCC'

@@ -1,5 +1,6 @@
 package org.libsdl.app;
 
+import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.PendingIntent;
@@ -139,6 +140,7 @@ public class HIDDeviceManager {
         return result;
     }
 
+    @SuppressLint("UnspecifiedRegisterReceiverFlag")
     private void initializeUSB() {
         mUsbManager = (UsbManager)mContext.getSystemService(Context.USB_SERVICE);
         if (mUsbManager == null) {
@@ -196,6 +198,8 @@ public class HIDDeviceManager {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             mContext.registerReceiver(mUsbBroadcast, filter, Context.RECEIVER_EXPORTED);
         } else {
+            // The receiver flag overload was added in Android 13; older devices must use
+            // the compatibility overload, where the flag is not available.
             mContext.registerReceiver(mUsbBroadcast, filter);
         }
 

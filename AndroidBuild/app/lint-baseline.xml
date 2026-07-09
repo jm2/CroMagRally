@@ -404,7 +404,7 @@
         errorLine2="                                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/org/libsdl/app/HIDDeviceManager.java"
-            line="398"
+            line="402"
             column="39"/>
     </issue>
 
@@ -415,7 +415,7 @@
         errorLine2="                                                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/org/libsdl/app/HIDDeviceManager.java"
-            line="450"
+            line="454"
             column="50"/>
     </issue>
 
@@ -426,7 +426,7 @@
         errorLine2="                                                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/org/libsdl/app/HIDDeviceManager.java"
-            line="450"
+            line="454"
             column="50"/>
     </issue>
 
@@ -437,7 +437,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/org/libsdl/app/HIDDeviceManager.java"
-            line="523"
+            line="527"
             column="13"/>
     </issue>
 
@@ -448,7 +448,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/org/libsdl/app/HIDDeviceManager.java"
-            line="523"
+            line="527"
             column="13"/>
     </issue>
 
@@ -459,7 +459,7 @@
         errorLine2="               ~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/org/libsdl/app/HIDDeviceManager.java"
-            line="527"
+            line="531"
             column="16"/>
     </issue>
 
@@ -470,7 +470,7 @@
         errorLine2="                                                                        ~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/org/libsdl/app/HIDDeviceManager.java"
-            line="527"
+            line="531"
             column="73"/>
     </issue>
 
@@ -481,7 +481,7 @@
         errorLine2="               ~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/org/libsdl/app/HIDDeviceManager.java"
-            line="527"
+            line="531"
             column="16"/>
     </issue>
 
@@ -492,7 +492,7 @@
         errorLine2="                                                                        ~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/org/libsdl/app/HIDDeviceManager.java"
-            line="527"
+            line="531"
             column="73"/>
     </issue>
 
@@ -503,18 +503,7 @@
         errorLine2="               ~~~~~~~~">
         <location
             file="src/main/java/org/libsdl/app/HIDDeviceManager.java"
-            line="138"
-            column="16"/>
-    </issue>
-
-    <issue
-        id="DefaultLocale"
-        message="Implicitly using the default locale is a common source of bugs: Use `String.format(Locale, ...)` instead"
-        errorLine1="        return String.format(&quot;%s/%x/%x/%d&quot;, mDevice.getDeviceName(), mDevice.getVendorId(), mDevice.getProductId(), mInterfaceIndex);"
-        errorLine2="               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/java/org/libsdl/app/HIDDeviceUSB.java"
-            line="34"
+            line="139"
             column="16"/>
     </issue>
 
@@ -690,40 +679,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/AndroidManifest.xml"
-            line="101"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="LeanbackUsesWifi"
-        message="Requiring Wifi permissions limits app availability on TVs that support only Ethernet"
-        errorLine1="    &lt;uses-permission android:name=&quot;android.permission.CHANGE_WIFI_MULTICAST_STATE&quot; />"
-        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/AndroidManifest.xml"
-            line="74"
-            column="5"/>
-    </issue>
-
-    <issue
-        id="RedundantLabel"
-        message="Redundant label can be removed"
-        errorLine1="            android:label=&quot;@string/app_name&quot;"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/AndroidManifest.xml"
-            line="97"
-            column="13"/>
-    </issue>
-
-    <issue
-        id="UnspecifiedRegisterReceiverFlag"
-        message="`mUsbBroadcast` is missing `RECEIVER_EXPORTED` or `RECEIVER_NOT_EXPORTED` flag for unprotected broadcasts registered for org.libsdl.app.USB_PERMISSION"
-        errorLine1="            mContext.registerReceiver(mUsbBroadcast, filter);"
-        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/java/org/libsdl/app/HIDDeviceManager.java"
-            line="199"
+            line="103"
             column="13"/>
     </issue>
 
@@ -767,7 +723,7 @@
         errorLine2="                                                                                                    ~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/org/libsdl/app/HIDDeviceManager.java"
-            line="379"
+            line="383"
             column="101"/>
     </issue>
 
@@ -778,7 +734,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/org/libsdl/app/HIDDeviceUSB.java"
-            line="55"
+            line="56"
             column="13"/>
     </issue>
 
@@ -789,7 +745,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/org/libsdl/app/HIDDeviceUSB.java"
-            line="77"
+            line="78"
             column="13"/>
     </issue>
 
@@ -800,7 +756,7 @@
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/java/org/libsdl/app/HIDDeviceUSB.java"
-            line="89"
+            line="90"
             column="13"/>
     </issue>
 
@@ -1042,7 +998,7 @@
         errorLine2="            ~~~~~~">
         <location
             file="src/main/java/org/libsdl/app/HIDDeviceManager.java"
-            line="32"
+            line="33"
             column="13"/>
     </issue>
 
@@ -1088,39 +1044,6 @@
             file="src/main/java/org/libsdl/app/SDLAudioManager.java"
             line="16"
             column="15"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.color.colorPrimary` appears to be unused"
-        errorLine1="    &lt;color name=&quot;colorPrimary&quot;>#3F51B5&lt;/color>"
-        errorLine2="           ~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/colors.xml"
-            line="3"
-            column="12"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.color.colorPrimaryDark` appears to be unused"
-        errorLine1="    &lt;color name=&quot;colorPrimaryDark&quot;>#303F9F&lt;/color>"
-        errorLine2="           ~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/colors.xml"
-            line="4"
-            column="12"/>
-    </issue>
-
-    <issue
-        id="UnusedResources"
-        message="The resource `R.color.colorAccent` appears to be unused"
-        errorLine1="    &lt;color name=&quot;colorAccent&quot;>#FF4081&lt;/color>"
-        errorLine2="           ~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/res/values/colors.xml"
-            line="5"
-            column="12"/>
     </issue>
 
     <issue

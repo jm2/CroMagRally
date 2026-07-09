@@ -1646,7 +1646,7 @@ static NSpPlayer* NSpGame_GetPlayerFromID(NSpGameReference gameRef, NSpPlayerID 
 
 	if (slot >= 0)
 	{
-		return &game->players[id];
+		return &game->players[slot];
 	}
 	else
 	{

@@ -1,45 +1,168 @@
 param(
-    [switch]$Run
+    [switch]$Run,
+    [string[]]$Abi
 )
 
 $ErrorActionPreference = "Stop"
+
+$HostIsWindows = Get-Variable -Name IsWindows -ValueOnly -ErrorAction SilentlyContinue
+$HostIsLinux = Get-Variable -Name IsLinux -ValueOnly -ErrorAction SilentlyContinue
+$HostIsMacOS = Get-Variable -Name IsMacOS -ValueOnly -ErrorAction SilentlyContinue
+
+if ($null -eq $HostIsWindows) {
+    $HostIsWindows = $env:OS -eq "Windows_NT"
+}
+if ($null -eq $HostIsLinux) {
+    $HostIsLinux = $false
+}
+if ($null -eq $HostIsMacOS) {
+    $HostIsMacOS = $false
+}
+
+$AndroidCompilePlatform = "android-35"
+$AndroidBuildToolsVersion = "37.0.0"
+
+function Test-AndroidSdkPath {
+    param ([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path $Path)) {
+        return $false
+    }
+
+    if ($env:SKIP_GRADLE -eq "1") {
+        return $true
+    }
+
+    return (Test-Path (Join-Path $Path "platforms/$AndroidCompilePlatform")) `
+        -and (Test-Path (Join-Path $Path "build-tools/$AndroidBuildToolsVersion"))
+}
+
+function Test-AndroidNdkPath {
+    param ([string]$Path)
+
+    return -not [string]::IsNullOrWhiteSpace($Path) `
+        -and (Test-Path (Join-Path $Path "build/cmake/android.toolchain.cmake"))
+}
 
 # Configuration
 if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) {
     Write-Error "Ninja is not found in your PATH. Please install Ninja (e.g., 'winget install ninja') or add it to your PATH."
 }
 
-if (-not $env:JAVA_HOME) {
-    $PossibleJava = @(
-        "C:\Program Files\Android\Android Studio\jbr",
-        "C:\Program Files\Android\Android Studio\jre"
+function Get-UserHome {
+    if ($env:HOME) {
+        return $env:HOME
+    }
+
+    if ($env:USERPROFILE) {
+        return $env:USERPROFILE
+    }
+
+    return [Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)
+}
+
+function Set-EnvFromFirstExistingPath {
+    param (
+        [string]$Name,
+        [string[]]$Candidates
     )
-    foreach ($Path in $PossibleJava) {
-        if (Test-Path $Path) {
-            $env:JAVA_HOME = $Path
-            Write-Host "Auto-detected JAVA_HOME: $Path"
+
+    foreach ($Candidate in $Candidates) {
+        if ($Candidate -and (Test-Path $Candidate)) {
+            Set-Item -Path "env:$Name" -Value $Candidate
+            Write-Host "Auto-detected ${Name}: $Candidate"
+            return
+        }
+    }
+}
+
+if (-not $env:JAVA_HOME) {
+    $HomeDir = Get-UserHome
+    $PossibleJava = if ($HostIsMacOS) {
+        @(
+            "/Applications/Android Studio.app/Contents/jbr/Contents/Home",
+            "/Applications/Android Studio.app/Contents/jre/Contents/Home"
+        )
+    }
+    elseif ($HostIsLinux) {
+        @(
+            "/opt/android-studio/jbr",
+            "$HomeDir/android-studio/jbr",
+            "/snap/android-studio/current/android-studio/jbr"
+        )
+    }
+    else {
+        @(
+            "$env:ProgramFiles\Android\Android Studio\jbr",
+            "$env:ProgramFiles\Android\Android Studio\jre",
+            "${env:ProgramFiles(x86)}\Android\Android Studio\jbr",
+            "${env:ProgramFiles(x86)}\Android\Android Studio\jre"
+        )
+    }
+
+    Set-EnvFromFirstExistingPath "JAVA_HOME" $PossibleJava
+}
+
+if ($env:ANDROID_HOME -and -not (Test-AndroidSdkPath $env:ANDROID_HOME)) {
+    Write-Host "Ignoring incomplete ANDROID_HOME: $env:ANDROID_HOME"
+    $env:ANDROID_HOME = $null
+}
+
+if (-not $env:ANDROID_HOME -and $env:ANDROID_SDK_ROOT -and (Test-AndroidSdkPath $env:ANDROID_SDK_ROOT)) {
+    $env:ANDROID_HOME = $env:ANDROID_SDK_ROOT
+}
+
+if (-not $env:ANDROID_HOME) {
+    $HomeDir = Get-UserHome
+    $PossibleSdk = if ($HostIsMacOS) {
+        @("$HomeDir/Library/Android/sdk")
+    }
+    elseif ($HostIsLinux) {
+        @("$HomeDir/Android/Sdk")
+    }
+    else {
+        @("$env:LOCALAPPDATA\Android\Sdk")
+    }
+
+    foreach ($SdkPath in $PossibleSdk) {
+        if (Test-AndroidSdkPath $SdkPath) {
+            $env:ANDROID_HOME = $SdkPath
+            Write-Host "Auto-detected ANDROID_HOME: $SdkPath"
             break
         }
     }
 }
 
-if (-not $env:ANDROID_HOME) {
-    $PossibleSdk = "$env:LOCALAPPDATA\Android\Sdk"
-    if (Test-Path $PossibleSdk) {
-        $env:ANDROID_HOME = $PossibleSdk
-        Write-Host "Auto-detected ANDROID_HOME: $PossibleSdk"
-    }
+if ($env:ANDROID_HOME) {
+    $env:ANDROID_SDK_ROOT = $env:ANDROID_HOME
 }
 
-if (-not $env:ANDROID_NDK_HOME -and $env:ANDROID_HOME) {
-    $NdkRoot = "$env:ANDROID_HOME\ndk"
+if (-not (Test-AndroidNdkPath $env:ANDROID_NDK_HOME) -and (Test-AndroidNdkPath $env:ANDROID_NDK_ROOT)) {
+    $env:ANDROID_NDK_HOME = $env:ANDROID_NDK_ROOT
+}
+
+if (-not (Test-AndroidNdkPath $env:ANDROID_NDK_HOME) -and $env:ANDROID_HOME) {
+    $NdkRoot = Join-Path $env:ANDROID_HOME "ndk"
     if (Test-Path $NdkRoot) {
-        $LatestNdk = Get-ChildItem $NdkRoot | Sort-Object Name -Descending | Select-Object -First 1
+        $LatestNdk = Get-ChildItem $NdkRoot -Directory |
+            Sort-Object {
+                try { [version]$_.Name } catch { [version]"0.0" }
+            } -Descending |
+            Select-Object -First 1
+
         if ($LatestNdk) {
             $env:ANDROID_NDK_HOME = $LatestNdk.FullName
             Write-Host "Auto-detected ANDROID_NDK_HOME: $($LatestNdk.FullName)"
         }
     }
+}
+
+if (-not (Test-AndroidSdkPath $env:ANDROID_HOME)) {
+    Write-Error "ANDROID_HOME is not set and no Android SDK was auto-detected."
+}
+
+if (-not (Test-AndroidNdkPath $env:ANDROID_NDK_HOME)) {
+    Write-Error "ANDROID_NDK_HOME is not set and no NDK was found under ANDROID_HOME."
 }
 
 $AndroidDir = "AndroidBuild"
@@ -79,6 +202,34 @@ function Install-Dependencies {
 
 Install-Dependencies
 
+function Get-RequestedAbis {
+    $RequestedAbis = @()
+
+    if ($Abi) {
+        $RequestedAbis += $Abi
+    }
+    elseif ($env:ABIS) {
+        $RequestedAbis += $env:ABIS
+    }
+    else {
+        $RequestedAbis += @("x86_64", "arm64-v8a")
+    }
+
+    $RequestedAbis |
+        ForEach-Object { $_ -split "[,\s]+" } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+}
+
+function Get-BuildDirForAbi {
+    param ([string]$Abi)
+
+    switch ($Abi) {
+        "arm64-v8a" { return "build-android" }
+        "x86_64"    { return "build-android-x86" }
+        default     { return "build-android-$Abi" }
+    }
+}
+
 # Function to build and copy for a specific ABI
 function Build-Abi {
     param (
@@ -94,32 +245,30 @@ function Build-Abi {
     Write-Host "Configuring $BuildDir..."
     New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null
     Push-Location $BuildDir
-    
-    $Toolchain = "$env:ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake"
+
+    $Toolchain = Join-Path $env:ANDROID_NDK_HOME "build/cmake/android.toolchain.cmake"
+    if (-not (Test-Path $Toolchain)) {
+        Write-Error "Android CMake toolchain file not found: $Toolchain"
+    }
+
     # Fix path for CMake if on Windows (forward slashes are generally safer for cmake args)
-    if ($IsWindows) {
+    if ($HostIsWindows) {
         $Toolchain = $Toolchain -replace "\\", "/"
     }
 
-    if ($Abi -eq "arm64-v8a") {
-        cmake -GNinja -DCMAKE_TOOLCHAIN_FILE="$Toolchain" `
-            -DANDROID_ABI=arm64-v8a `
-            -DANDROID_PLATFORM=android-24 `
-            -DBUILD_SDL_FROM_SOURCE=ON `
-            -DCMAKE_BUILD_TYPE=Release `
-            -DSDL3_DIR="extern/SDL3-3.2.8" `
+    try {
+        cmake -GNinja `
+            "-DCMAKE_TOOLCHAIN_FILE=$Toolchain" `
+            "-DANDROID_ABI=$Abi" `
+            "-DANDROID_PLATFORM=android-24" `
+            "-DBUILD_SDL_FROM_SOURCE=ON" `
+            "-DCMAKE_BUILD_TYPE=Release" `
+            "-DSDL3_DIR=extern/SDL3-3.2.8" `
             ..
     }
-    else {
-        cmake -GNinja -DCMAKE_TOOLCHAIN_FILE="$Toolchain" `
-            -DANDROID_ABI=x86_64 `
-            -DANDROID_PLATFORM=android-24 `
-            -DBUILD_SDL_FROM_SOURCE=ON `
-            -DCMAKE_BUILD_TYPE=Release `
-            -DSDL3_DIR="extern/SDL3-3.2.8" `
-            ..
+    finally {
+        Pop-Location
     }
-    Pop-Location
 
     cmake --build $BuildDir --config Release
     
@@ -127,6 +276,18 @@ function Build-Abi {
     New-Item -ItemType Directory -Force -Path $JniLibsDir | Out-Null
     Copy-Item "$BuildDir/libCroMagRally.so" "$JniLibsDir/libmain.so"
     Copy-Item "$BuildDir/extern/SDL3-3.2.8/libSDL3.so" "$JniLibsDir/libSDL3.so"
+}
+
+# Build the requested ABIs. ABIS defaults to the device + emulator pair; CI can set
+# ABIS=arm64-v8a SKIP_GRADLE=1 for a fast native-only smoke build.
+$RequestedAbis = @(Get-RequestedAbis)
+foreach ($RequestedAbi in $RequestedAbis) {
+    Build-Abi $RequestedAbi (Get-BuildDirForAbi $RequestedAbi)
+}
+
+if ($env:SKIP_GRADLE -eq "1") {
+    Write-Host "=== SKIP_GRADLE=1: native libraries built; skipping APK assembly. ==="
+    exit 0
 }
 
 # 0. Copy Assets
@@ -138,8 +299,10 @@ $Files = Get-ChildItem -Path "Data" -Recurse -File |
     ForEach-Object {
     $_.FullName.Substring($BasePathLength).Replace("\", "/")
 } | Sort-Object
-# Write with Unix line endings for consistency if needed, but defaults are usually fine.
-Set-Content -Path "Data/files.txt" -Value $Files -Force
+[System.IO.File]::WriteAllText(
+    (Join-Path $BasePath "Data/files.txt"),
+    (($Files -join "`n") + "`n"),
+    [System.Text.UTF8Encoding]::new($false))
 
 $AssetsDir = "$AndroidDir/app/src/main/assets"
 Write-Host "=== Copying Assets to $AssetsDir ==="
@@ -147,15 +310,9 @@ Remove-Item -Path $AssetsDir -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $AssetsDir | Out-Null
 Copy-Item -Path "Data" -Destination "$AssetsDir" -Recurse -Force
 
-# 1. Build x86_64 (Emulator)
-Build-Abi "x86_64" "build-android-x86"
-
-# 2. Build arm64-v8a (Device)
-Build-Abi "arm64-v8a" "build-android"
-
 Write-Host "=== 3. Assembling Debug APK (Gradle) ==="
 Push-Location $AndroidDir
-if ($IsWindows) {
+if ($HostIsWindows) {
     .\gradlew.bat assembleDebug
 }
 else {
@@ -177,8 +334,13 @@ if ($Run) {
         }
         
         Write-Host "=== No running device found. Launching emulator: $AvdName ==="
-        # Provide a warning that this might fail if emulator not in path or weird env
-        Start-Process -FilePath $EmulatorBin -ArgumentList "-avd $AvdName -no-boot-anim -netdelay none -netspeed full" -WindowStyle Hidden
+        $EmulatorArgs = @("-avd", $AvdName, "-no-boot-anim", "-netdelay", "none", "-netspeed", "full")
+        if ($HostIsWindows) {
+            Start-Process -FilePath $EmulatorBin -ArgumentList $EmulatorArgs -WindowStyle Hidden
+        }
+        else {
+            Start-Process -FilePath $EmulatorBin -ArgumentList $EmulatorArgs | Out-Null
+        }
         
         Write-Host "Waiting for device to connect..."
         adb wait-for-device
