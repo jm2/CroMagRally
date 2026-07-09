@@ -107,11 +107,7 @@ if ! is_android_ndk_usable "$ANDROID_NDK_HOME"; then
 fi
 
 ANDROID_DIR="AndroidBuild"
-SDL_VERSION="3.2.8"
-SDL_DIR="extern/SDL3-${SDL_VERSION}"
-SDL_TAR="SDL3-${SDL_VERSION}.tar.gz"
-SDL_URL="https://libsdl.org/release/${SDL_TAR}"
-SDL_SHA256="13388fabb361de768ecdf2b65e52bb27d1054cae6ccb6942ba926e378e00db03"
+SDL_DIR="extern/SDL3"
 
 # Parse arguments
 DO_RUN=false
@@ -121,47 +117,14 @@ for arg in "$@"; do
     fi
 done
 
-# Function to check and download dependencies
+# The Android build uses the same SDL source checkout as every other platform.
 prepare_dependencies() {
-    if [ ! -d "$SDL_DIR" ]; then
-        echo "=== SDL3 not found. Downloading... ==="
-        mkdir -p extern
-        
-        # Download
-        if command -v wget >/dev/null 2>&1; then
-            wget -q "$SDL_URL" -O "$SDL_TAR"
-        elif command -v curl >/dev/null 2>&1; then
-            curl -L -s "$SDL_URL" -o "$SDL_TAR"
-        else
-            echo "Error: Neither wget nor curl found. Please install one to download dependencies."
-            exit 1
-        fi
-        
-        # Verify Checksum
-        echo "Verifying checksum..."
-        if command -v sha256sum >/dev/null 2>&1; then
-            echo "$SDL_SHA256  $SDL_TAR" | sha256sum -c -
-        elif command -v shasum >/dev/null 2>&1; then
-            echo "$SDL_SHA256  $SDL_TAR" | shasum -a 256 -c -
-        else
-            echo "Error: Neither sha256sum nor shasum found. Cannot verify dependency."
-            rm "$SDL_TAR"
-            exit 1
-        fi
-
-        if [ $? -ne 0 ]; then
-            echo "Error: Checksum verification failed!"
-            rm "$SDL_TAR"
-            exit 1
-        fi
-        
-        # Extract
-        tar -xzf "$SDL_TAR" -C extern/
-        rm "$SDL_TAR"
-        echo "=== SDL3 setup complete ==="
-    else
-        echo "=== SDL3 found in $SDL_DIR ==="
+    if [ ! -f "$SDL_DIR/CMakeLists.txt" ]; then
+        echo "Error: SDL3 submodule is missing at $SDL_DIR."
+        echo "Run: git submodule update --init --recursive"
+        exit 1
     fi
+    echo "=== Using SDL3 submodule at $SDL_DIR ==="
 }
 
 prepare_dependencies
@@ -183,8 +146,9 @@ build_abi() {
         -DANDROID_ABI=$ABI \
         -DANDROID_PLATFORM=android-24 \
         -DBUILD_SDL_FROM_SOURCE=ON \
+        -DSDL_SHARED=ON \
+        -DSDL_STATIC=OFF \
         -DCMAKE_BUILD_TYPE=Release \
-        -DSDL3_DIR=$SDL_DIR \
         ..
     cd ..
 
@@ -193,7 +157,7 @@ build_abi() {
     echo "--- Copying libraries to $JNI_LIBS_DIR ---"
     mkdir -p $JNI_LIBS_DIR
     cp $BUILD_DIR/libCroMagRally.so $JNI_LIBS_DIR/libmain.so
-    cp $BUILD_DIR/extern/SDL3-3.2.8/libSDL3.so $JNI_LIBS_DIR/libSDL3.so
+    cp $BUILD_DIR/extern/SDL3/libSDL3.so $JNI_LIBS_DIR/libSDL3.so
 }
 
 # Build the requested ABIs. ABIS defaults to the device + emulator pair; the PR compile

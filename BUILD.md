@@ -22,7 +22,6 @@ If you want to build the game **manually** instead, the rest of this document de
     git clone --recurse-submodules https://github.com/jorio/CroMagRally
     cd CroMagRally
     ```
-1. Download [SDL3-3.2.8.dmg](https://libsdl.org/release/SDL3-3.2.8.dmg), open it, then browse to SDL3.xcframework/macos-arm64_x86_64. In that folder, copy **SDL3.framework** to the game's **extern** folder.
 1. Prep the Xcode project:
     ```
     cmake -G Xcode -S . -B build
@@ -43,7 +42,6 @@ If you want to build the game **manually** instead, the rest of this document de
     git clone --recurse-submodules https://github.com/jorio/CroMagRally
     cd CroMagRally
     ```
-1. Download [SDL3-devel-3.2.8-VC.zip](https://libsdl.org/release/SDL3-devel-3.2.8-VC.zip), extract it, and copy **SDL3-3.2.8** to the **extern** folder. Rename **SDL3-3.2.8** to just **SDL3**.
 1. Prep the Visual Studio solution:
     ```
     cmake -G "Visual Studio 17 2022" -A x64 -S . -B build
@@ -59,7 +57,6 @@ If you want to build the game **manually** instead, the rest of this document de
 1. Install the prerequisites from your package manager:
     - Any C++20 compiler
     - CMake 3.21+
-    - SDL3 development library (e.g. "libsdl3-dev" on Ubuntu, "sdl3" on Arch, "SDL3-devel" on Fedora)
     - OpenGL development libraries (e.g. "libgl1-mesa-dev" on Ubuntu)
 1. Clone the repo **recursively**:
     ```
@@ -71,12 +68,14 @@ If you want to build the game **manually** instead, the rest of this document de
     cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
     cmake --build build
     ```
+    SDL3 is built from the `extern/SDL3` submodule by default. Distribution packagers can
+    opt into an installed SDL with `-DBUILD_SDL_FROM_SOURCE=OFF`.
     If you'd like to enable runtime sanitizers, append `-DSANITIZE=1` to the **first** `cmake` call above.
 1. The game gets built in `build/CroMagRally`. Enjoy!
 
 ## How to build for mobile (iOS / tvOS / Android)
 
-The mobile/TV builds are produced by dedicated scripts (they are **not** part of `build.py`). They target **sideloading / GitHub Releases**, not the App Store or Google Play. SDL3 is pinned to the same release the desktop build uses — for iOS/tvOS it is git-cloned into `extern/SDL` (override the tag with `SDL_REF=...`); for Android it is downloaded and SHA256-verified into `extern/SDL3-3.2.8`.
+The mobile/TV builds are produced by dedicated scripts (they are **not** part of `build.py`). They target **sideloading / GitHub Releases**, not the App Store or Google Play. Every platform builds the same `extern/SDL3` submodule checkout; update that gitlink when adopting a newer official SDL release.
 
 ### iOS / tvOS (macOS with Xcode 15+ required)
 

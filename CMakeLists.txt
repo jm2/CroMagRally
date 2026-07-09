@@ -28,8 +28,19 @@ project(${GAME_TARGET}
 	VERSION ${GAME_VERSION}
 	LANGUAGES C CXX)
 
-option(BUILD_SDL_FROM_SOURCE "Build SDL from source" OFF)
-option(SDL_STATIC "Static link SDL" OFF)
+option(BUILD_SDL_FROM_SOURCE "Build SDL from the extern/SDL3 submodule" ON)
+set(CMR_SDL_SOURCE_DIR "${CMAKE_SOURCE_DIR}/extern/SDL3" CACHE PATH
+	"Path to the SDL source tree used when BUILD_SDL_FROM_SOURCE is enabled")
+
+set(_sdl_static_default OFF)
+if(APPLE AND BUILD_SDL_FROM_SOURCE)
+	# Source-built SDL is easiest to package as part of an Apple app bundle when linked
+	# statically. Mobile builds require this, and it also removes the desktop build's
+	# dependency on a separately downloaded SDL3.framework.
+	set(_sdl_static_default ON)
+endif()
+option(SDL_STATIC "Static link SDL" ${_sdl_static_default})
+unset(_sdl_static_default)
 
 option(SANITIZE "Build with asan/ubsan" OFF)
 
@@ -54,8 +65,8 @@ if(MSVC)
 	add_compile_definitions(UNICODE _UNICODE)
 
 	set_property(DIRECTORY ${CMAKE_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${GAME_TARGET})
-elseif(APPLE)
-	# Let the game (and Pomme) find header files within extern/SDL3.framework
+elseif(APPLE AND NOT BUILD_SDL_FROM_SOURCE)
+	# Let the game (and Pomme) find headers in an explicitly requested prebuilt framework.
 	set(CMAKE_XCODE_ATTRIBUTE_FRAMEWORK_SEARCH_PATHS extern)
 	add_compile_options("-F${CMAKE_SOURCE_DIR}/extern")  # for non-xcode IDEs
 endif()
@@ -91,34 +102,29 @@ endif()
 #------------------------------------------------------------------------------
 
 if(NOT BUILD_SDL_FROM_SOURCE)
-	# If SDL3_DIR wasn't specified, discover if the user put some prebuilt SDL3
-	# package in the 'extern' directory
-	if(NOT DEFINED SDL3_DIR)
-		if(APPLE)
-			set(_sdl3_maybe "${CMAKE_SOURCE_DIR}/extern/SDL3.framework/Resources/CMake")
-		elseif(WIN32)
-			set(_sdl3_maybe "${CMAKE_SOURCE_DIR}/extern/SDL3/cmake")
-		endif()
-	
-		if(DEFINED _sdl3_maybe AND EXISTS "${_sdl3_maybe}")
-			set(SDL3_DIR "${_sdl3_maybe}")
-			message("Looking for SDL3 in: ${_sdl3_maybe}")
-		else()
-			message("Couldn't find pre-built SDL3 package in: ${_sdl3_maybe}")
-		endif()
-		unset(_sdl3_maybe)
+	find_package(SDL3 CONFIG REQUIRED)
+	message("Found external SDL3 package")
+else()
+	# Build the same submodule checkout on every supported platform. Keep the binary
+	# directory stable so packaging scripts never depend on an SDL release number.
+	if(NOT EXISTS "${CMR_SDL_SOURCE_DIR}/CMakeLists.txt")
+		message(FATAL_ERROR
+			"SDL3 source is missing at ${CMR_SDL_SOURCE_DIR}. "
+			"Run: git submodule update --init --recursive")
 	endif()
 
-	find_package(SDL3 CONFIG REQUIRED)
-	message("Found pre-built SDL3")
-else()
-	# Build from source
-	# Force SDL3 to use the vendored source path if not specified
-	if(NOT DEFINED SDL3_DIR OR SDL3_DIR MATCHES "SDL3.framework")
-		set(SDL3_DIR "${CMAKE_SOURCE_DIR}/extern/SDL3-3.2.8")
+	set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
+	set(SDL_TESTS OFF CACHE BOOL "" FORCE)
+	set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
+	set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
+	if(SDL_STATIC)
+		set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+	else()
+		set(SDL_SHARED ON CACHE BOOL "" FORCE)
 	endif()
-	message("Building SDL3 from source: " ${SDL3_DIR})
-	add_subdirectory("${SDL3_DIR}" EXCLUDE_FROM_ALL)
+
+	message("Building SDL3 from source: " ${CMR_SDL_SOURCE_DIR})
+	add_subdirectory("${CMR_SDL_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/extern/SDL3" EXCLUDE_FROM_ALL)
 endif()
 
 #------------------------------------------------------------------------------
@@ -364,7 +370,7 @@ set_target_properties(${GAME_TARGET} PROPERTIES
 	# Build it as an .app bundle
 	MACOSX_BUNDLE						TRUE
 
-	# Set framework search path to (App bundle)/Contents/Frameworks so the game can use its embedded SDL3.framework
+	# Set framework search path to (App bundle)/Contents/Frameworks for legacy prebuilt-framework builds.
 	XCODE_ATTRIBUTE_LD_RUNPATH_SEARCH_PATHS "@executable_path/../Frameworks"
 
 	# Explicitly turn off code signing, otherwise downloaded app will be quarantined forever
@@ -392,8 +398,8 @@ set_target_properties(${GAME_TARGET} PROPERTIES
 	XCODE_ATTRIBUTE_COPY_PHASE_STRIP[variant=Debug]	"NO"		# avoid "skipping copy phase strip" warning while working on Debug config
 )
 
-# Embed SDL3 framework only if not statically linked (must be outside set_target_properties)
-if(NOT SDL_STATIC)
+# A prebuilt Apple framework must be embedded. Source builds are static on Apple.
+if(APPLE AND NOT BUILD_SDL_FROM_SOURCE AND NOT SDL_STATIC)
 	set_target_properties(${GAME_TARGET} PROPERTIES
 		XCODE_EMBED_FRAMEWORKS "extern/SDL3.framework"
 		XCODE_EMBED_FRAMEWORKS_CODE_SIGN_ON_COPY "YES"
@@ -517,9 +523,18 @@ endif()
 
 # Windows-specific libraries
 if(WIN32)
-	# Copy SDL3 DLLs to output folder on Windows for convenience
+	# Source-built SDL lives in a subdirectory. Put its runtime DLL beside every
+	# executable so local runs, CTest, and packaging all use the same layout.
 	add_custom_command(TARGET ${GAME_TARGET} POST_BUILD
-		COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_RUNTIME_DLLS:${GAME_TARGET}> $<TARGET_FILE_DIR:${GAME_TARGET}>)
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			$<TARGET_RUNTIME_DLLS:${GAME_TARGET}> $<TARGET_FILE_DIR:${GAME_TARGET}>
+		COMMAND_EXPAND_LISTS)
+	if(TARGET CroMagRallyValidationTests)
+		add_custom_command(TARGET CroMagRallyValidationTests POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E copy_if_different
+				$<TARGET_RUNTIME_DLLS:CroMagRallyValidationTests> $<TARGET_FILE_DIR:CroMagRallyValidationTests>
+			COMMAND_EXPAND_LISTS)
+	endif()
 
 	# When installing (cmake --install), copy Visual Studio redistributable DLLs to install location
 	include(InstallRequiredSystemLibraries)
@@ -538,7 +553,7 @@ configure_file(${CMAKE_SOURCE_DIR}/packaging/ReadMe.txt.in ${CMAKE_CURRENT_BINAR
 option(CMR_INSTALL "Generate FHS install rules + deb/rpm (CPack) packaging" OFF)
 
 # Copy SDL3 into the package's own private libdir. ON for self-contained packages that
-# build SDL from source (deb/rpm bundle the pinned SDL 3.2.8). Turn OFF when a system
+# build the SDL submodule from source. Turn OFF when a system
 # SDL3 is used -- Arch ships 'sdl3'; Flatpak's SDL3 module already lives in /app/lib --
 # so we never ship a stray copy of a library the platform already provides.
 option(CMR_BUNDLE_SDL "Bundle SDL3 into the package's private libdir" ON)
@@ -563,10 +578,13 @@ if(CMR_INSTALL)
 	# Executable (arch-dependent payload)
 	install(TARGETS ${GAME_TARGET} RUNTIME DESTINATION ${CMR_PRIVATE_LIBDIR})
 
-	# Bundled SDL3 (self-contained packages only). SDL3::SDL3 is an alias/interface that
-	# installs nothing -- the real shared imported target is SDL3::SDL3-shared. Glob its own
-	# libdir so the full libSDL3.so.0.x.x <- libSDL3.so.0 <- libSDL3.so symlink chain ships.
-	if(CMR_BUNDLE_SDL AND TARGET SDL3::SDL3-shared)
+	# Bundled SDL3 (self-contained packages only). A source build exposes the real
+	# SDL3-shared target; a system package exposes an imported SDL3::SDL3-shared target.
+	if(CMR_BUNDLE_SDL AND TARGET SDL3-shared)
+		install(TARGETS SDL3-shared
+			LIBRARY DESTINATION ${CMR_PRIVATE_LIBDIR}
+			RUNTIME DESTINATION ${CMR_PRIVATE_LIBDIR})
+	elseif(CMR_BUNDLE_SDL AND TARGET SDL3::SDL3-shared)
 		set(_sdl_so "")
 		get_target_property(_sdl_cfgs SDL3::SDL3-shared IMPORTED_CONFIGURATIONS)
 		if(_sdl_cfgs)

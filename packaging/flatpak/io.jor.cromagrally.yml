@@ -1,7 +1,7 @@
 # Flatpak manifest for Cro-Mag Rally.
 #
 # The game is plain SDL3 + OpenGL (no GTK/GNOME), so it targets the freedesktop runtime.
-# That runtime ships SDL2, NOT SDL3, so we build the pinned SDL 3.2.8 from source as its
+# That runtime ships SDL2, NOT SDL3, so we build the repository's SDL3 submodule as its
 # own module first -- this also keeps SDL byte-identical to the AppImage/deb/rpm builds,
 # which matters for the deterministic lockstep netcode.
 #
@@ -24,7 +24,7 @@ finish-args:
   - --share=network           # LAN / Wi-Fi netplay (TCP+UDP, default port 49959)
 
 modules:
-  # SDL 3.2.8 -- not provided by the 24.08 runtime (which only has SDL2).
+  # SDL3 -- not provided by the 24.08 runtime (which only has SDL2).
   - name: sdl3
     buildsystem: cmake-ninja
     config-opts:
@@ -39,9 +39,8 @@ modules:
       - /lib/pkgconfig
       - '*.a'
     sources:
-      - type: archive
-        url: https://libsdl.org/release/SDL3-3.2.8.tar.gz
-        sha256: 13388fabb361de768ecdf2b65e52bb27d1054cae6ccb6942ba926e378e00db03
+      - type: dir
+        path: ../../extern/SDL3
 
   # The game. CMR_INSTALL lays out the FHS tree under /app (binary in /app/lib/cromagrally,
   # assets in /app/share/cromagrally/Data, launcher at /app/bin/cromagrally). SDL is the

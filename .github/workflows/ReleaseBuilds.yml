@@ -23,7 +23,7 @@ permissions:
 jobs:
   build-linux-appimage:
     runs-on: ${{ matrix.platform.os }}
-    timeout-minutes: 5
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -58,7 +58,7 @@ jobs:
 
   build-windows:
     runs-on: windows-2022
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
         with: {submodules: 'recursive'}
@@ -98,7 +98,7 @@ jobs:
 
   build-macos:
     runs-on: macos-latest  # as of January 2025, this still supports the macOS 10.13 deployment target
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       # Surfaced at job level so each signing step's `if:` can detect whether the Apple
       # secrets are configured (a step's own step-level env is NOT visible to its `if:`).
@@ -164,8 +164,8 @@ jobs:
           echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> "$GITHUB_ENV"
 
       - name: Build native libs + assets (CMake/NDK, Release)
-        # build_android.sh: fetches & sha256-verifies SDL3 3.2.8, builds libCroMagRally.so +
-        # libSDL3.so for x86_64 and arm64-v8a (CMAKE_BUILD_TYPE=Release, android-24), copies
+        # build_android.sh: builds the extern/SDL3 submodule and libCroMagRally.so for
+        # x86_64 and arm64-v8a (CMAKE_BUILD_TYPE=Release, android-24), copies
         # them into AndroidBuild/.../jniLibs, copies Data/ into assets, then assembleDebug.
         run: ./build_android.sh
 
@@ -210,7 +210,7 @@ jobs:
     timeout-minutes: 30            # SDL3-static-from-source + game via Xcode can take ~15-25 min
     steps:
       - uses: actions/checkout@v6
-        with: {submodules: 'recursive'}   # extern/Pomme + extern/gl4es (gl4es required for iOS GL ES)
+        with: {submodules: 'recursive'}   # extern/Pomme + extern/SDL3 + extern/gl4es
 
       - uses: maxim-lobanov/setup-xcode@v1   # optional: pin Xcode (README wants 15+)
         with:
@@ -219,8 +219,8 @@ jobs:
       - name: Extract game version
         run: echo "GAME_VERSION=$(grep -m1 'set(GAME_VERSION' CMakeLists.txt | sed -E 's/.*\"([^\"]+)\".*/\1/')" >> "$GITHUB_ENV"
 
-      # Single source of truth: run the same script developers use. It pins SDL
-      # release-3.2.8, builds the unsigned device .app (CODE_SIGNING_ALLOWED=NO keeps a
+      # Single source of truth: run the same script developers use. It builds the
+      # extern/SDL3 submodule and unsigned device .app (CODE_SIGNING_ALLOWED=NO keeps a
       # cert-less runner green), and packages the sideloadable unsigned .ipa.
       - name: Build + package unsigned iOS .ipa
         env:
@@ -252,8 +252,8 @@ jobs:
         with:
           xcode-version: latest-stable
 
-      # Single source of truth: run the same script developers use. It pins SDL
-      # release-3.2.8, builds the unsigned Apple TV .app (CODE_SIGNING_ALLOWED=NO), and
+      # Single source of truth: run the same script developers use. It builds the
+      # extern/SDL3 submodule and unsigned Apple TV .app (CODE_SIGNING_ALLOWED=NO), then
       # zips it into a single versioned asset.
       #
       # For a SIGNED, store-distributable build you'd add an
@@ -275,7 +275,7 @@ jobs:
   # Native Linux packages (deb / rpm / Arch / Flatpak), x86_64 + aarch64.
   # deb/rpm/arch build inside their target distro (containers) so runtime deps
   # and glibc match; flatpak uses host-native flatpak-builder (builds aarch64
-  # natively on the arm runner). All jobs bundle the pinned SDL 3.2.8 except
+  # natively on the arm runner). All jobs build the shared SDL submodule except
   # Arch, which depends on the system 'sdl3'. Artifact-only, matching this
   # workflow's `contents: read` posture (download + attach to the Release).
   # ──────────────────────────────────────────────────────────────────────────
@@ -391,7 +391,7 @@ jobs:
           - { arch: aarch64, runner: ubuntu-24.04-arm }
     steps:
       - uses: actions/checkout@v6
-        with: {submodules: 'recursive'}   # extern/Pomme is copied into the flatpak `type: dir` source
+        with: {submodules: 'recursive'}   # extern/Pomme and extern/SDL3 are `type: dir` sources
       - name: Install flatpak + flatpak-builder on the host
         run: |
           sudo apt-get update
@@ -412,7 +412,7 @@ jobs:
         with:
           bundle: CroMagRally-${{ env.GAME_VERSION }}-linux-${{ matrix.platform.arch }}.flatpak
           manifest-path: packaging/flatpak/io.jor.cromagrally.yml
-          cache-key: flatpak-${{ matrix.platform.arch }}-${{ hashFiles('packaging/flatpak/io.jor.cromagrally.yml') }}
+          cache-key: flatpak-${{ matrix.platform.arch }}-${{ hashFiles('packaging/flatpak/io.jor.cromagrally.yml', 'extern/SDL3/include/SDL3/SDL_version.h') }}
           arch: ${{ matrix.platform.arch }}
           # This action auto-uploads the bundle as a workflow artifact by default; turn it
           # off so the explicit upload-artifact step below is the ONLY flatpak artifact.

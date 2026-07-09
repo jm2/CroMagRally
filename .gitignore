@@ -1,7 +1,11 @@
 build*/
 cmake-build-*/
 cache/
-extern/SDL*
+__pycache__/
+# Legacy/downloaded SDL layouts. The source checkout at extern/SDL3 is a submodule.
+extern/SDL
+extern/SDL3-*
+extern/SDL3.framework
 dist/
 lib/
 

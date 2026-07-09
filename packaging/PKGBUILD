@@ -1,7 +1,7 @@
 # Maintainer: John-Michael Mulesa <jmulesa@gmail.com>
 #
-# Arch package for Cro-Mag Rally. Unlike the deb/rpm/flatpak builds (which bundle the pinned
-# SDL 3.2.8), Arch is rolling and always ships a current SDL3, so we depend on the system
+# Arch package for Cro-Mag Rally. Unlike the self-contained package builds, Arch is rolling
+# and always ships a current SDL3, so we intentionally depend on the system
 # 'sdl3' and do NOT vendor a copy (-DCMR_BUNDLE_SDL=OFF) -- namcap/AUR policy frowns on bundled
 # libraries, and SDL does no game-physics math, so the lockstep determinism (enforced by
 # -ffp-contract=off in CMakeLists.txt) is unaffected by the SDL version.

@@ -166,38 +166,14 @@ if (-not (Test-AndroidNdkPath $env:ANDROID_NDK_HOME)) {
 }
 
 $AndroidDir = "AndroidBuild"
-$SdlVersion = "3.2.8"
-$SdlDir = "extern/SDL3-$SdlVersion"
-$SdlTar = "SDL3-$SdlVersion.tar.gz"
-$SdlUrl = "https://libsdl.org/release/$SdlTar"
-$SdlSha256 = "13388fabb361de768ecdf2b65e52bb27d1054cae6ccb6942ba926e378e00db03"
+$SdlDir = "extern/SDL3"
 
-# Function to check and download dependencies
+# The Android build uses the same SDL source checkout as every other platform.
 function Install-Dependencies {
-    if (-not (Test-Path -Path $SdlDir)) {
-        Write-Host "=== SDL3 not found. Downloading... ==="
-        New-Item -ItemType Directory -Force -Path "extern" | Out-Null
-        
-        # Download
-        Invoke-WebRequest -Uri $SdlUrl -OutFile $SdlTar
-        
-        # Verify Checksum
-        $FileHash = (Get-FileHash -Path $SdlTar -Algorithm SHA256).Hash.ToLower()
-        if ($FileHash -ne $SdlSha256) {
-            Write-Host "Error: Checksum verification failed!" -ForegroundColor Red
-            Remove-Item $SdlTar
-            exit 1
-        }
-        
-        # Extract
-        # Assuming tar is available (std on Win10+ and Linux)
-        tar -xzf $SdlTar -C extern/
-        Remove-Item $SdlTar
-        Write-Host "=== SDL3 setup complete ==="
+    if (-not (Test-Path -Path "$SdlDir/CMakeLists.txt")) {
+        Write-Error "SDL3 submodule is missing at $SdlDir. Run: git submodule update --init --recursive"
     }
-    else {
-        Write-Host "=== SDL3 found in $SdlDir ==="
-    }
+    Write-Host "=== Using SDL3 submodule at $SdlDir ==="
 }
 
 Install-Dependencies
@@ -262,8 +238,9 @@ function Build-Abi {
             "-DANDROID_ABI=$Abi" `
             "-DANDROID_PLATFORM=android-24" `
             "-DBUILD_SDL_FROM_SOURCE=ON" `
+            "-DSDL_SHARED=ON" `
+            "-DSDL_STATIC=OFF" `
             "-DCMAKE_BUILD_TYPE=Release" `
-            "-DSDL3_DIR=extern/SDL3-3.2.8" `
             ..
     }
     finally {
@@ -275,7 +252,7 @@ function Build-Abi {
     Write-Host "--- Copying libraries to $JniLibsDir ---"
     New-Item -ItemType Directory -Force -Path $JniLibsDir | Out-Null
     Copy-Item "$BuildDir/libCroMagRally.so" "$JniLibsDir/libmain.so"
-    Copy-Item "$BuildDir/extern/SDL3-3.2.8/libSDL3.so" "$JniLibsDir/libSDL3.so"
+    Copy-Item "$BuildDir/extern/SDL3/libSDL3.so" "$JniLibsDir/libSDL3.so"
 }
 
 # Build the requested ABIs. ABIS defaults to the device + emulator pair; CI can set

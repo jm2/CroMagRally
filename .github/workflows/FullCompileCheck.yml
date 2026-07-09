@@ -12,7 +12,7 @@ jobs:
   full-compile-check:
     name: ${{ matrix.platform.name }}
     runs-on: ${{ matrix.platform.os }}
-    timeout-minutes: 10
+    timeout-minutes: 25
 
     strategy:
       fail-fast: false
@@ -25,8 +25,8 @@ jobs:
 
     steps:
       # ubuntu-latest (24.04 noble) predates SDL3 and has no libsdl3-dev, so the Linux
-      # jobs build SDL from source (build.py --dependencies, no --system-sdl). These are
-      # the SDL build dependencies, matching the release AppImage job.
+      # jobs build the extern/SDL3 submodule. These are its optional backend dependencies,
+      # matching the release AppImage job.
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         run: |
@@ -57,7 +57,7 @@ jobs:
 
       - name: Configure sanitizer validation tests
         if: matrix.platform.name == 'Linux/GCC'
-        run: cmake -S . -B build-sanitize -DCMAKE_BUILD_TYPE=Debug -DBUILD_SDL_FROM_SOURCE=ON -DSDL3_DIR=extern/SDL3-3.2.8 -DSANITIZE=ON
+        run: cmake -S . -B build-sanitize -DCMAKE_BUILD_TYPE=Debug -DBUILD_SDL_FROM_SOURCE=ON -DSANITIZE=ON
 
       - name: Run sanitizer validation tests
         if: matrix.platform.name == 'Linux/GCC'
@@ -74,7 +74,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
-        with: {submodules: 'recursive'}   # extern/Pomme + extern/gl4es required by CMakeLists
+        with: {submodules: 'recursive'}   # extern/Pomme + extern/SDL3 + extern/gl4es
 
       - uses: android-actions/setup-android@v4
 

@@ -4,3 +4,6 @@
 [submodule "extern/gl4es"]
 	path = extern/gl4es
 	url = https://github.com/jm2/gl4es.git
+[submodule "extern/SDL3"]
+	path = extern/SDL3
+	url = https://github.com/libsdl-org/SDL.git

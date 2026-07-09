@@ -34,3 +34,41 @@ android {
 dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
 }
+
+def sdlVersionHeader = rootProject.file('../extern/SDL3/include/SDL3/SDL_version.h')
+def sdlJavaActivity = file('src/main/java/org/libsdl/app/SDLActivity.java')
+
+tasks.register('verifySdlJavaGlue') {
+    group = 'verification'
+    description = 'Checks that the app-local SDL Java glue matches the SDL3 submodule version.'
+    inputs.files(sdlVersionHeader, sdlJavaActivity)
+
+    doLast {
+        if (!sdlVersionHeader.isFile()) {
+            throw new GradleException('SDL3 submodule is missing. Run: git submodule update --init --recursive')
+        }
+        if (!sdlJavaActivity.isFile()) {
+            throw new GradleException("Missing SDL Java glue: ${sdlJavaActivity}")
+        }
+
+        def nativeVersion = [:]
+        def javaVersion = [:]
+        ['MAJOR', 'MINOR', 'MICRO'].each { part ->
+            def nativeMatch = (sdlVersionHeader.text =~ /#define\s+SDL_${part}_VERSION\s+(\d+)/)
+            def javaMatch = (sdlJavaActivity.text =~ /SDL_${part}_VERSION\s*=\s*(\d+)/)
+            if (!nativeMatch.find() || !javaMatch.find()) {
+                throw new GradleException("Unable to read SDL ${part.toLowerCase()} version")
+            }
+            nativeVersion[part] = nativeMatch.group(1)
+            javaVersion[part] = javaMatch.group(1)
+        }
+
+        if (nativeVersion != javaVersion) {
+            throw new GradleException("SDL C/Java version mismatch: native ${nativeVersion.values().join('.')} vs Java ${javaVersion.values().join('.')}")
+        }
+    }
+}
+
+tasks.named('preBuild').configure {
+    dependsOn tasks.named('verifySdlJavaGlue')
+}
