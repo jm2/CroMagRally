@@ -128,10 +128,10 @@ endif()
 
 # Android 16 KB page-size support. Google Play requires API-35+ apps to support 16 KB
 # memory pages, and devices already running in 16 KB page mode crash when loading a
-# 4 KB-aligned shared object. NDK r27 still links 4 KB-aligned by default, so force
-# 16 KB ELF segment alignment for every shared object we ship -- the game's
-# libCroMagRally.so and the from-source libSDL3.so. Directory-scoped, so it propagates
-# to the SDL subdirectory added below; a harmless no-op for the static libs.
+# 4 KB-aligned shared object. Keep 16 KB ELF segment alignment explicit for every
+# shared object we ship -- the game's libCroMagRally.so and the from-source libSDL3.so.
+# Directory-scoped, so it propagates to the SDL subdirectory added below; a harmless
+# no-op for the static libs.
 if(ANDROID)
 	add_link_options("-Wl,-z,max-page-size=16384" "-Wl,-z,common-page-size=16384")
 endif()
