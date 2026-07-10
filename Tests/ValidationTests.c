@@ -38,6 +38,18 @@ static void TestEnvelopeValidation(void)
 	NSpMessageHeader unknown = {.what = 'nope', .messageLen = sizeof(NSpMessageHeader)};
 	assert(!NetValidateInboundEnvelope(kNetInbound_Host, &unknown));
 	assert(!NetValidateInboundEnvelope(kNetInbound_Client, &unknown));
+
+	NSpJoinApprovedMessage approved = {0};
+	approved.header.what = kNSpJoinApproved;
+	approved.header.messageLen = sizeof(approved);
+	approved.header.to = kNSpHostID + MAX_CLIENTS - 1;
+	assert(NetValidateInboundEnvelope(kNetInbound_Client, &approved.header));
+	approved.header.to = kNSpHostID + MAX_CLIENTS;
+	assert(!NetValidateInboundEnvelope(kNetInbound_Client, &approved.header));
+	approved.header.to = kNSpHostID;
+	assert(!NetValidateInboundEnvelope(kNetInbound_Client, &approved.header));
+	approved.header.to = kNSpAllPlayers;
+	assert(!NetValidateInboundEnvelope(kNetInbound_Client, &approved.header));
 }
 
 static NetPlayerCharTypeMessage ValidCharMessage(void)
@@ -93,6 +105,27 @@ static void TestConfigValidation(void)
 	message.playerNum = 1;
 	message.trackNum = NUM_TRACKS;
 	assert(!NetValidateConfigPayload(&message));
+
+	message.trackNum = NUM_RACE_TRACKS;
+	assert(!NetValidateConfigPayload(&message));
+	message.gameMode = GAME_MODE_TAG1;
+	assert(NetValidateConfigPayload(&message));
+	message.trackNum = NUM_RACE_TRACKS - 1;
+	assert(!NetValidateConfigPayload(&message));
+	message.gameMode = GAME_MODE_CAPTUREFLAG;
+	message.trackNum = NUM_TRACKS - 1;
+	assert(NetValidateConfigPayload(&message));
+}
+
+static void TestSyncMaskValidation(void)
+{
+	const uint32_t hostAndClient1 = (1u << 0) | (1u << 1);
+	const uint32_t departedClient2 = 1u << 2;
+
+	assert(NetAreAllActivePlayersSynced(hostAndClient1, hostAndClient1));
+	assert(!NetAreAllActivePlayersSynced(1u << 0, hostAndClient1));
+	assert(NetAreAllActivePlayersSynced(hostAndClient1 | departedClient2, hostAndClient1));
+	assert(NetRetainActiveSyncBits(hostAndClient1 | departedClient2, hostAndClient1) == hostAndClient1);
 }
 
 static NetClientControlInfoMessageType ValidControlMessage(void)
@@ -485,6 +518,7 @@ int main(void)
 	TestEnvelopeValidation();
 	TestCharacterValidation();
 	TestConfigValidation();
+	TestSyncMaskValidation();
 	TestControlValidation();
 	TestHostControlValidation();
 	TestDeterministicEventMath();

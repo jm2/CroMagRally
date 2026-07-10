@@ -48,6 +48,8 @@ Boolean NetValidateInboundEnvelope(NetInboundRole role, const NSpMessageHeader* 
 	switch (message->what)
 	{
 		case kNSpJoinApproved:
+			return message->to > kNSpHostID
+				&& message->to < kNSpHostID + MAX_CLIENTS;
 		case kNSpPlayerJoined:
 		case kNSpPlayerLeft:
 		case kNetConfigureMessage:
@@ -68,18 +70,45 @@ Boolean NetValidateInboundEnvelope(NetInboundRole role, const NSpMessageHeader* 
 
 Boolean NetValidateConfigPayload(const NetConfigMessage* message)
 {
-	return message->gameMode >= GAME_MODE_MULTIPLAYERRACE
-		&& message->gameMode <= GAME_MODE_CAPTUREFLAG
-		&& message->age >= 0
+	if (message->gameMode < GAME_MODE_MULTIPLAYERRACE
+		|| message->gameMode > GAME_MODE_CAPTUREFLAG
+		|| message->trackNum < 0
+		|| message->trackNum >= NUM_TRACKS)
+	{
+		return false;
+	}
+
+	// Race tracks and battle arenas have different data contracts. In particular,
+	// scoreboard storage only has NUM_RACE_TRACKS rows, so never accept a race that
+	// names a battle arena. Conversely, battle modes require an arena.
+	if (message->gameMode == GAME_MODE_MULTIPLAYERRACE)
+	{
+		if (message->trackNum >= NUM_RACE_TRACKS)
+			return false;
+	}
+	else if (message->trackNum < NUM_RACE_TRACKS)
+	{
+		return false;
+	}
+
+	return message->age >= 0
 		&& message->age < NUM_AGES
-		&& message->trackNum >= 0
-		&& message->trackNum < NUM_TRACKS
 		&& message->numPlayers >= 1
 		&& message->numPlayers <= MAX_LOCAL_PLAYERS
 		&& message->playerNum >= 0
 		&& message->playerNum < message->numPlayers
 		&& message->difficulty < NUM_DIFFICULTIES
 		&& message->targetFPS <= MAX_GAME_FPS;
+}
+
+uint32_t NetRetainActiveSyncBits(uint32_t syncedMask, uint32_t activeMask)
+{
+	return syncedMask & activeMask;
+}
+
+Boolean NetAreAllActivePlayersSynced(uint32_t syncedMask, uint32_t activeMask)
+{
+	return NetRetainActiveSyncBits(syncedMask, activeMask) == activeMask;
 }
 
 Boolean NetValidatePlayerCharPayload(const NetPlayerCharTypeMessage* message, int expectedPlayer, int numRealPlayers)

@@ -216,6 +216,7 @@ enum
 	kNetSequence_ClientOfflineBecauseHostBailed,
 	kNetSequence_ClientOfflineBecauseHostUnreachable,
 	kNetSequence_ClientOfflineBecauseKicked,
+	kNetSequence_ClientOfflineBecauseJoinDenied,
 	kNetSequence_OfflineEverybodyLeft,
 	kNetSequence_SeedDesync,
 	kNetSequence_PositionDesync,
@@ -228,5 +229,6 @@ enum
 
 
 bool UpdateNetSequence(void);
+const char* Net_GetJoinDeniedReason(void);
 
 Boolean IsNetGamePaused(void);

@@ -994,16 +994,16 @@ static NSpMessageHeader* NSpMessage_GetAsClient(NSpGame* game)
 	{
 		case kNSpJoinApproved:
 		{
-			game->myID = message->to;		// that's our ID
-
-			NSpPlayer* newPlayer = NSpGame_GetPlayerFromID(game, game->myID);
+			NSpPlayerID approvedID = message->to;
+			NSpPlayer* newPlayer = NSpGame_GetPlayerFromID(game, approvedID);
 			if (!newPlayer)					// host supplied an out-of-range id: ignore rather than assert-crash
 			{
-				printf("kNSpJoinApproved: invalid id %d from host; ignoring.\n", (int) game->myID);
+				printf("kNSpJoinApproved: invalid id %d from host; ignoring.\n", (int) approvedID);
 				break;
 			}
 
-			newPlayer->id			= game->myID;
+			game->myID				= approvedID;
+			newPlayer->id			= approvedID;
 			newPlayer->state		= kNSpPlayerState_Me;
 			newPlayer->sockfd		= INVALID_SOCKET;		// client has no connection to itself
 			snprintf(newPlayer->name, sizeof(newPlayer->name), "YOU");		// TODO: get actual name
@@ -1119,8 +1119,9 @@ int NSpGame_AckJoinRequest(NSpGameReference gameRef, NSpMessageHeader* message)
 	{
 		NSpPlayer* player = &game->players[i];
 
-		if (player->state == kNSpPlayerState_Offline		// skip over dead clients
-			|| player->id == newPlayerID)					// skip over itself
+		if ((player->state != kNSpPlayerState_Me
+				&& player->state != kNSpPlayerState_ConnectedPeer)	// don't advertise half-handshaken peers
+			|| player->id == newPlayerID)						// skip over itself
 		{
 			continue;
 		}
@@ -1614,7 +1615,8 @@ uint32_t NSpGame_GetActivePlayersIDMask(NSpGameReference gameRef)
 		{
 			case kNSpPlayerState_Me:
 			case kNSpPlayerState_ConnectedPeer:
-				mask |= 1 << game->players[i].id;
+				if (NSpGame_IsValidPlayerID(gameRef, game->players[i].id))
+					mask |= 1u << (uint32_t) game->players[i].id;
 				break;
 
 			default:
@@ -2371,8 +2373,8 @@ uint32_t NSpGame_GetHostLastHeard(NSpGameReference gameRef)
 }
 
 // CMR7 Stage 4: refresh every liveness clock to now. Called at game-loop entry so the long
-// (possibly >NET_DROP_MS) lobby/vehicle-select/level-load gap can never trip a false drop on the
-// first in-game NetCheck_ConnectionTimeouts.
+// Lobby/vehicle-select/level-load gaps can be long, so refresh the clocks before the first
+// in-game NetCheck_ConnectionTimeouts instead of treating setup time as connection silence.
 void NSpGame_TouchAllLastHeard(NSpGameReference gameRef)
 {
 	NSpGame* game = NSpGame_Unbox(gameRef);
