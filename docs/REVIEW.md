@@ -14,7 +14,7 @@ The fork is in better shape than its provenance suggests: the core lockstep dete
 1. **Wire safety (security):** the host writes to arrays using attacker-controlled indices from network payloads — remotely exploitable memory corruption on any LAN. 2 critical, 4 high findings.
 2. **Session-killer netcode bugs:** never-reset state (queues, strike counter) makes the *second* hosted game in a process reliably die; lobby churn wedges races; several disconnect paths call `DoFatalAlert` and kill everyone.
 3. **Unintentional gameplay-fidelity regressions:** the RNG split into synced/unsynced streams (a2c3b97) misrouted ~8 *simulation-affecting* random draws to the unsynced per-machine stream — traps, land mine, oil slick, stump geometry, sub AI — creating real cross-peer divergence the rubber-band only partially masks. Plus one new behavior (cactus car-spin) that contradicts the fork's own legacy-restoration intent.
-4. **WiFi stutter root cause:** the per-frame blocking lockstep barrier converts any single client's radio jitter into a global freeze, and the 30-frame pre-roll buys jitter absorption at a constant ~500ms input lag. The fix is not tuning — it's removing the barrier. A complete, judge-vetted redesign ("CMR7 rev B") is in §5 and `wifi-design-synthesis.md`, estimated 20–30 dev-days, staged so each stage ships independently.
+4. **WiFi stutter root cause:** the per-frame blocking lockstep barrier converts any single client's radio jitter into a global freeze, and the 30-frame pre-roll buys jitter absorption at a constant ~500ms input lag. The fix is not tuning — it's removing the barrier. A complete, judge-vetted redesign ("CMR7 rev B") is in §5 and the [CMR7 staged implementation plan](WIFI-NETCODE-CMR7.md#staged-implementation-plan), estimated 20–30 dev-days, staged so each stage ships independently.
 
 A handful of changes are **intentional tuning you should explicitly ratify or revert** (§4.3): WATER_FRICTION 1600→1000, ice acceleration 0.3→0.5, the PCG32 RNG swap, and the cactus car-spin.
 
@@ -128,7 +128,7 @@ Current model: single-threaded TCP lockstep where the **client busy-blocks at to
 
 So the stutter is architectural, not parametric. No tuning of the current barrier makes WiFi smooth.
 
-### The design (unanimous judge verdict; full spec in `wifi-design-synthesis.md`)
+### The design (unanimous judge verdict; [full protocol specification](WIFI-NETCODE-CMR7.md#protocol-specification))
 
 **CMR7 rev B — "Free-Running Lockstep":** keep TCP, keep the star topology, keep variable timestep and the fatal seed check — but **the host never waits**. Three mechanisms:
 
@@ -217,8 +217,8 @@ Acceptance profile: mixed LAN with one congested-2.4GHz peer — wired client fr
 
 ### Companion documents
 
-- `WIFI-NETCODE-CMR7.md` — the full CMR7 rev B WiFi redesign: protocol, message formats, latency math, mixed-LAN handling, fidelity analysis, and the staged implementation plan.
-- `SUBMODULE-AUDIT.md` — audit of the forked `extern/Pomme` and `extern/gl4es` submodules vs upstream.
+- [WIFI-NETCODE-CMR7.md](WIFI-NETCODE-CMR7.md#overview) — the full CMR7 rev B WiFi redesign: protocol, message formats, latency math, mixed-LAN handling, fidelity analysis, and the staged implementation plan.
+- [SUBMODULE-AUDIT.md](SUBMODULE-AUDIT.md) — audit of the forked `extern/Pomme` and `extern/gl4es` submodules vs upstream.
 
 Most of the P0/P1 findings in this review are **already fixed** on this branch (see the
 commit history); the items explicitly deferred to "CMR7 Stage 0" are tracked in the WiFi
