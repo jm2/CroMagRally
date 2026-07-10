@@ -24,21 +24,20 @@ jobs:
           - { name: Mac, os: macos-latest }
 
     steps:
-      # ubuntu-latest (24.04 noble) predates SDL3 and has no libsdl3-dev, so the Linux
-      # jobs build the extern/SDL3 submodule. These are its optional backend dependencies,
-      # matching the release AppImage job.
+      # Linux jobs compile the pinned extern/SDL3 submodule. These are its optional
+      # backend dependencies, matching the release AppImage job.
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt update
           sudo apt install -y libasound2-dev libpulse-dev \
             libaudio-dev libjack-dev libsndio-dev libx11-dev libxext-dev \
-            libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev \
+            libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev \
             libxkbcommon-dev libdrm-dev libgbm-dev libgl1-mesa-dev libgles2-mesa-dev \
             libegl1-mesa-dev libdbus-1-dev libibus-1.0-dev libudev-dev fcitx-libs-dev \
             libpipewire-0.3-dev libwayland-dev libdecor-0-dev liburing-dev
 
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with: {submodules: 'recursive'}
 
       - run: ${{matrix.platform.prefix}} python3 build.py --dependencies --configure --build ${{matrix.platform.extraflags}}
@@ -62,39 +61,37 @@ jobs:
       - name: Run sanitizer validation tests
         if: matrix.platform.name == 'Linux/GCC'
         run: |
-          cmake --build build-sanitize --target CroMagRallyValidationTests --parallel 2
+          cmake --build build-sanitize --target CroMagRallyValidationTests PommeFileTests PommeIEEEExtendedTests --parallel 2
           ctest --test-dir build-sanitize --output-on-failure
 
   # The desktop matrix above can't catch breakage in the Android NDK build or the mobile
   # branches of the shared CMakeLists, which otherwise only surface at release-tag time.
-  # This is a fast, native-only smoke build (one ABI, no Gradle) on a free Linux runner.
+  # Build one ABI and assemble the debug APK so JNI staging, SDL Java glue, resources,
+  # manifest merging, and Gradle packaging are all exercised on every PR.
   android-native-check:
-    name: Android native (arm64-v8a)
+    name: Android APK (arm64-v8a)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with: {submodules: 'recursive'}   # extern/Pomme + extern/SDL3 + extern/gl4es
 
-      - uses: android-actions/setup-android@v4
+      - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
 
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Install NDK
+      - name: Install SDK platform, build-tools and NDK
         run: |
-          sdkmanager --install "ndk;27.2.12479018"
-          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          sdkmanager --install "platforms;android-35" "build-tools;37.0.0" "ndk;29.0.14206865"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/29.0.14206865" >> "$GITHUB_ENV"
 
-      # SKIP_GRADLE=1 builds libCroMagRally.so + libSDL3.so for arm64-v8a and stops before
-      # the APK assembly (no JDK/Gradle needed). Reuses build_android.sh so the gate and the
-      # release job stay in sync.
-      - name: Build native lib (no Gradle)
+      - name: Build Android debug APK
         env:
           ABIS: arm64-v8a
-          SKIP_GRADLE: "1"
+          GRADLE_TASK: assembleDebug
         run: ./build_android.sh
 
       - name: Lint Android package
