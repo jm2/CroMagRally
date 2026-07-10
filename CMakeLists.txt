@@ -594,6 +594,14 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 	add_test(
 		NAME version_metadata
 		COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/Tests/VersionMetadataTests.py ${CMAKE_SOURCE_DIR})
+	if(WIN32)
+		# Keep the runtime-DLL staging hook beside the executable it belongs to so
+		# target existence and directory scope are unambiguous at configure time.
+		add_custom_command(TARGET CroMagRallyValidationTests POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E copy_if_different
+				$<TARGET_RUNTIME_DLLS:CroMagRallyValidationTests> $<TARGET_FILE_DIR:CroMagRallyValidationTests>
+			COMMAND_EXPAND_LISTS)
+	endif()
 endif()
 
 # macOS-specific post-build (skip for iOS/tvOS)
@@ -619,13 +627,6 @@ if(WIN32)
 		COMMAND ${CMAKE_COMMAND} -E copy_if_different
 			$<TARGET_RUNTIME_DLLS:${GAME_TARGET}> $<TARGET_FILE_DIR:${GAME_TARGET}>
 		COMMAND_EXPAND_LISTS)
-	if(TARGET CroMagRallyValidationTests)
-		add_custom_command(TARGET CroMagRallyValidationTests POST_BUILD
-			COMMAND ${CMAKE_COMMAND} -E copy_if_different
-				$<TARGET_RUNTIME_DLLS:CroMagRallyValidationTests> $<TARGET_FILE_DIR:CroMagRallyValidationTests>
-			COMMAND_EXPAND_LISTS)
-	endif()
-
 	# When installing (cmake --install), copy Visual Studio redistributable DLLs to install location
 	include(InstallRequiredSystemLibraries)
 endif()
