@@ -77,7 +77,7 @@ class HIDDeviceUSB implements HIDDevice {
         String result;
         result = mDevice.getManufacturerName();
         if (result == null) {
-            result = String.format("%x", getVendorId());
+            result = Integer.toHexString(getVendorId());
         }
         return result;
     }
@@ -87,7 +87,7 @@ class HIDDeviceUSB implements HIDDevice {
         String result;
         result = mDevice.getProductName();
         if (result == null) {
-            result = String.format("%x", getProductId());
+            result = Integer.toHexString(getProductId());
         }
         return result;
     }
@@ -98,7 +98,7 @@ class HIDDeviceUSB implements HIDDevice {
     }
 
     String getDeviceName() {
-        return getManufacturerName() + " " + getProductName() + "(0x" + String.format("%x", getVendorId()) + "/0x" + String.format("%x", getProductId()) + ")";
+        return getManufacturerName() + " " + getProductName() + "(0x" + Integer.toHexString(getVendorId()) + "/0x" + Integer.toHexString(getProductId()) + ")";
     }
 
     @Override

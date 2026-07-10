@@ -53,9 +53,11 @@ tasks.register('verifySdlJavaGlue') {
 
         def nativeVersion = [:]
         def javaVersion = [:]
+        def nativeText = sdlVersionHeader.text
+        def javaText = sdlJavaActivity.text
         ['MAJOR', 'MINOR', 'MICRO'].each { part ->
-            def nativeMatch = (sdlVersionHeader.text =~ /#define\s+SDL_${part}_VERSION\s+(\d+)/)
-            def javaMatch = (sdlJavaActivity.text =~ /SDL_${part}_VERSION\s*=\s*(\d+)/)
+            def nativeMatch = (nativeText =~ /#define\s+SDL_${part}_VERSION\s+(\d+)/)
+            def javaMatch = (javaText =~ /SDL_${part}_VERSION\s*=\s*(\d+)/)
             if (!nativeMatch.find() || !javaMatch.find()) {
                 throw new GradleException("Unable to read SDL ${part.toLowerCase()} version")
             }

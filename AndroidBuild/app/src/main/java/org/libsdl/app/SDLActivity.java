@@ -618,16 +618,16 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
         super.onWindowFocusChanged(hasFocus);
         Log.v(TAG, "onWindowFocusChanged(): " + hasFocus);
 
+        if (SDLActivity.mBrokenLibraries) {
+           return;
+        }
+
         // If we are gaining focus, we can always try to restore our USB devices. If we are losing focus,
         // only try to relinquish them if we don't have background events allowed (for multi-window Android setups).
         if (hasFocus || !SDLActivity.nativeGetHintBoolean("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", false)) {
             if (mHIDDeviceManager != null) {
                 mHIDDeviceManager.setFrozen(!hasFocus);
             }
-        }
-
-        if (SDLActivity.mBrokenLibraries) {
-           return;
         }
 
         mHasFocus = hasFocus;
@@ -2136,21 +2136,20 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
 
     public static String formatLocale(Locale locale) {
         String result = "";
-        String lang = "";
-        if (locale.getLanguage() == "in") {
+        String lang = locale.getLanguage();
+        if ("in".equals(lang)) {
             // Indonesian is "id" according to ISO 639.2, but on Android is "in" because of Java backwards compatibility
             lang = "id";
-        } else if (locale.getLanguage() == "") {
+        } else if (lang.isEmpty()) {
             // Make sure language is never empty
             lang = "und";
-        } else {
-            lang = locale.getLanguage();
         }
 
-        if (locale.getCountry() == "") {
+        String country = locale.getCountry();
+        if (country.isEmpty()) {
             result = lang;
         } else {
-            result = lang + "_" + locale.getCountry();
+            result = lang + "_" + country;
         }
         return result;
     }

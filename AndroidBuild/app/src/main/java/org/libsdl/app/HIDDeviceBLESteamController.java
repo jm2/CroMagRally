@@ -62,6 +62,7 @@ class HIDDeviceBLESteamController extends BluetoothGattCallback implements HIDDe
     static final UUID inputCharacteristicTriton_0x45 = UUID.fromString("100F6C7A-1735-4313-B402-38567131E5F3");
     static final UUID inputCharacteristicTriton_0x47 = UUID.fromString("100F6C7C-1735-4313-B402-38567131E5F3");
     static final UUID reportCharacteristic = UUID.fromString("100F6C34-1735-4313-B402-38567131E5F3");
+    static final Pattern reportCharacteristicPattern = Pattern.compile("100F6C([0-9A-Z]{2})", Pattern.CASE_INSENSITIVE);
     static private final byte[] enterValveMode = new byte[] { (byte)0xC0, (byte)0x87, 0x03, 0x08, 0x07, 0x00 };
 
     private HashMap<Integer, BluetoothGattCharacteristic> mOutputReportChars = new HashMap<Integer, BluetoothGattCharacteristic>();
@@ -371,8 +372,7 @@ class HIDDeviceBLESteamController extends BluetoothGattCallback implements HIDDe
                         mReportId = 0x03;
                         mInputCharacteristic = chr.getUuid();
                     } else {
-                        Pattern reportPattern = Pattern.compile("100F6C([0-9A-Z]{2})", Pattern.CASE_INSENSITIVE);
-                        Matcher matcher = reportPattern.matcher(chr.getUuid().toString());
+                        Matcher matcher = reportCharacteristicPattern.matcher(chr.getUuid().toString());
 
                         if (matcher.find()) {
                             try {
