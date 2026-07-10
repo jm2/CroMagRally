@@ -3,6 +3,8 @@
 **Repo:** `jm2/CroMagRally` (master @ 253f74a) · **Baselines:** `jorio/master`, `jorio/net`, original 1999 Pangea source (997b783)
 **Date:** 2026-06-11 · **Method:** 5 mapper agents → 22 adversarial verifiers (refute-biased) → 5 fresh-lens hunters → completeness critic → 3 competing WiFi designs → 3-lens judge panel → synthesis. Every finding below was independently re-derived from code with file:line evidence; severities reflect the *verified* assessment, which in several cases differs from the initial claim.
 
+> **Historical review snapshot:** This document describes commit `253f74a` as it existed on June 11, 2026. It is retained as engineering provenance; many findings and “pending” items were addressed by later CMR7 and hardening commits. Treat the current source, tests, and changelog as authoritative for present behavior.
+
 ---
 
 ## 1. Executive summary

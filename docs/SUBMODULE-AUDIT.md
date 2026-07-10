@@ -5,6 +5,10 @@ delta was fetched, diffed against the upstream merge-base, and reviewed for
 security/memory-safety, correctness/regression, and build-portability (Windows ARM64,
 Android, iOS, tvOS).
 
+> **Historical audit snapshot:** Commit IDs, ahead/behind counts, and action items below
+> describe the June 2026 checkouts. The live gitlinks and each submodule's current license
+> and history are authoritative after subsequent dependency updates.
+
 ## Verdict
 
 **Both forks are safe to keep as-is for the game's current targets.** Every change is

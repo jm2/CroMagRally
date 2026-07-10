@@ -6,8 +6,8 @@
   <name>Cro-Mag Rally</name>
   <summary>The wildest racing game since man invented the wheel!</summary>
   <summary xml:lang="fr">Le jeu de course le plus déjanté depuis l’invention de la roue !</summary>
-  <developer id="io.jor">
-    <name>Pangea Software, Inc., Iliyas Jorio</name>
+  <developer id="io.github.jm2">
+    <name>Pangea Software, Inc., Iliyas Jorio, and Cro-Mag Rally contributors</name>
   </developer>
 
   <description>
@@ -17,8 +17,10 @@
     <p>In addition to single-player racing where one player races against the computer, there are also several different multi-player modes including Tag, Quest for Fire, and Survival. Up to four players can play on a single computer in split-screen mode.</p>
     <p xml:lang="fr">En plus des courses à un joueur où vous tenterez de battre l’ordinateur, le jeu comprend différents modes multi-joueurs : la chasse au Chat, la Quête du Feu, et la Survie. Jusqu’à quatre joueurs peuvent jouer sur le même ordinateur en mode écran partagé.</p>
 
-    <p>About this port: CMR was released in 2000 by Pangea Software. It was a pack-in game on Macs that came out around that time. This is a port of the original OS 9 version of the game, made under permission from Pangea Software, Inc.</p>
-    <p xml:lang="fr">À propos de ce portage : CMR fut initialement lancé en 2000 par Pangea Software. Ce jeu était fourni sur les Macs qui sortaient à cette époque. Ceci est un portage de la version OS 9 d’origine, réalisé et rediffusé avec la permission de Pangea Software, Inc.</p>
+    <p>About this port: CMR was released in 2000 by Pangea Software and bundled with Macs of that era. Iliyas Jorio made the original modern port from the OS 9 game with permission from Pangea Software, Inc.; this maintained fork extends that work.</p>
+    <p xml:lang="fr">À propos de ce portage : CMR fut initialement lancé en 2000 par Pangea Software et fourni sur les Macs de cette époque. Iliyas Jorio a réalisé le portage moderne original à partir du jeu OS 9 avec la permission de Pangea Software, Inc. ; cette version maintenue prolonge ce travail.</p>
+
+    <p>The maintained fork also supports LAN or Wi-Fi multiplayer for up to four players.</p>
   </description>
 
   <categories>
@@ -44,38 +46,42 @@
 
   <screenshots>
     <screenshot type="default">
+      <caption>Cro-Mag Rally gameplay</caption>
       <image>https://img.itch.zone/aW1hZ2UvMTU2NDAwNS85MTU3MTc2LnBuZw==/original/aaCbpm.png</image>
     </screenshot>
     <screenshot>
+      <caption>Race through the Stone, Bronze, and Iron Ages</caption>
       <image>https://img.itch.zone/aW1hZ2UvMTU2NDAwNS85MTU3MTIwLnBuZw==/original/yrQlCE.png</image>
     </screenshot>
     <screenshot>
+      <caption>Use primitive weapons against rival racers</caption>
       <image>https://img.itch.zone/aW1hZ2UvMTU2NDAwNS85MTU3MTIyLnBuZw==/original/gJrC75.png</image>
     </screenshot>
     <screenshot>
+      <caption>Compete in colorful prehistoric environments</caption>
       <image>https://img.itch.zone/aW1hZ2UvMTU2NDAwNS85MTU3MTIzLnBuZw==/original/4RF0jm.png</image>
     </screenshot>
   </screenshots>
 
-  <url type="homepage">https://jorio.itch.io/cromagrally</url>
+  <url type="homepage">https://github.com/jm2/CroMagRally</url>
   <url type="donation">https://ko-fi.com/jorio</url>
-  <url type="vcs-browser">https://github.com/jorio/CroMagRally</url>
-  <url type="bugtracker">https://github.com/jorio/CroMagRally/issues</url>
+  <url type="vcs-browser">https://github.com/jm2/CroMagRally</url>
+  <url type="bugtracker">https://github.com/jm2/CroMagRally/issues</url>
 
   <releases>
-    <release version="3.1.0" date="2026-06-12">
-      <url>https://github.com/jorio/CroMagRally/releases/tag/3.1.0</url>
+    <release version="3.1.0" date="2026-06-15">
+      <url>https://github.com/jm2/CroMagRally/releases/tag/v3.1.0</url>
       <description>
         <p>New in this release:</p>
         <ul>
-          <li>Online multiplayer over LAN/Wi-Fi with free-running lockstep netplay</li>
+          <li>LAN/Wi-Fi multiplayer for up to four players with free-running lockstep netplay</li>
           <li>Cross-architecture deterministic physics, so x86 and ARM peers stay in sync</li>
           <li>Native Linux packages: AppImage, Debian, RPM, Arch, and Flatpak</li>
         </ul>
       </description>
     </release>
     <release version="3.0.1" date="2024-02-07">
-      <url>https://github.com/jorio/CroMagRally/releases/tag/3.0.0</url>
+      <url>https://github.com/jorio/CroMagRally/releases/tag/3.0.1</url>
       <description>
         <p>New in this release:</p>
         <ul>
