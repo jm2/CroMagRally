@@ -1,9 +1,20 @@
 # Cro-Mag Rally Changelog
 
-- **3.0.2 (NOT RELEASED YET)**
-    - Updated to SDL 3
-    - Fix StonehengeMap search path on case-sensitive filesystems (#19)
-    - **NOTE:** The Mac version now requires macOS 10.13.
+- **3.1.1 (NOT RELEASED YET)**
+    - Use one pinned SDL3 source checkout across every supported platform.
+    - Harden network message validation, deterministic simulation, session teardown, preferences, input handling, and mobile lifecycle behavior.
+    - Expand native, sanitizer, Android, and packaging validation.
+    - Refresh build and network-play documentation and include third-party license notices in packaged releases.
+
+- **3.1.0 (June 15, 2026)**
+    - Restore multiplayer for up to four players on a LAN or Wi-Fi network.
+    - Add CMR7 free-running lockstep with adaptive per-client input buffering for smoother mixed wired/Wi-Fi games.
+    - Add Android, iOS, and tvOS build targets and touch controls.
+    - Add AppImage, Debian, RPM, Arch, and Flatpak release packaging alongside macOS and Windows builds.
+    - Update to SDL 3.
+    - Fix the Stonehenge map search path on case-sensitive filesystems (#19).
+    - Fix tournament retry, digital steering, reverse/nitro behavior, and Atlantis CPU behavior.
+    - The macOS version now requires macOS 10.13 or later.
 
 - **3.0.1 (February 7, 2024)**
     - Improved Italian localization contributed by @orazioedoardo - grazie!
@@ -27,7 +38,7 @@
     - Minor gameplay fixes, including:
         - Throw a weapon and pick up another powerup in quick succession
         - Better fence collisions
-    - Please note that NetSprockets multiplayer from the OS 9 version is still missing. It may be recreated in a later update if there's interest for it.
+    - At the time of this release, NetSprockets multiplayer from the OS 9 version was still missing. LAN/Wi-Fi play was restored later in 3.1.0.
 
 This port is provided free of charge! If you'd like to support the development of Pangea game ports, you can visit https://jorio.itch.io and name your own price for any of the games there. Much appreciated!
 
@@ -51,7 +62,7 @@ This port is provided free of charge! If you'd like to support the development o
 
 - **2.0b4 (May 17, 2001)**
 
-- **2.0b1 (March 27, 2001)**: Carbonized (OS X support). 
+- **2.0b1 (March 27, 2001)**: Carbonized (OS X support).
 
 - **1.0.5 (December 4, 2000)**: Physics editor, Simplistic difficulty level
 

@@ -3,6 +3,7 @@
 // This file is part of Cro-Mag Rally. https://github.com/jorio/CroMagRally
 
 #include "game.h"
+#include "network.h"
 
 extern SDL_Window *gSDLWindow;
 
@@ -55,6 +56,7 @@ static void OnJoystickRemoved(SDL_JoystickID which);
 static SDL_Gamepad *TryOpenGamepadFromJoystick(SDL_JoystickID joystickID);
 static SDL_Gamepad *TryOpenAnyUnusedGamepad(bool showMessage);
 static int GetGamepadSlotFromJoystick(SDL_JoystickID joystickID);
+static void CloseGamepad(int gamepadSlot);
 
 // Touch Controls (enabled on all platforms, hidden until touch event)
 #if defined(__ANDROID__) || (defined(__IOS__) && !defined(__TVOS__))
@@ -147,6 +149,10 @@ static void InitTouchData(void) {
 
 static void DisableVirtualJoystick(void) {
   if (gVirtualJoystickID > 0) {
+    int gamepadSlot = GetGamepadSlotFromJoystick(gVirtualJoystickID);
+    if (gamepadSlot >= 0) {
+      CloseGamepad(gamepadSlot);
+    }
     if (gVirtualJoystick) {
       SDL_CloseJoystick(gVirtualJoystick);
       gVirtualJoystick = NULL;
@@ -159,6 +165,56 @@ static void DisableVirtualJoystick(void) {
     // stays false, so the injection sites would otherwise keep feeding the LAST touch stick/
     // buttons into player 0 even though the virtual pad is gone.
     SDL_memset(&gVirtualInput, 0, sizeof(gVirtualInput));
+  }
+}
+
+static void DeactivateTouchControls(bool prefersGamepad) {
+  // An inactive synthetic pad must not remain in a player slot: local-player setup
+  // counts open SDL gamepads, and would otherwise assign a player to a silent device.
+  DisableVirtualJoystick();
+  gUserPrefersGamepad = prefersGamepad;
+}
+
+static bool SDLCALL HandleAppLifecycleEvent(void* userdata, SDL_Event* event) {
+  (void)userdata;
+
+  switch (event->type) {
+    case SDL_EVENT_TERMINATING:
+      // Keep this as a fallback, but don't rely on it: mobile OSes may kill a
+      // backgrounded process without another lifecycle callback.
+      SavePlayerFile();
+      break;
+
+    case SDL_EVENT_WILL_ENTER_BACKGROUND:
+      SavePlayerFile();
+      ResetTouchInput();
+      SetNetworkPowerMode(false);
+      break;
+
+    case SDL_EVENT_DID_ENTER_BACKGROUND:
+      ResetTouchInput();
+      SetNetworkPowerMode(false);
+      break;
+
+    case SDL_EVENT_DID_ENTER_FOREGROUND:
+      if (gNetGameInProgress)
+        SetNetworkPowerMode(true);
+      break;
+
+    default:
+      break;
+  }
+
+  return true;
+}
+
+void InstallInputEventWatch(void) {
+  static bool installed = false;
+  if (!installed) {
+    if (!SDL_AddEventWatch(HandleAppLifecycleEvent, NULL))
+      SDL_Log("Could not install application lifecycle event watch: %s", SDL_GetError());
+    else
+      installed = true;
   }
 }
 
@@ -215,32 +271,30 @@ static void InitMobileInput(void) {
 void ValidateActiveFingers(void) {
     int num_touch_devices = 0;
     SDL_TouchID *touch_devices = SDL_GetTouchDevices(&num_touch_devices);
-    
-    // For every active virtual finger...
-    for (int i = 0; i < MAX_TOUCH_FINGERS; i++) {
-        if (gFingers[i].active) {
-            bool found_in_sdl = false;
-            
-            // Check against all actual SDL fingers
-            if (touch_devices) {
-                for (int t = 0; t < num_touch_devices; t++) {
-                    int num_fingers = 0;
-                    SDL_Finger **fingers = SDL_GetTouchFingers(touch_devices[t], &num_fingers);
-                    
-                    if (fingers) {
-                        for (int f = 0; f < num_fingers; f++) {
-                            if (fingers[f]->id == gFingers[i].id) {
-                                found_in_sdl = true;
-                                break;
-                            }
-                        }
-                        SDL_free(fingers);
-                    }
-                    if (found_in_sdl) break;
+    bool found_in_sdl[MAX_TOUCH_FINGERS] = {false};
+
+    // SDL allocates the finger array, so fetch it once per device rather than once per
+    // tracked finger. The old loop allocated up to devices*fingers arrays every frame.
+    if (touch_devices) {
+        for (int t = 0; t < num_touch_devices; t++) {
+            int num_fingers = 0;
+            SDL_Finger **fingers = SDL_GetTouchFingers(touch_devices[t], &num_fingers);
+            if (!fingers)
+                continue;
+
+            for (int f = 0; f < num_fingers; f++) {
+                for (int i = 0; i < MAX_TOUCH_FINGERS; i++) {
+                    if (gFingers[i].active && fingers[f]->id == gFingers[i].id)
+                        found_in_sdl[i] = true;
                 }
             }
-            
-            if (found_in_sdl) {
+            SDL_free(fingers);
+        }
+    }
+
+    for (int i = 0; i < MAX_TOUCH_FINGERS; i++) {
+        if (gFingers[i].active) {
+            if (found_in_sdl[i]) {
                 gFingers[i].ghostFrames = 0;
             } else {
                 gFingers[i].ghostFrames++;
@@ -673,6 +727,22 @@ void DoSDLMaintenance(void) {
       CleanQuit(); // throws Pomme::QuitRequest
       return;
 
+    case SDL_EVENT_RENDER_DEVICE_RESET:
+      // A replacement mobile GL context has none of the game's textures/display lists.
+      // The renderer cannot reconstruct a live scene safely, so preserve user/network
+      // state and leave cleanly instead of continuing into a black screen or GL assert.
+      SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "The OpenGL context was lost and recreated by the OS");
+      SavePlayerFile();
+      EndNetworkGame();
+      ShutdownNetworkManager();
+      SDL_ShowSimpleMessageBox(
+          SDL_MESSAGEBOX_ERROR,
+          GAME_FULL_NAME,
+          "The graphics context was reset by the operating system. Your progress was saved; please reopen the game.",
+          NULL);
+      ExitToShell();
+      return;
+
     // Touch input handling (all platforms - hidden until activated by real touch)
     case SDL_EVENT_FINGER_DOWN:
     case SDL_EVENT_FINGER_MOTION: {
@@ -741,7 +811,6 @@ void DoSDLMaintenance(void) {
       
     case SDL_EVENT_WINDOW_FOCUS_LOST:
     case SDL_EVENT_WINDOW_MINIMIZED:
-    case SDL_EVENT_DID_ENTER_BACKGROUND:
       // Reset touch state to prevents buttons/joystick getting stuck
       ResetTouchInput();
       break;
@@ -775,8 +844,7 @@ void DoSDLMaintenance(void) {
       // Ignore OS key auto-repeat: a held key shouldn't keep tearing the touch pad down
       // (and, on a touch device, re-tearing it every repeat while the player is typing).
       if (!event.key.repeat) {
-        DisableVirtualJoystick();
-        gUserPrefersGamepad = false;
+        DeactivateTouchControls(false);
       }
       break;
 
@@ -785,8 +853,7 @@ void DoSDLMaintenance(void) {
       // is not an intent to use the gamepad and used to trigger a spurious teardown.
       bool isVirtual = (event.gdevice.which == gVirtualJoystickID);
       if (!isVirtual) {
-        DisableVirtualJoystick();
-        gUserPrefersGamepad = true;
+        DeactivateTouchControls(true);
       }
       break;
     }
@@ -798,8 +865,7 @@ void DoSDLMaintenance(void) {
       
       if (!isVirtual &&
           SDL_abs(event.gaxis.value) > 3000) { // Deadzone check & ID check
-        DisableVirtualJoystick();
-        gUserPrefersGamepad = true;
+        DeactivateTouchControls(true);
       }
       break;
     }
@@ -856,13 +922,13 @@ Boolean GetNewKeyState(uint16_t sdlScancode) {
 #pragma mark -
 
 Boolean GetClickState(int mouseButton) {
-  if (mouseButton >= NUM_SUPPORTED_MOUSE_BUTTONS)
+  if (mouseButton < 0 || mouseButton >= NUM_SUPPORTED_MOUSE_BUTTONS)
     return false;
   return 0 != (gMouseButtonStates[mouseButton] & KEYSTATE_ACTIVE_BIT);
 }
 
 Boolean GetNewClickState(int mouseButton) {
-  if (mouseButton >= NUM_SUPPORTED_MOUSE_BUTTONS)
+  if (mouseButton < 0 || mouseButton >= NUM_SUPPORTED_MOUSE_BUTTONS)
     return false;
   return gMouseButtonStates[mouseButton] == KEYSTATE_PRESSED;
 }
@@ -870,12 +936,12 @@ Boolean GetNewClickState(int mouseButton) {
 #pragma mark -
 
 Boolean GetNeedState(int needID, int playerID) {
-  const Gamepad *gamepad = &gGamepads[playerID];
-
   GAME_ASSERT(playerID >= 0);
   GAME_ASSERT(playerID < MAX_LOCAL_PLAYERS);
   GAME_ASSERT(needID >= 0);
   GAME_ASSERT(needID < NUM_CONTROL_NEEDS);
+
+  const Gamepad *gamepad = &gGamepads[playerID];
 
   if (gamepad->open && (gamepad->needStates[needID] & KEYSTATE_ACTIVE_BIT)) {
     return true;
@@ -890,6 +956,9 @@ Boolean GetNeedState(int needID, int playerID) {
 }
 
 Boolean GetNeedStateAnyP(int needID) {
+  GAME_ASSERT(needID >= 0);
+  GAME_ASSERT(needID < NUM_CONTROL_NEEDS);
+
   for (int i = 0; i < MAX_LOCAL_PLAYERS; i++) {
     if (gGamepads[i].open &&
         (gGamepads[i].needStates[needID] & KEYSTATE_ACTIVE_BIT)) {
@@ -902,12 +971,12 @@ Boolean GetNeedStateAnyP(int needID) {
 }
 
 Boolean GetNewNeedState(int needID, int playerID) {
-  const Gamepad *gamepad = &gGamepads[playerID];
-
   GAME_ASSERT(playerID >= 0);
   GAME_ASSERT(playerID < MAX_LOCAL_PLAYERS);
   GAME_ASSERT(needID >= 0);
   GAME_ASSERT(needID < NUM_CONTROL_NEEDS);
+
+  const Gamepad *gamepad = &gGamepads[playerID];
 
   if (gamepad->open && gamepad->needStates[needID] == KEYSTATE_PRESSED) {
     return true;
@@ -922,6 +991,9 @@ Boolean GetNewNeedState(int needID, int playerID) {
 }
 
 Boolean GetNewNeedStateAnyP(int needID) {
+  GAME_ASSERT(needID >= 0);
+  GAME_ASSERT(needID < NUM_CONTROL_NEEDS);
+
   for (int i = 0; i < MAX_LOCAL_PLAYERS; i++) {
     if (gGamepads[i].open &&
         (gGamepads[i].needStates[needID] == KEYSTATE_PRESSED)) {
@@ -1047,9 +1119,10 @@ Boolean UserWantsOut(void) {
   if (!gIsInGame && GetNewNeedStateAnyP(kNeed_UIBack)) {
     return true;
   }
-  // NOTE: kNeed_UIPause (Start button) removed - it should trigger pause dialog
-  // (DoPauseDialog), not immediate game exit. Pause handling is in PlayArea via
-  // schedulePause variable.
+  // Start dismisses splash/help/win screens, while gameplay still routes it to pause.
+  if (!gIsInGame && GetNewNeedStateAnyP(kNeed_UIPause)) {
+    return true;
+  }
   //		|| GetNewClickState(SDL_BUTTON_LEFT)
   return false;
 }
@@ -1144,12 +1217,10 @@ static SDL_Gamepad *TryOpenGamepadFromJoystick(SDL_JoystickID joystickID) {
   if (isVirtual) {
      gamepadSlot = FindFreeGamepadSlot();
   } else {
-    // Physical Gamepad: Check for Virtual Hogging Slot 0
-    bool hogging = false;
-    if (gGamepads[0].open &&
-        SDL_GetGamepadID(gGamepads[0].sdlGamepad) == gVirtualJoystickID)
-      hogging = true;
-    if (hogging) {
+    // Physical gamepads take priority over the synthetic touch pad. Keep the touch pad
+    // in a high slot when possible, and evict it synchronously if all four slots fill.
+    int virtualSlot = GetGamepadSlotFromJoystick(gVirtualJoystickID);
+    if (virtualSlot == 0) {
       SDL_Log("Physical Gamepad detected! Moving Virtual Gamepad from Slot 0 "
               "to make room...");
 
@@ -1165,9 +1236,13 @@ static SDL_Gamepad *TryOpenGamepadFromJoystick(SDL_JoystickID joystickID) {
       if (newVirtualSlot > 0) {
         // Move the struct data
         gGamepads[newVirtualSlot] = gGamepads[0];
+        SDL_SetGamepadPlayerIndex(gGamepads[newVirtualSlot].sdlGamepad,
+                                  newVirtualSlot);
 
         // Zero out Slot 0 (but don't Close/Display message, just clear struct)
         SDL_memset(&gGamepads[0], 0, sizeof(Gamepad));
+
+        virtualSlot = newVirtualSlot;
 
         SDL_Log("Virtual Gamepad moved to Slot %d", newVirtualSlot);
       }
@@ -1187,6 +1262,12 @@ static SDL_Gamepad *TryOpenGamepadFromJoystick(SDL_JoystickID joystickID) {
     } else {
       gamepadSlot = FindFreeGamepadSlot();
     }
+
+    if (gamepadSlot < 0 && virtualSlot >= 0) {
+      SDL_Log("All physical gamepad slots are needed; detaching the virtual pad.");
+      gamepadSlot = virtualSlot;
+      DisableVirtualJoystick();
+    }
   }
 
   if (gamepadSlot < 0) {
@@ -1201,6 +1282,11 @@ static SDL_Gamepad *TryOpenGamepadFromJoystick(SDL_JoystickID joystickID) {
 
   // Use this one
   SDL_Gamepad *sdlGamepad = SDL_OpenGamepad(joystickID);
+  if (!sdlGamepad) {
+    SDL_Log("Could not open joystick %d as a gamepad: %s", joystickID,
+            SDL_GetError());
+    return NULL;
+  }
 
   // Assign player ID
   SDL_SetGamepadPlayerIndex(sdlGamepad, gamepadSlot);
@@ -1437,9 +1523,6 @@ void DrawVirtualGamepad(void) {
 
   // Hide if touch controls not activated or user prefers physical gamepad
   if (!gTouchControlsActive || gUserPrefersGamepad) {
-    if (gTouchControlsActive && gUserPrefersGamepad) {
-       static int sLogThrottle = 0;
-    }
     return;
   }
 
@@ -1472,7 +1555,6 @@ void DrawVirtualGamepad(void) {
   bool btnB = gVirtualInput.btnB;
   bool btnX = gVirtualInput.btnX;
   bool btnY = gVirtualInput.btnY;
-  bool btnStart = gVirtualInput.btnStart;
 
   // Stick position using STICK_* constants for consistency with input logic
   // Convert normalized coordinates to screen space (centered projection)

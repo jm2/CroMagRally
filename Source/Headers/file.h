@@ -64,7 +64,7 @@ typedef struct
 	Byte	splitScreenMode2P;
 	Byte	splitScreenMode3P;
 	Byte	language;
-	Byte	_unused1;				// was tagDuration in v3.0.0
+	Byte	tagDuration;
 	Byte	antialiasingLevel;
 	Boolean	fullscreen;
 	Byte	displayNumMinus1;
@@ -107,6 +107,8 @@ typedef struct
 
 #define SCOREBOARD_MAGIC "CMR Scores v0  "
 
+#define MAX_SAVED_LAP_TIME_SECONDS (24.0f * 60.0f * 60.0f)
+
 
 		/* COMMAND-LINE OPTIONS */
 
@@ -128,6 +130,9 @@ SkeletonDefType *LoadSkeletonFile(short skeletonType);
 
 OSErr LoadUserDataFile(const char* path, const char* magic, long payloadLength, Ptr payloadPtr);
 OSErr SaveUserDataFile(const char* path, const char* magic, long payloadLength, Ptr payloadPtr);
+
+Boolean SanitizePrefs(PrefsType* prefs, const PrefsType* defaults);
+Boolean SanitizeScoreboard(Scoreboard* scoreboard);
 
 OSErr LoadPrefs(void);
 void SavePrefs(void);

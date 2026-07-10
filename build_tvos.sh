@@ -5,13 +5,11 @@ set -e
 # Usage: ./build_tvos.sh [device|simulator]
 #
 # Env knobs (sensible defaults for local dev; the CI release job sets these):
-#   SDL_REF                SDL git tag/branch to build from  (default: release-3.2.8)
 #   CODE_SIGNING_ALLOWED   set to NO for an unsigned build   (default: YES)
 #   PACKAGE                set to 1 to emit a versioned       (default: 0)
 #                          unsigned .app .zip (device target only)
 
 TARGET=${1:-simulator}
-SDL_REF="${SDL_REF:-release-3.2.8}"
 
 echo "=== Building Cro-Mag Rally for tvOS ($TARGET) ==="
 
@@ -28,11 +26,11 @@ else
     OUT_SUBDIR="Release-appletvsimulator"
 fi
 
-# Step 0: Check dependencies. SDL3 is pinned to the same release the desktop build uses
-# (3.2.8) for reproducible builds; override with SDL_REF=... if you really need another rev.
-if [ ! -d "extern/SDL" ]; then
-    echo "=== Cloning SDL3 ($SDL_REF) ==="
-    git clone --depth 1 --branch "$SDL_REF" https://github.com/libsdl-org/SDL.git extern/SDL
+# Step 0: Use the same SDL source submodule as every other platform.
+if [ ! -f "extern/SDL3/CMakeLists.txt" ]; then
+    echo "Error: SDL3 submodule is missing."
+    echo "Run: git submodule update --init --recursive"
+    exit 1
 fi
 
 # Step 1: Configure with CMake
@@ -67,7 +65,11 @@ APP_BUNDLE="$BUILD_DIR/$OUT_SUBDIR/CroMagRally.app"
 # Device target only. NOTE: an unsigned tvOS .app is not installable on real Apple TV
 # hardware without re-signing in Xcode.
 if [ "${PACKAGE:-0}" == "1" ] && [ "$TARGET" == "device" ]; then
-    GAME_VERSION=$(grep -m1 'set(GAME_VERSION' CMakeLists.txt | sed -E 's/.*"([^"]+)".*/\1/')
+    GAME_VERSION=$(sed -n 's/^GAME_VERSION=//p' version.properties)
+    if [ -z "$GAME_VERSION" ]; then
+        echo "Error: GAME_VERSION is missing from version.properties"
+        exit 1
+    fi
     ZIP_ABS="$PWD/CroMagRally-${GAME_VERSION}-tvos-unsigned.zip"
     echo "=== Packaging $(basename "$ZIP_ABS") (UNSIGNED) ==="
     rm -f "$ZIP_ABS"

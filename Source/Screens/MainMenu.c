@@ -395,10 +395,6 @@ static void OnConfirmPlayMenu(const MenuItem* mi)
 		case 2:
 		case 3:
 		case 4:
-		case 5:
-		case 6:
-		case 7:
-		case 8:
 			gNetGameInProgress = false;
 			gNumLocalPlayers = mi->id;					// assume only local player(s) on this machine
 			gNumRealPlayers = mi->id;
@@ -411,13 +407,19 @@ static void OnConfirmPlayMenu(const MenuItem* mi)
 			break;
 
 		default:
-			DoFatalAlert("Unsupported pick ID in play menu: %d", mi->id);
+			DoAlert("Unsupported local player count: %d", mi->id);
+			gNetGameInProgress = false;
+			gNumLocalPlayers = 1;
+			gNumRealPlayers = 1;
+			break;
 	}
+
+	gTagDuration = gGamePrefs.tagDuration;
 }
 
 static void OnPickGameMode(const MenuItem* mi)
 {
-	gGameMode = GAME_CLAMP(mi->id, 0, NUM_GAME_MODES);
+	gGameMode = GAME_CLAMP(mi->id, 0, NUM_GAME_MODES - 1);
 }
 
 static void OnPickTournamentAge(const MenuItem* mi)
@@ -454,7 +456,8 @@ static void OnPickClearSavedGame(const MenuItem* mi)
 
 static void OnPickTagDuration(const MenuItem* mi)
 {
-	gTagDuration = mi->id;
+	gGamePrefs.tagDuration = GAME_CLAMP(mi->id, 2, 4);
+	gTagDuration = gGamePrefs.tagDuration;
 }
 
 #pragma mark -
@@ -479,7 +482,7 @@ static int IsTournamentAgeAvailable(const MenuItem* mi)
 
 static int GetLayoutFlagsForTournamentObjective(const MenuItem* mi)
 {
-	bool isEasy = gDifficulty <= DIFFICULTY_EASY;
+	bool isEasy = gGamePrefs.difficulty <= DIFFICULTY_EASY;
 
 	if (mi->text == STR_TOURNAMENT_OBJECTIVE_EASY)
 		return isEasy? 0: kMILayoutFlagHidden;

@@ -35,6 +35,7 @@ static void GetLocalKeyStateForPlayer(short playerNum, short gamepadSlot);
 
 void InitInput(void)
 {
+	InstallInputEventWatch();
 }
 
 /**************** READ KEYBOARD *************/

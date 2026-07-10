@@ -19,9 +19,9 @@ static ObjNode* gRecordChainHead = 0;
 
 static struct
 {
-	int active : 1;
-	int track : 7;
-	int rank : 8;
+	unsigned int active : 1;
+	unsigned int track : 7;
+	unsigned int rank : 8;
 } gTodaysRecords[MAX_TODAYS_RECORDS];
 
 static void OnScoreboardTrackChanged(const MenuItem* mi);
@@ -46,6 +46,10 @@ char* FormatRaceTime(float t)
 	if (t <= 0)
 	{
 		return "0:00\v.00";
+	}
+	if (!isfinite(t) || t > MAX_SAVED_LAP_TIME_SECONDS * LAPS_PER_RACE)
+	{
+		return "--:--\v.--";
 	}
 
 	static char timeBuf[16];
@@ -356,21 +360,31 @@ static void LayOutScoreboardForTrack(void)
 			nodes[n++] = TextMesh_New(text, kTextMeshAlignLeft, &defLaps);
 
 			SDL_DateTime dt = {0};
-			SDL_TimeToDateTime(record->timestamp * 1e9, &dt, true);
-			const char* month = Localize(dt.month - 1 + STR_MONTH_1);
-			int day = dt.day;
-			int year = dt.year;
+			Boolean validDate = record->timestamp > 0
+				&& record->timestamp <= INT64_MAX / SDL_NS_PER_SECOND
+				&& SDL_TimeToDateTime(record->timestamp * SDL_NS_PER_SECOND, &dt, true)
+				&& dt.month >= 1
+				&& dt.month <= 12;
 
-			SDL_snprintf(text, sizeof(text), "%s %s", Localize(STR_DIFFICULTY_1 + record->difficulty), Localize(STR_SIMPLISTIC + record->difficulty));
-			if (gGamePrefs.language == LANGUAGE_ENGLISH)
-				snprintfcat(text, sizeof(text), "\n%s %d, %d", month, day, year);
+			int difficulty = GAME_MIN(record->difficulty, NUM_DIFFICULTIES - 1);
+			SDL_snprintf(text, sizeof(text), "%s %s", Localize(STR_DIFFICULTY_1 + difficulty), Localize(STR_SIMPLISTIC + difficulty));
+			if (!validDate)
+			{
+				snprintfcat(text, sizeof(text), "\n----");
+			}
 			else
-				snprintfcat(text, sizeof(text), "\n%d %s %d", day, month, year);
+			{
+				const char* month = Localize(dt.month - 1 + STR_MONTH_1);
+				if (gGamePrefs.language == LANGUAGE_ENGLISH)
+					snprintfcat(text, sizeof(text), "\n%s %d, %d", month, dt.day, dt.year);
+				else
+					snprintfcat(text, sizeof(text), "\n%d %s %d", dt.day, month, dt.year);
+			}
 
 			defDate.slot = slot++;
 			nodes[n++] = TextMesh_New(text, kTextMeshAlignLeft, &defDate);
 
-			if (record->vehicleType != CAR_TYPE_SUB)
+			if (record->vehicleType < NUM_LAND_CAR_TYPES)
 			{
 				defCar.slot = slot++;
 				defCar.type = 1 + record->vehicleType;

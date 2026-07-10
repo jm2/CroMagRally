@@ -79,7 +79,7 @@ Boolean NetValidateConfigPayload(const NetConfigMessage* message)
 		&& message->playerNum >= 0
 		&& message->playerNum < message->numPlayers
 		&& message->difficulty < NUM_DIFFICULTIES
-		&& message->targetFPS <= 1000;
+		&& message->targetFPS <= MAX_GAME_FPS;
 }
 
 Boolean NetValidatePlayerCharPayload(const NetPlayerCharTypeMessage* message, int expectedPlayer, int numRealPlayers)
@@ -112,4 +112,82 @@ Boolean NetValidateClientControlPayload(const NetClientControlInfoMessageType* m
 		&& message->analogSteering.x <= 1.0f
 		&& message->analogSteering.y >= -1.0f
 		&& message->analogSteering.y <= 1.0f;
+}
+
+Boolean NetValidateHostControlPayload(const NetHostControlInfoMessageType* message, int numRealPlayers)
+{
+	const uint32_t validControlBits = (1u << NUM_CONTROL_BITS) - 1u;
+	const uint8_t validInputFlags = INPUT_FLAG_SUBSTITUTED | INPUT_FLAG_COALESCED;
+	const float minHostFPS = 9.0f;
+	const float maxHostFPS = MAX_GAME_FPS;
+	const float maxAbsSyncCoord = 1000000.0f;
+	const float maxAbsSyncRotation = 1000000.0f;
+
+	if (!message || numRealPlayers < 1 || numRealPlayers > MAX_LOCAL_PLAYERS)
+		return false;
+
+	if (!isfinite(message->fps)
+		|| !isfinite(message->fpsFrac)
+		|| message->fps < minHostFPS
+		|| message->fps > maxHostFPS
+		|| message->fpsFrac < 1.0f / maxHostFPS
+		|| message->fpsFrac > 1.0f / minHostFPS
+		|| fabsf(message->fps * message->fpsFrac - 1.0f) > 0.01f)
+	{
+		return false;
+	}
+
+	for (int i = 0; i < MAX_PLAYERS; i++)
+	{
+		if ((message->controlBits[i] & ~validControlBits) != 0
+			|| (message->controlBitsNew[i] & ~validControlBits) != 0
+			|| !isfinite(message->analogSteering[i].x)
+			|| !isfinite(message->analogSteering[i].y)
+			|| message->analogSteering[i].x < -1.0f
+			|| message->analogSteering[i].x > 1.0f
+			|| message->analogSteering[i].y < -1.0f
+			|| message->analogSteering[i].y > 1.0f
+			|| !isfinite(message->syncPos[i].x)
+			|| !isfinite(message->syncPos[i].y)
+			|| !isfinite(message->syncPos[i].z)
+			|| fabsf(message->syncPos[i].x) > maxAbsSyncCoord
+			|| fabsf(message->syncPos[i].y) > maxAbsSyncCoord
+			|| fabsf(message->syncPos[i].z) > maxAbsSyncCoord
+			|| !isfinite(message->syncRotY[i])
+			|| fabsf(message->syncRotY[i]) > maxAbsSyncRotation
+			|| (message->pauseState[i] != 0 && message->pauseState[i] != 1)
+			|| (message->inputFlags[i] & ~validInputFlags) != 0
+			|| message->queueDepth[i] >= NET_INPUT_QUEUE_SIZE
+			|| message->targetDepth[i] > NET_MAX_INPUT_DEPTH)
+		{
+			return false;
+		}
+	}
+
+	if (message->eventCount > NET_MAX_PENDING_EVENTS)
+		return false;
+
+	for (int i = 0; i < message->eventCount; i++)
+	{
+		const NetFrameEvent* event = &message->events[i];
+		if ((event->type != kEvBecomeBot && event->type != kEvUnpauseForce)
+			|| event->playerNum < 0
+			|| event->playerNum >= numRealPlayers
+			|| event->pad != 0
+			|| event->effectiveFrame - message->frameCounter > NET_MAX_EVENT_LEAD)
+		{
+			return false;
+		}
+
+		for (int j = 0; j < i; j++)
+		{
+			if (message->events[j].type == event->type
+				&& message->events[j].playerNum == event->playerNum)
+			{
+				return false;
+			}
+		}
+	}
+
+	return true;
 }

@@ -645,7 +645,7 @@ Twitch* MakeTwitch(ObjNode* puppet, int presetAndFlags)
 	driverData->fxChain[effectNum] = twitch;
 
 	uint8_t presetNum = presetAndFlags & 0xFF;
-	GAME_ASSERT_MESSAGE(presetNum <= kTwitchPresetCOUNT, "Not a legal twitch preset");
+	GAME_ASSERT_MESSAGE(presetNum < kTwitchPresetCOUNT, "Not a legal twitch preset");
 	*twitch = gTwitchPresets[presetNum];
 
 	// Save current alpha as "phase" for alpha fade effects

@@ -13,3 +13,4 @@ Boolean NetValidateInboundEnvelope(NetInboundRole role, const NSpMessageHeader* 
 Boolean NetValidateConfigPayload(const NetConfigMessage* message);
 Boolean NetValidatePlayerCharPayload(const NetPlayerCharTypeMessage* message, int expectedPlayer, int numRealPlayers);
 Boolean NetValidateClientControlPayload(const NetClientControlInfoMessageType* message, int expectedPlayer, int numRealPlayers);
+Boolean NetValidateHostControlPayload(const NetHostControlInfoMessageType* message, int numRealPlayers);

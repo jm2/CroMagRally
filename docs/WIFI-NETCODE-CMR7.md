@@ -7,6 +7,11 @@ design. The P0/P1 fixes that precede it are already on this branch; the **Stage 
 below that are still pending are the ones this review deliberately deferred (they need
 play-test verification under the redesign).
 
+> **Historical design record:** This plan and its line-number references were written
+> before the CMR7 stages landed. “Pending,” effort, and baseline statements document the
+> implementation process, not the current state of the shipping code. See the current
+> source and `CHANGELOG.md` for implemented behavior.
+
 ---
 ## Design name
 CMR7 Free-Running Lockstep, rev B — stall-free host-echo lockstep with adaptive per-client input delay, wall-clock input sender, and frame-aligned game events
@@ -448,7 +453,7 @@ The ring is pure backpressure storage for the slow-client case.
 - `Source/Headers/netsprocket.h` (netsprocket.h:21) — kNSpMaxPayloadLength 256 -> 512. kNSpMaxMessageLength derives automatically. Must be in the SAME commit as the 4CC bump.
 - `Source/Headers/netsprocket.h` (netsprocket.h:24) — kNSpCMRProtocol4CC 'CMR6' -> 'CMR7'. Old peers are cleanly rejected by the version check at NetLow.c:718-723 and the send-side assert at NetLow.c:1685.
 - `Source/Headers/network.h` (network.h:41-44 NetSyncMessage) — Add uint16_t targetFPS + uint16_t pad. Field lands in the CMR7 bump but is only WRITTEN/READ in Stage 4 (host-finalized FPS negotiation). Add _Static_assert on sizeof.
-- `Source/Headers/network.h` (network.h:49-63 NetHostControlInfoMessageType) — Rewrite per CMR7 (see dataStructures): keep fps/fpsFrac/randomSeed/frameCounter/simTick/controlBits[]/controlBitsNew[](now host-derived)/analogSteering[]/pauseState[]/syncPos[]/syncRotY[]; ADD inputFlags[MAX_PLAYERS] (bit0 substituted, bit1 coalesced), ackInputSeq[MAX_PLAYERS], queueDepth[MAX_PLAYERS], targetDepth[MAX_PLAYERS], eventCount + NetFrameEvent events[2]. Add NetFrameEvent struct + kEv*/INPUT_FLAG_* enums. Group same-alignment fields; add exact-size _Static_assert.
+- `Source/Headers/network.h` (network.h:49-63 NetHostControlInfoMessageType) — Rewrite per CMR7 (see dataStructures): keep fps/fpsFrac/randomSeed/frameCounter/simTick/controlBits[]/controlBitsNew[] (now host-derived)/analogSteering[]/pauseState[]/syncPos[]/syncRotY[]; ADD inputFlags[MAX_PLAYERS] (bit0 substituted, bit1 coalesced), ackInputSeq[MAX_PLAYERS], queueDepth[MAX_PLAYERS], targetDepth[MAX_PLAYERS], eventCount + NetFrameEvent events[2]. Add NetFrameEvent struct + kEv*/INPUT_FLAG_* enums. Group same-alignment fields; add exact-size _Static_assert.
 - `Source/Headers/network.h` (network.h:68-82 NetClientControlInfoMessageType) — Rewrite (see dataStructures): rename frameCounter -> inputSeq (client-owned monotonic); ADD uint32_t lastHostFrameSeen + explicit pad; DELETE controlBitsNew, prevControlBits[8], prevAnalogSteering[8] (host derives edges; TCP is ordered so history was dead weight). Add _Static_assert.
 - `Source/Headers/network.h` (network.h:35 NetConfigMessage.useRedundancy) — Rename field to 'reserved' (keep the byte for layout); stop writing/reading it. gUseRedundancy global retired.
 - `Source/Headers/network.h` (network.h:109-113 prototypes) — Remove HostReceive_ControlInfoFromClients decl; add Host_PumpClientInputs(void), Host_ConsumeClientInputs(void), Host_InitInputControl(void), SampleAndSendLocalInput(Boolean* outSchedulePause), ResetNetGameTransientState(void). (Net_Pump/NSpGame_FlushSends come from Stage 1.) Leave Client_CheckIfMorePacketsWaiting decl (deleted in Stage 3).

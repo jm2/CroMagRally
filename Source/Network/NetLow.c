@@ -65,6 +65,7 @@ int gNetPort = 49959;
 // max message (kNSpMaxMessageLength) always fits an empty ring, so overflow only ever comes
 // from sustained backlog -> the existing kick (host) / terminate (client) path.
 #define SEND_RING_CAPACITY 32768
+#define MAX_APPLE_ADVERTISE_FAILURES 30
 
 typedef struct SendRing
 {
@@ -112,6 +113,7 @@ typedef struct NSpGame
 	NSpPlayer					players[MAX_CLIENTS];
 
 	float						timeToReadvertise;
+	uint8_t					advertiseFailureCount;
 
 	uint32_t					cookie;
 
@@ -1281,13 +1283,31 @@ NSpSearchReference NSpSearch_StartSearchingForGameHosts(void)
 		goto fail;
 	}
 
+#if __IOS__ || __TVOS__
+	// Receiving broadcasts alone does not trigger Apple's local-network permission prompt.
+	// Send a harmless non-magic datagram so the OS asks before we wait for advertisements;
+	// peers ignore it in NSpSearch_Tick because it is not kLobbyMagic.
+	static const char permissionProbe[] = "CMR LOCAL NETWORK PERMISSION";
+	struct sockaddr_in permissionAddr =
+	{
+		.sin_family = AF_INET,
+		.sin_port = htons(gNetPort),
+		.sin_addr = GetSubnetBroadcastAddress(),
+	};
+	(void) sendto(
+		search->listenSocket,
+		permissionProbe,
+		sizeof(permissionProbe) - 1,
+		MSG_NOSIGNAL,
+		(struct sockaddr*) &permissionAddr,
+		sizeof(permissionAddr));
+#endif
+
 	printf("Created lobby search\n");
 	return search;
 
 fail:
-
-
-	SafeDisposePtr((Ptr) search);
+	NSpSearch_Dispose(search);
 	return NULL;
 }
 
@@ -1464,9 +1484,13 @@ static void NSpGame_WaitForClientsToCloseSockets(NSpGame* game)
 	const int retryDelay = 25;
 	const int maxDelay = 1000;
 
-	// 10 tries, 50 ms delay => wait at most half a second for everyone to close
+	// Give peers about one second to receive queued teardown data and close cleanly.
 	for (int tries = 0; tries < maxDelay/retryDelay; tries++)
 	{
+		// The termination message may be queued behind normal traffic. Progress every
+		// nonblocking peer send ring during the grace period before polling for EOF.
+		NSpGame_FlushSends(game);
+
 		int numSocketsToClose = MAX_CLIENTS;
 
 		for (int i = 0; i < MAX_CLIENTS; i++)
@@ -1533,6 +1557,9 @@ int NSpGame_Dispose(NSpGameReference inGame, int disposeFlags)
 	// Erase clients
 	for (int i = 0; i < MAX_CLIENTS; i++)
 	{
+		// NSpPlayer_Clear deliberately doesn't close sockets. Force-close any peer that
+		// didn't cooperate during the bounded grace period before erasing its descriptor.
+		CloseSocket(&game->players[i].sockfd);
 		NSpPlayer_Clear(&game->players[i]);
 	}
 
@@ -1721,6 +1748,7 @@ int NSpGame_StartAdvertising(NSpGameReference gameRef)
 
 	game->isAdvertising = true;
 	game->timeToReadvertise = 0;
+	game->advertiseFailureCount = 0;
 	return kNSpRC_OK;
 }
 
@@ -1746,6 +1774,7 @@ int NSpGame_StopAdvertising(NSpGameReference gameRef)
 	CloseSocket(&game->hostAdvertiseSocket);
 	game->isAdvertising = false;
 	game->timeToReadvertise = 0;
+	game->advertiseFailureCount = 0;
 
 	return kNSpRC_OK;
 }
@@ -1814,10 +1843,27 @@ int NSpGame_AdvertiseTick(NSpGameReference gameRef, float dt)
 
 	if (rc == -1)
 	{
-		printf("%s: sendto(%d) : error % d\n",
-			__func__, (int) game->hostAdvertiseSocket, GetSocketError());
+		int socketError = GetSocketError();
+#if __IOS__ || __TVOS__
+		// While Apple's local-network permission sheet is pending, broadcast commonly
+		// fails with one of these errors. Retry for a bounded interval so denial or a
+		// genuinely broken interface eventually surfaces to the lobby.
+		if ((socketError == EHOSTUNREACH || socketError == EACCES || socketError == ENETDOWN)
+			&& game->advertiseFailureCount < MAX_APPLE_ADVERTISE_FAILURES)
+		{
+			game->advertiseFailureCount++;
+			printf("%s: sendto(%d): transient Apple error %d (%u/%u); will retry\n",
+				__func__, (int) game->hostAdvertiseSocket, socketError,
+				(unsigned) game->advertiseFailureCount, (unsigned) MAX_APPLE_ADVERTISE_FAILURES);
+			return kNSpRC_OK;
+		}
+#endif
+		printf("%s: sendto(%d): error %d\n",
+			__func__, (int) game->hostAdvertiseSocket, socketError);
 		return kNSpRC_SendFailed;
 	}
+
+	game->advertiseFailureCount = 0;
 
 	return kNSpRC_OK;
 }

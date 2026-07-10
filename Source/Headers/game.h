@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 
-#include "version.h"
+#include <version.h>
 #include "globals.h"
 #include "3dmath.h"
 #include "objects.h"

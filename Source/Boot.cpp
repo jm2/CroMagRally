@@ -8,12 +8,10 @@
 #include "Pomme.h"
 #include "PommeFiles.h"
 #include "PommeInit.h"
+#include <charconv>
 #include <sstream>
+#include <stdexcept>
 #include <string>
-
-#if defined(__ANDROID__) || defined(__IOS__) || defined(__TVOS__)
-#include <gl4esinit.h>
-#endif
 
 extern "C" {
 #include "game.h"
@@ -69,7 +67,9 @@ tryAgain:
     throw std::runtime_error("Couldn't find the Data folder.");
   }
 
+#if defined(__ANDROID__)
 verify:
+#endif
   attemptNum++;
 
   dataPath = dataPath.lexically_normal();
@@ -87,6 +87,27 @@ verify:
   return dataPath;
 }
 
+static int ParseIntegerArgument(const char *option, int argc, char **argv,
+                                int *argumentIndex, int minimum, int maximum) {
+  if (*argumentIndex + 1 >= argc) {
+    throw std::invalid_argument(std::string(option) + " requires a value");
+  }
+
+  const char *text = argv[++*argumentIndex];
+  const char *textEnd = text + SDL_strlen(text);
+  int value = 0;
+  auto [parseEnd, error] = std::from_chars(text, textEnd, value);
+  if (error != std::errc() || parseEnd != textEnd || value < minimum ||
+      value > maximum) {
+    std::ostringstream message;
+    message << "Invalid " << option << " value '" << text << "' (expected "
+            << minimum << ".." << maximum << ")";
+    throw std::invalid_argument(message.str());
+  }
+
+  return value;
+}
+
 static void ParseCommandLine(int argc, char **argv) {
   SDL_memset(&gCommandLine, 0, sizeof(gCommandLine));
   gCommandLine.vsync = 1;
@@ -95,13 +116,11 @@ static void ParseCommandLine(int argc, char **argv) {
     std::string argument = argv[i];
 
     if (argument == "--track") {
-      GAME_ASSERT_MESSAGE(i + 1 < argc, "practice track # unspecified");
-      gCommandLine.bootToTrack = atoi(argv[i + 1]);
-      i += 1;
+      gCommandLine.bootToTrack =
+          ParseIntegerArgument("--track", argc, argv, &i, 1, NUM_TRACKS);
     } else if (argument == "--car") {
-      GAME_ASSERT_MESSAGE(i + 1 < argc, "car # unspecified");
-      gCommandLine.car = atoi(argv[i + 1]);
-      i += 1;
+      gCommandLine.car = ParseIntegerArgument("--car", argc, argv, &i, 1,
+                                              NUM_LAND_CAR_TYPES);
     } else if (argument == "--stats")
       gDebugMode = 1;
     else if (argument == "--no-vsync")
@@ -115,9 +134,7 @@ static void ParseCommandLine(int argc, char **argv) {
     else if (argument == "--join")
       gCommandLine.netJoin = true;					// join a net game via lobby discovery
     else if (argument == "--port") {
-      GAME_ASSERT_MESSAGE(i + 1 < argc, "port # unspecified");
-      gNetPort = atoi(argv[i + 1]);					// override the default gameplay/lobby port (49959)
-      i += 1;
+      gNetPort = ParseIntegerArgument("--port", argc, argv, &i, 1, 65535);
     }
 #if 0
 		else if (argument == "--fullscreen-resolution")
@@ -134,6 +151,10 @@ static void ParseCommandLine(int argc, char **argv) {
 			i += 1;
 		}
 #endif
+  }
+
+  if (gCommandLine.netHost && gCommandLine.netJoin) {
+    throw std::invalid_argument("--host and --join are mutually exclusive");
   }
 }
 
@@ -345,27 +366,6 @@ retryVideo:
       SDL_Log("Boot: Desktop Mode: %dx%d @ %.2fHz", mode->w, mode->h, mode->refresh_rate);
     }
   }
-
-#if defined(__ANDROID__) || defined(__IOS__) || defined(__TVOS__)
-  // Initialize gl4es AFTER the OpenGL context is created
-  SDL_Log("Boot: Initializing gl4es...");
-  
-  // Get the GL context and make sure it's current (required for gl4es init)
-  SDL_GLContext glContext = SDL_GL_GetCurrentContext();
-  if (!glContext) {
-    glContext = SDL_GL_CreateContext(gSDLWindow);
-    if (glContext) {
-      SDL_GL_MakeCurrent(gSDLWindow, glContext);
-    } else {
-      SDL_Log("Boot: Failed to create GL context: %s", SDL_GetError());
-    }
-  }
-  
-  // For NOEGL builds, provide the GetProcAddress function
-  set_getprocaddress((void *(*)(const char *))SDL_GL_GetProcAddress);
-  
-  initialize_gl4es();
-#endif
 
   // Init gamepad subsystem
   SDL_Init(SDL_INIT_GAMEPAD);

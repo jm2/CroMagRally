@@ -40,6 +40,20 @@ static void MoveDart(ObjNode *theNode);
 static void MoveDragon(ObjNode *theNode);
 static void MoveTroll(ObjNode *theNode);
 
+static uint32_t TerrainEventEntityKey(const ObjNode* node)
+{
+	const TerrainItemEntryType* item = node ? node->TerrainItemPtr : NULL;
+	if (!item)
+		return 0;
+
+	uint32_t params = (uint32_t) item->parm[0]
+		| ((uint32_t) item->parm[1] << 8)
+		| ((uint32_t) item->parm[2] << 16)
+		| ((uint32_t) item->parm[3] << 24);
+	uint32_t positionKey = DeterministicPairKey(item->x, item->y);
+	return DeterministicPairKey(positionKey, DeterministicPairKey(item->type, params));
+}
+
 
 /****************************/
 /*    CONSTANTS             */
@@ -696,6 +710,7 @@ OGLMatrix4x4	m;
 float			speed;
 
 	FindCoordOnJointAtFlagEvent(theNode, 7, &tipOff, &tipCoord);
+	uint32_t entityKey = TerrainEventEntityKey(theNode);
 
 	for (int i = 0; i < 3; i++)				// throw 3 rocks
 	{
@@ -724,15 +739,13 @@ float			speed;
 			/* SET IN MOTION */
 			/*****************/
 
-		// The thrown rock's trajectory is collision-relevant (rocks can hit cars), so key the
-		// launch speed/heading/Delta.y on the catapult's heading via stateless ChaoticFloat
-		// (unique per-rock/per-draw modifier) instead of the unsynced VisualRandom stream.
-		speed = 8000.0f + ChaoticFloat(theNode->Rot.y, i*3 + 0) * 1000.0f;
+		// The rocks are collision-relevant, so use stable terrain/event identity.
+		speed = 8000.0f + DeterministicSimEventFloat(kDeterministicEvent_CatapultThrow, entityKey, i*3 + 0) * 1000.0f;
 
-		OGLMatrix4x4_SetRotate_Y(&m, theNode->Rot.y + (ChaoticFloat(theNode->Rot.y, i*3 + 1) - 0.5f) * 2.0f * .3f);
+		OGLMatrix4x4_SetRotate_Y(&m, theNode->Rot.y + (DeterministicSimEventFloat(kDeterministicEvent_CatapultThrow, entityKey, i*3 + 1) - 0.5f) * 2.0f * .3f);
 		OGLVector3D_Transform(&throwVector,	&m, &newObj->Delta);
 
-		newObj->Delta.y += ChaoticFloat(theNode->Rot.y, i*3 + 2) * .1f;
+		newObj->Delta.y += DeterministicSimEventFloat(kDeterministicEvent_CatapultThrow, entityKey, i*3 + 2) * .1f;
 
 		newObj->Delta.x *= speed;															// give it speed
 		newObj->Delta.y *= speed;
@@ -931,6 +944,14 @@ NewParticleGroupDefType	groupDef;
 NewParticleDefType	newParticleDef;
 OGLVector3D			d;
 OGLPoint3D			pt;
+	uint32_t entityKey = DeterministicPairKey(TerrainEventEntityKey(goddess), (uint32_t) playerNum);
+	OGLPoint3D impactPoint = gPlayerInfo[playerNum].coord;
+	impactPoint.x += (DeterministicSimEventFloat(kDeterministicEvent_GoddessBolt, entityKey, 0) - 0.5f) * 2.0f * 300.0f;
+	impactPoint.z += (DeterministicSimEventFloat(kDeterministicEvent_GoddessBolt, entityKey, 1) - 0.5f) * 2.0f * 300.0f;
+	// Preserve the old final-endpoint jitter distribution, but make it simulation-stable.
+	impactPoint.x += (DeterministicSimEventFloat(kDeterministicEvent_GoddessBolt, entityKey, 2) - 0.5f) * 2.0f * 100.0f;
+	impactPoint.y += (DeterministicSimEventFloat(kDeterministicEvent_GoddessBolt, entityKey, 3) - 0.5f) * 2.0f * 100.0f;
+	impactPoint.z += (DeterministicSimEventFloat(kDeterministicEvent_GoddessBolt, entityKey, 4) - 0.5f) * 2.0f * 100.0f;
 
 	x = goddess->Coord.x;
 	y = goddess->Coord.y + 1000.0f;
@@ -948,12 +969,9 @@ OGLPoint3D			pt;
 
 		/* CALC VECTOR FROM GODDESS TO PLAYER */
 
-	// The targeting offset decides WHERE the bolt strikes (damage gating) -> sim-affecting,
-	// so key it on the target player's coord + slot via stateless ChaoticFloat. The bolt-path
-	// jaggedness endpoints below stay on VisualRandom (pure visual).
-	boltVector.x = (gPlayerInfo[playerNum].coord.x + (ChaoticFloat(gPlayerInfo[playerNum].coord.x, playerNum) - 0.5f) * 2.0f * 300.0f) - x;
-	boltVector.y = gPlayerInfo[playerNum].coord.y - y;
-	boltVector.z = (gPlayerInfo[playerNum].coord.z + (ChaoticFloat(gPlayerInfo[playerNum].coord.z, playerNum + 5) - 0.5f) * 2.0f * 300.0f) - z;
+	boltVector.x = impactPoint.x - x;
+	boltVector.y = impactPoint.y - y;
+	boltVector.z = impactPoint.z - z;
 
 	boltVector.x /= (float)(numSegments-1);							// divide vector length for multiple segments
 	boltVector.y /= (float)(numSegments-1);
@@ -964,7 +982,7 @@ OGLPoint3D			pt;
 
 	endPoints[0].x = goddess->Coord.x;
 	endPoints[0].y = goddess->Coord.y + 1000.0f;
-	endPoints[0].z = goddess->Coord.x;
+	endPoints[0].z = goddess->Coord.z;
 
 
 		/* CALC INTERMEDIATE & END POINTS */
@@ -975,10 +993,20 @@ OGLPoint3D			pt;
 		y += boltVector.y;
 		z += boltVector.z;
 
-		endPoints[i].x = x + VisualRandomFloat2() * 100.0f;			// randomize it
-		endPoints[i].y = y + VisualRandomFloat2() * 100.0f;
-		endPoints[i].z = z + VisualRandomFloat2() * 100.0f;
+		if (i == numSegments - 1)
+		{
+			endPoints[i] = impactPoint;								// damage endpoint is deterministic
+		}
+		else
+		{
+			endPoints[i].x = x + VisualRandomFloat2() * 100.0f;		// intermediate jitter is visual only
+			endPoints[i].y = y + VisualRandomFloat2() * 100.0f;
+			endPoints[i].z = z + VisualRandomFloat2() * 100.0f;
+		}
 	}
+
+	// Gameplay cannot depend on whether this machine has room for the visual particle group.
+	BlastCars(-1, impactPoint.x, impactPoint.y, impactPoint.z, 300.0f);
 
 
 		/****************************************/
@@ -1042,10 +1070,9 @@ OGLPoint3D			pt;
 		/* PUT EXPLOSION AT ENDPOINT */
 		/*****************************/
 
-	pt = endPoints[numSegments-1];
+	pt = impactPoint;
 
 	MakeSparkExplosion(pt.x, pt.y, pt.z, 500.0, PARTICLE_SObjType_WhiteSpark);
-	BlastCars(-1, pt.x, pt.y, pt.z, 300.0);
 
 
 		/* PLAY CANNON SOUND AT IMPACT POINT */
@@ -1194,12 +1221,12 @@ NewParticleDefType		newParticleDef;
 
 	speed = dist * .9f;
 
-	// The cannonball's trajectory is collision-relevant, so key the launch jitter on the
-	// cannon's heading via stateless ChaoticFloat instead of the unsynced VisualRandom stream.
-	OGLMatrix4x4_SetRotate_Y(&m2, theNode->Rot.y + (ChaoticFloat(theNode->Rot.y, 0) - 0.5f) * 2.0f * .1f);
+	// The cannonball's trajectory is collision-relevant, so use stable terrain/event identity.
+	uint32_t entityKey = TerrainEventEntityKey(theNode);
+	OGLMatrix4x4_SetRotate_Y(&m2, theNode->Rot.y + (DeterministicSimEventFloat(kDeterministicEvent_CannonShot, entityKey, 0) - 0.5f) * 2.0f * .1f);
 	OGLVector3D_Transform(&throwVector,	&m2, &delta);
 
-	newObj->Delta.y += ChaoticFloat(theNode->Rot.y, 1) * .1f;
+	delta.y += DeterministicSimEventFloat(kDeterministicEvent_CannonShot, entityKey, 1) * .1f;
 
 	newObj->Delta.x = delta.x * speed;															// give it speed
 	newObj->Delta.y = delta.y * speed;
@@ -1498,12 +1525,10 @@ OGLPoint3D			pt;
 
 		/* CALC VECTOR FROM CAPSULE TO PLAYER */
 
-	// The targeting offset decides WHERE the bolt strikes (damage gating) -> sim-affecting,
-	// so key it on the target player's coord + slot via stateless ChaoticFloat. The bolt-path
-	// jaggedness endpoints below stay on VisualRandom (pure visual).
-	boltVector.x = (gPlayerInfo[playerNum].coord.x + (ChaoticFloat(gPlayerInfo[playerNum].coord.x, playerNum) - 0.5f) * 2.0f * 300.0f) - x;
+	// Capsule targeting is visual; the actual nitro grant below is keyed directly by playerNum.
+	boltVector.x = (gPlayerInfo[playerNum].coord.x + VisualRandomFloat2() * 300.0f) - x;
 	boltVector.y = gPlayerInfo[playerNum].coord.y - y;
-	boltVector.z = (gPlayerInfo[playerNum].coord.z + (ChaoticFloat(gPlayerInfo[playerNum].coord.z, playerNum + 5) - 0.5f) * 2.0f * 300.0f) - z;
+	boltVector.z = (gPlayerInfo[playerNum].coord.z + VisualRandomFloat2() * 300.0f) - z;
 
 	boltVector.x /= (float)(numSegments-1);							// divide vector length for multiple segments
 	boltVector.y /= (float)(numSegments-1);
@@ -1514,7 +1539,7 @@ OGLPoint3D			pt;
 
 	endPoints[0].x = goddess->Coord.x;
 	endPoints[0].y = goddess->Coord.y;
-	endPoints[0].z = goddess->Coord.x;
+	endPoints[0].z = goddess->Coord.z;
 
 
 		/* CALC INTERMEDIATE & END POINTS */
@@ -1529,6 +1554,9 @@ OGLPoint3D			pt;
 		endPoints[i].y = y + VisualRandomFloat2() * 100.0f;
 		endPoints[i].z = z + VisualRandomFloat2() * 100.0f;
 	}
+
+	// The nitro grant is gameplay; apply it even if a local visual allocation fails below.
+	gPlayerInfo[playerNum].nitroTimer = 5.0f;
 
 
 		/****************************************/
@@ -1639,10 +1667,6 @@ OGLPoint3D			pt;
 			AddParticleToGroup(&newParticleDef);
 		}
 	}
-
-		/* GIVE SUBMARINE A NITRO BOOST */
-
-	gPlayerInfo[playerNum].nitroTimer = 5.0;
 
 	PlayEffect_Parms3D(EFFECT_NITRO, &gPlayerInfo[playerNum].coord, NORMAL_CHANNEL_RATE, 1.5);
 }
@@ -2329,12 +2353,5 @@ Boolean isVisible;
 		UpdateShadow(theNode);
 	}
 }
-
-
-
-
-
-
-
 
 

@@ -47,10 +47,8 @@ int Net_GetConnectionHint(void);
 #define LOADING_TIMEOUT	15						// # seconds to wait for clients to load a level
 
 // CMR7 Stage 4: frame-aligned events + connection-liveness policy.
-#define D_MAX				8					// max per-client adaptive input-queue depth
-#define EV_BECOME_BOT_LEAD	(D_MAX + 4)			// ~12 frames (~200ms @60) of lead so every peer records the event before its effectiveFrame
 #define NET_BADGE_MS		1000				// >1s silence from a peer -> connection badge (substitution continues)
-#define NET_DROP_MS			10000				// >10s silence -> host frame-aligns a become-bot / client errors out
+#define NET_DROP_MS			30000				// 30s mobile-background grace before host bot conversion / client error
 #define NET_KEEPALIVE_MS	50					// 20Hz heartbeat throttle (lobby/barriers only; in-game streams 60pps)
 
 /**********************/
@@ -170,7 +168,7 @@ static Boolean AreAllPlayersSynced(void)
 // old blocking, 4-strike HostReceive busy-spin.
 //
 
-#define NET_QUEUE_SIZE		128					// ~2s of client inputs @60fps (was 64)
+#define HOST_PACKET_BUDGET_PER_PUMP	64		// bound each pump; excess stays in TCP for a later pump
 #define JITTER_WINDOW		128					// inter-arrival samples kept for the depth controller
 #define GRACE_RETRIES		2					// bounded re-poll attempts (~1ms each) before substituting
 #define SUB_DECAY_AFTER		30					// consecutive substituted frames before neutral decay
@@ -179,7 +177,7 @@ static Boolean AreAllPlayersSynced(void)
 typedef struct {
 	int head;
 	int tail;
-	NetClientControlInfoMessageType msgs[NET_QUEUE_SIZE];
+	NetClientControlInfoMessageType msgs[NET_INPUT_QUEUE_SIZE];
 } PacketQueue;
 
 static PacketQueue sHostInputQueues[MAX_PLAYERS];
@@ -219,7 +217,7 @@ static double sNextSampleTime = 0.0;				// wall-clock sampler cursor (seconds, p
 // CMR7 Stage 4 (G3 determinism fix): a player leaving / dropping is NOT converted to a bot at
 // TCP-arrival time (which would draw ChooseTaggedPlayer's synced RNG at a stream position that
 // differs across peers -> kNetSequence_SeedDesync FATAL). Instead the host schedules a
-// kEvBecomeBot event at effectiveFrame = currentHostFrame + EV_BECOME_BOT_LEAD, re-broadcasts it
+// kEvBecomeBot event at effectiveFrame = currentHostFrame + NET_MAX_EVENT_LEAD, re-broadcasts it
 // in every host control packet until that frame, and EVERY machine (host included) applies it
 // from a shared table at the IDENTICAL sim frame — right after the per-frame seed exchange and
 // before MoveEverything — so the conditional RandomRange lands at the same RNG-stream position
@@ -245,7 +243,7 @@ static void Queue_Push(int playerNum, NetClientControlInfoMessageType* msg)
 {
 	if (!IsValidPlayerNum(playerNum)) return;		// never index sHostInputQueues[] with an out-of-range wire value
 	PacketQueue* q = &sHostInputQueues[playerNum];
-	int next = (q->tail + 1) % NET_QUEUE_SIZE;
+	int next = (q->tail + 1) % NET_INPUT_QUEUE_SIZE;
 	if (next != q->head)							// drop on full ring (>~2s backlog = deep underrun)
 	{
 		q->msgs[q->tail] = *msg;
@@ -266,7 +264,7 @@ static void Queue_Pop(int playerNum)
 	if (!IsValidPlayerNum(playerNum)) return;
 	PacketQueue* q = &sHostInputQueues[playerNum];
 	if (q->head != q->tail)
-		q->head = (q->head + 1) % NET_QUEUE_SIZE;
+		q->head = (q->head + 1) % NET_INPUT_QUEUE_SIZE;
 }
 
 static int Queue_Count(int playerNum)
@@ -274,7 +272,7 @@ static int Queue_Count(int playerNum)
 	if (!IsValidPlayerNum(playerNum)) return 0;
 	PacketQueue* q = &sHostInputQueues[playerNum];
 	int n = q->tail - q->head;
-	if (n < 0) n += NET_QUEUE_SIZE;
+	if (n < 0) n += NET_INPUT_QUEUE_SIZE;
 	return n;
 }
 
@@ -397,7 +395,7 @@ static void Host_ScheduleFrameEvent(uint8_t type, int playerNum)
 			return;
 	}
 
-	uint32_t effF = gHostSendCounter + EV_BECOME_BOT_LEAD;
+	uint32_t effF = gHostSendCounter + NET_MAX_EVENT_LEAD;
 
 	for (int s = 0; s < NET_MAX_PENDING_EVENTS; s++)			// push into the outgoing re-broadcast ring
 	{
@@ -652,9 +650,8 @@ void ShutdownNetworkManager(void)
 
 void EndNetworkGame(void)
 {
-OSErr	iErr;
-
 	SetNetworkPowerMode(false);
+	SetNetworkDiscoveryMode(false);
 
 #if 0
 	if ((!gNetGameInProgress) || (!gNetGame))								// only if we're running a net game
@@ -732,6 +729,7 @@ bool UpdateNetSequence(void)
 		case kNetSequence_HostReadyToStartGame:
 			NSpGame_StopAdvertising(gNetGame);
 			NSpGame_StopAcceptingNewClients(gNetGame);
+			SetNetworkDiscoveryMode(false);
 			if (noErr == HostSendGameConfigInfo())
 			{
 				gNetSequenceState = kNetSequence_HostStartingGame;
@@ -779,6 +777,7 @@ bool UpdateNetSequence(void)
 
 				NSpSearch_Dispose(gNetSearch);
 				gNetSearch = NULL;
+				SetNetworkDiscoveryMode(false);
 			}
 			break;
 
@@ -959,6 +958,7 @@ bool UpdateNetSequence(void)
 Boolean SetupNetworkHosting(void)
 {
 	ResetNetGameTransientState();			// start from a clean slate (belt-and-suspenders vs EndNetworkGame)
+	SetNetworkDiscoveryMode(true);
 	SetNetworkPowerMode(true);
 	gNetSequenceState = kNetSequence_HostOffline;
 	gTargetFPS = OGL_GetMonitorRefreshRate();
@@ -984,6 +984,7 @@ Boolean SetupNetworkHosting(void)
 	if (!gNetGame)
 	{
 		SetNetworkPowerMode(false);
+		SetNetworkDiscoveryMode(false);
 		gNetSequenceState = kNetSequence_Error;
 		// Don't goto failure; show the error to the player
 		DoNetGatherScreen();
@@ -993,6 +994,7 @@ Boolean SetupNetworkHosting(void)
 	if (kNSpRC_OK != NSpGame_StartAdvertising(gNetGame))
 	{
 		SetNetworkPowerMode(false);
+		SetNetworkDiscoveryMode(false);
 		gNetSequenceState = kNetSequence_Error;
 		DoNetGatherScreen();
 		return true;
@@ -1016,6 +1018,7 @@ Boolean SetupNetworkHosting(void)
 failure:
 	NSpGame_Dispose(gNetGame, 0);
 	SetNetworkPowerMode(false);
+	SetNetworkDiscoveryMode(false);
 
 	return true;
 }
@@ -1029,9 +1032,8 @@ failure:
 
 Boolean SetupNetworkJoin(void)
 {
-OSStatus			status = noErr;
-
 	ResetNetGameTransientState();			// start from a clean slate
+	SetNetworkDiscoveryMode(true);
 	SetNetworkPowerMode(true);
 
 	gNetSequenceState = kNetSequence_ClientOffline;
@@ -1049,7 +1051,10 @@ OSStatus			status = noErr;
 
 	Boolean cancelled = DoNetGatherScreen();
 	if (cancelled)
+	{
 		SetNetworkPowerMode(false);
+		SetNetworkDiscoveryMode(false);
+	}
 	return cancelled;
 }
 
@@ -1374,6 +1379,12 @@ static Boolean Client_InGame_HandleHostControlInfoMessage(NetHostControlInfoMess
 {
 	GAME_ASSERT(gIsNetworkClient);
 
+	if (!NetValidateHostControlPayload(mess, gNumRealPlayers))
+	{
+		RejectProtocolMessage(&mess->h);
+		return false;
+	}
+
 	if (mess->frameCounter < gHostSendCounter)			// see if this is an old packet, possibly a duplicate.  If so, skip it
 		return false;
 
@@ -1417,9 +1428,11 @@ static Boolean Client_InGame_HandleHostControlInfoMessage(NetHostControlInfoMess
 			car->Coord.y += (mess->syncPos[i].y - car->Coord.y) * kSyncFactor;
 			car->Coord.z += (mess->syncPos[i].z - car->Coord.z) * kSyncFactor;
 
-			float rotDiff = mess->syncRotY[i] - car->Rot.y;
-			while (rotDiff <= -kPI) rotDiff += kPI2;
-			while (rotDiff > kPI) rotDiff -= kPI2;
+			float rotDiff = fmodf(mess->syncRotY[i] - car->Rot.y, kPI2);
+			if (rotDiff <= -kPI)
+				rotDiff += kPI2;
+			else if (rotDiff > kPI)
+				rotDiff -= kPI2;
 			
 			car->Rot.y += rotDiff * kSyncFactor;
 		}
@@ -1430,7 +1443,6 @@ static Boolean Client_InGame_HandleHostControlInfoMessage(NetHostControlInfoMess
 	// BEFORE MoveEverything — exactly where the host applies its own copy.
 	{
 		uint8_t ec = mess->eventCount;
-		if (ec > NET_MAX_PENDING_EVENTS) ec = NET_MAX_PENDING_EVENTS;	// clamp a wire value to the events[] bound
 		for (int k = 0; k < ec; k++)
 			RecordFrameEvent(mess->events[k].effectiveFrame, mess->events[k].type, mess->events[k].playerNum);
 	}
@@ -1682,9 +1694,12 @@ void Host_PumpClientInputs(void)
 
 	double perfFreq = (double) SDL_GetPerformanceFrequency();
 
-	NSpMessageHeader* inMess;
-	while ((inMess = NSpMessage_Get(gNetGame)) != NULL)
+	for (unsigned packet = 0; packet < HOST_PACKET_BUDGET_PER_PUMP; packet++)
 	{
+		NSpMessageHeader* inMess = NSpMessage_Get(gNetGame);
+		if (inMess == NULL)
+			break;
+
 		Boolean over = false;
 
 		if (inMess->what == kNetClientControlInfoMessage)
@@ -1881,7 +1896,7 @@ void Host_ConsumeClientInputs(void)
 			}
 
 			sInputFlags[i] |= INPUT_FLAG_SUBSTITUTED;
-			if (sDepth[i].targetDepth < 8)
+			if (sDepth[i].targetDepth < NET_MAX_INPUT_DEPTH)
 				sDepth[i].targetDepth++;										// immediate underrun bump
 			continue;
 		}
@@ -2024,7 +2039,7 @@ int Net_GetConnectionHint(void)
 	}
 	return isWifi;
 
-#elif defined(__IOS__) || defined(__TVOS__)
+#elif defined(__IOS__) || defined(__TVOS__) || defined(__ANDROID__)
     return 1; // Assume WiFi/Wireless for now
 
 #elif defined(_WIN32)

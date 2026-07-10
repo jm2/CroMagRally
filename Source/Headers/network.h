@@ -75,6 +75,13 @@ _Static_assert(sizeof(NetFrameEvent) == 8, "NetFrameEvent ABI");
 // would silently drop the surplus and desync the host vs clients (seed/state FATAL).
 #define NET_MAX_PENDING_EVENTS	8
 
+// Host input buffering and frame-event scheduling limits are wire invariants too: the
+// payload validator must agree with the producer on every accepted telemetry/event value.
+#define NET_INPUT_QUEUE_SIZE	128
+#define NET_MAX_INPUT_DEPTH	8
+#define NET_MAX_EVENT_LEAD	(NET_MAX_INPUT_DEPTH + 4)
+_Static_assert(NET_INPUT_QUEUE_SIZE <= 256, "queue depth must fit its uint8_t wire field");
+
 
 		/* HOST CONTROL INFO MESSAGE (CMR7) */
 
@@ -171,6 +178,7 @@ void NetCheck_ConnectionTimeouts(void);			// CMR7 Stage 4: per-frame lastHeard b
 void Net_MaybeSendKeepAlive(void);				// CMR7 Stage 4: throttled header-only heartbeat (lobby/barriers keep radios awake)
 void Net_RefreshLastHeard(void);				// CMR7 Stage 4: reset all liveness clocks to now (game-loop entry)
 void SetNetworkPowerMode(Boolean enabled);		// Android network-session WiFi/multicast locks; no-op elsewhere
+void SetNetworkDiscoveryMode(Boolean enabled);	// Android multicast lock while advertising/searching; no-op elsewhere
 
 void PlayerBroadcastVehicleType(void);
 Boolean GetVehicleSelectionFromNetPlayers(void);

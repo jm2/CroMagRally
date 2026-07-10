@@ -5,13 +5,11 @@ set -e
 # Usage: ./build_ios.sh [device|simulator]
 #
 # Env knobs (sensible defaults for local dev; the CI release job sets these):
-#   SDL_REF                SDL git tag/branch to build from  (default: release-3.2.8)
 #   CODE_SIGNING_ALLOWED   set to NO for an unsigned build   (default: YES)
 #   PACKAGE                set to 1 to emit a sideloadable    (default: 0)
 #                          unsigned .ipa (device target only)
 
 TARGET=${1:-simulator}
-SDL_REF="${SDL_REF:-release-3.2.8}"
 
 echo "=== Building Cro-Mag Rally for iOS ($TARGET) ==="
 
@@ -29,11 +27,11 @@ else
     OUT_SUBDIR="Release-iphonesimulator"
 fi
 
-# Step 0: Check dependencies. SDL3 is pinned to the same release the desktop build uses
-# (3.2.8) for reproducible builds; override with SDL_REF=... if you really need another rev.
-if [ ! -d "extern/SDL" ]; then
-    echo "=== Cloning SDL3 ($SDL_REF) ==="
-    git clone --depth 1 --branch "$SDL_REF" https://github.com/libsdl-org/SDL.git extern/SDL
+# Step 0: Use the same SDL source submodule as every other platform.
+if [ ! -f "extern/SDL3/CMakeLists.txt" ]; then
+    echo "Error: SDL3 submodule is missing."
+    echo "Run: git submodule update --init --recursive"
+    exit 1
 fi
 
 # Step 1: Configure with CMake
@@ -65,7 +63,11 @@ APP_BUNDLE="$BUILD_DIR/$OUT_SUBDIR/CroMagRally.app"
 # Step 3 (optional): wrap the .app in the conventional Payload/ layout as an UNSIGNED .ipa
 # for sideload/re-sign tools (AltStore / Sideloadly). Device target only.
 if [ "${PACKAGE:-0}" == "1" ] && [ "$TARGET" == "device" ]; then
-    GAME_VERSION=$(grep -m1 'set(GAME_VERSION' CMakeLists.txt | sed -E 's/.*"([^"]+)".*/\1/')
+    GAME_VERSION=$(sed -n 's/^GAME_VERSION=//p' version.properties)
+    if [ -z "$GAME_VERSION" ]; then
+        echo "Error: GAME_VERSION is missing from version.properties"
+        exit 1
+    fi
     IPA="CroMagRally-${GAME_VERSION}-ios-unsigned.ipa"
     echo "=== Packaging $IPA (UNSIGNED; re-sign with AltStore/Sideloadly to install) ==="
     rm -rf Payload "$IPA"

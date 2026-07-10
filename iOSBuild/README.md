@@ -6,6 +6,9 @@
 - **CMake 3.21+** (`brew install cmake`)
 - **macOS** (required for iOS development)
 
+Run every command below from the repository root (the directory containing
+`build_ios.sh` and `CMakeLists.txt`), not from `iOSBuild/`.
+
 ## Quick Build (Simulator)
 
 ```bash
@@ -18,7 +21,18 @@
 ./build_ios.sh device
 ```
 
-> **Note:** Device builds require an Apple Developer account and valid provisioning profile.
+> **Note:** Installing a directly signed device build requires an Apple Developer account
+> and valid provisioning profile.
+
+To produce an unsigned device package for later re-signing with Xcode, AltStore, or
+Sideloadly, no developer certificate is required:
+
+```bash
+CODE_SIGNING_ALLOWED=NO PACKAGE=1 ./build_ios.sh device
+```
+
+This emits a clearly labeled `*-ios-unsigned.ipa`; it is not directly installable until
+it has been signed for the destination device.
 
 ## Manual Build Steps
 

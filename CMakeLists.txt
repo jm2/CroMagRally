@@ -1,10 +1,45 @@
 cmake_minimum_required(VERSION 3.21)
 
-set(GAME_TARGET				"CroMagRally")
-set(GAME_FULL_NAME			"Cro-Mag Rally")
-set(GAME_VERSION			"3.1.0")
-set(GAME_IDENTIFIER			"io.jor.cromagrally")
+if(POLICY CMP0219)
+	cmake_policy(SET CMP0219 NEW)
+	set(CMAKE_POLICY_DEFAULT_CMP0219 NEW)
+endif()
+
 set(GAME_COPYRIGHT			"© 2000 Pangea Software, Inc., © 2025 Iliyas Jorio.")
+
+# Keep product metadata in a format that CMake, Gradle, release scripts, and packaging
+# tools can all consume without configuring (or modifying) the source tree first.
+set(GAME_VERSION_PROPERTIES "${CMAKE_CURRENT_SOURCE_DIR}/version.properties")
+if(NOT EXISTS "${GAME_VERSION_PROPERTIES}")
+	message(FATAL_ERROR "Missing canonical version file: ${GAME_VERSION_PROPERTIES}")
+endif()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${GAME_VERSION_PROPERTIES}")
+
+function(cmr_read_property property_name output_variable)
+	file(STRINGS "${GAME_VERSION_PROPERTIES}" _property_lines REGEX "^${property_name}=")
+	list(LENGTH _property_lines _property_line_count)
+	if(NOT _property_line_count EQUAL 1)
+		message(FATAL_ERROR "version.properties must contain exactly one ${property_name} entry")
+	endif()
+	list(GET _property_lines 0 _property_line)
+	string(REGEX REPLACE "^[^=]+=" "" _property_value "${_property_line}")
+	if(_property_value STREQUAL "")
+		message(FATAL_ERROR "${property_name} must not be empty in version.properties")
+	endif()
+	set(${output_variable} "${_property_value}" PARENT_SCOPE)
+endfunction()
+
+cmr_read_property(GAME_NAME GAME_TARGET)
+cmr_read_property(GAME_FULL_NAME GAME_FULL_NAME)
+cmr_read_property(GAME_IDENTIFIER GAME_IDENTIFIER)
+cmr_read_property(GAME_VERSION GAME_VERSION)
+cmr_read_property(APPLE_BUILD_NUMBER APPLE_BUILD_NUMBER)
+if(NOT GAME_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+	message(FATAL_ERROR "GAME_VERSION must be a three-part numeric version, got '${GAME_VERSION}'")
+endif()
+if(NOT APPLE_BUILD_NUMBER MATCHES "^[1-9][0-9]*$")
+	message(FATAL_ERROR "APPLE_BUILD_NUMBER must be a positive integer, got '${APPLE_BUILD_NUMBER}'")
+endif()
 
 set(GAME_DATADIR			"${CMAKE_SOURCE_DIR}/Data")
 set(GAME_SRCDIR				"${CMAKE_SOURCE_DIR}/Source")
@@ -28,10 +63,25 @@ project(${GAME_TARGET}
 	VERSION ${GAME_VERSION}
 	LANGUAGES C CXX)
 
-option(BUILD_SDL_FROM_SOURCE "Build SDL from source" OFF)
-option(SDL_STATIC "Static link SDL" OFF)
+option(BUILD_SDL_FROM_SOURCE "Build SDL from the extern/SDL3 submodule" ON)
+set(CMR_SDL_SOURCE_DIR "${CMAKE_SOURCE_DIR}/extern/SDL3" CACHE PATH
+	"Path to the SDL source tree used when BUILD_SDL_FROM_SOURCE is enabled")
+
+set(_sdl_static_default OFF)
+if(APPLE AND BUILD_SDL_FROM_SOURCE)
+	# Source-built SDL is easiest to package as part of an Apple app bundle when linked
+	# statically. Mobile builds require this, and it also removes the desktop build's
+	# dependency on a separately downloaded SDL3.framework.
+	set(_sdl_static_default ON)
+endif()
+option(SDL_STATIC "Static link SDL" ${_sdl_static_default})
+unset(_sdl_static_default)
 
 option(SANITIZE "Build with asan/ubsan" OFF)
+set(CMR_MACOS_CODE_SIGN_IDENTITY "" CACHE STRING
+	"Code-signing identity for macOS release builds; leave empty for unsigned local builds")
+
+include(CTest)
 
 if(WIN32 OR APPLE)
 	# Don't warn
@@ -54,8 +104,8 @@ if(MSVC)
 	add_compile_definitions(UNICODE _UNICODE)
 
 	set_property(DIRECTORY ${CMAKE_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${GAME_TARGET})
-elseif(APPLE)
-	# Let the game (and Pomme) find header files within extern/SDL3.framework
+elseif(APPLE AND NOT BUILD_SDL_FROM_SOURCE)
+	# Let the game (and Pomme) find headers in an explicitly requested prebuilt framework.
 	set(CMAKE_XCODE_ATTRIBUTE_FRAMEWORK_SEARCH_PATHS extern)
 	add_compile_options("-F${CMAKE_SOURCE_DIR}/extern")  # for non-xcode IDEs
 endif()
@@ -78,10 +128,10 @@ endif()
 
 # Android 16 KB page-size support. Google Play requires API-35+ apps to support 16 KB
 # memory pages, and devices already running in 16 KB page mode crash when loading a
-# 4 KB-aligned shared object. NDK r27 still links 4 KB-aligned by default, so force
-# 16 KB ELF segment alignment for every shared object we ship -- the game's
-# libCroMagRally.so and the from-source libSDL3.so. Directory-scoped, so it propagates
-# to the SDL subdirectory added below; a harmless no-op for the static libs.
+# 4 KB-aligned shared object. Keep 16 KB ELF segment alignment explicit for every
+# shared object we ship -- the game's libCroMagRally.so and the from-source libSDL3.so.
+# Directory-scoped, so it propagates to the SDL subdirectory added below; a harmless
+# no-op for the static libs.
 if(ANDROID)
 	add_link_options("-Wl,-z,max-page-size=16384" "-Wl,-z,common-page-size=16384")
 endif()
@@ -91,40 +141,41 @@ endif()
 #------------------------------------------------------------------------------
 
 if(NOT BUILD_SDL_FROM_SOURCE)
-	# If SDL3_DIR wasn't specified, discover if the user put some prebuilt SDL3
-	# package in the 'extern' directory
-	if(NOT DEFINED SDL3_DIR)
-		if(APPLE)
-			set(_sdl3_maybe "${CMAKE_SOURCE_DIR}/extern/SDL3.framework/Resources/CMake")
-		elseif(WIN32)
-			set(_sdl3_maybe "${CMAKE_SOURCE_DIR}/extern/SDL3/cmake")
-		endif()
-	
-		if(DEFINED _sdl3_maybe AND EXISTS "${_sdl3_maybe}")
-			set(SDL3_DIR "${_sdl3_maybe}")
-			message("Looking for SDL3 in: ${_sdl3_maybe}")
-		else()
-			message("Couldn't find pre-built SDL3 package in: ${_sdl3_maybe}")
-		endif()
-		unset(_sdl3_maybe)
+	find_package(SDL3 CONFIG REQUIRED)
+	message("Found external SDL3 package")
+else()
+	# Build the same submodule checkout on every supported platform. Keep the binary
+	# directory stable so packaging scripts never depend on an SDL release number.
+	if(NOT EXISTS "${CMR_SDL_SOURCE_DIR}/CMakeLists.txt")
+		message(FATAL_ERROR
+			"SDL3 source is missing at ${CMR_SDL_SOURCE_DIR}. "
+			"Run: git submodule update --init --recursive")
 	endif()
 
-	find_package(SDL3 CONFIG REQUIRED)
-	message("Found pre-built SDL3")
-else()
-	# Build from source
-	# Force SDL3 to use the vendored source path if not specified
-	if(NOT DEFINED SDL3_DIR OR SDL3_DIR MATCHES "SDL3.framework")
-		set(SDL3_DIR "${CMAKE_SOURCE_DIR}/extern/SDL3-3.2.8")
+	set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
+	set(SDL_TESTS OFF CACHE BOOL "" FORCE)
+	set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
+	set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
+	if(SDL_STATIC)
+		set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+	else()
+		set(SDL_SHARED ON CACHE BOOL "" FORCE)
 	endif()
-	message("Building SDL3 from source: " ${SDL3_DIR})
-	add_subdirectory("${SDL3_DIR}" EXCLUDE_FROM_ALL)
+
+	message("Building SDL3 from source: " ${CMR_SDL_SOURCE_DIR})
+	add_subdirectory("${CMR_SDL_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/extern/SDL3" EXCLUDE_FROM_ALL)
 endif()
 
 #------------------------------------------------------------------------------
 # DEPENDENCIES
 #------------------------------------------------------------------------------
 
+if(NOT DEFINED POMME_BUILD_TESTING)
+	set(POMME_BUILD_TESTING OFF)
+	if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT CMAKE_SYSTEM_NAME STREQUAL "tvOS")
+		set(POMME_BUILD_TESTING ON)
+	endif()
+endif()
 add_subdirectory(extern/Pomme)
 
 if(ANDROID OR CMAKE_SYSTEM_NAME STREQUAL "iOS" OR CMAKE_SYSTEM_NAME STREQUAL "tvOS")
@@ -170,8 +221,14 @@ endif()
 # EXECUTABLE TARGET
 #------------------------------------------------------------------------------
 
-# Write header file containing version info
-configure_file(${GAME_SRCDIR}/Headers/version.h.in ${GAME_SRCDIR}/Headers/version.h)
+# Write version info into the build tree. Configuring must never dirty the source tree
+# or leave build.py reading a header generated by an older configuration.
+set(GAME_GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+file(MAKE_DIRECTORY "${GAME_GENERATED_INCLUDE_DIR}")
+configure_file(
+	${GAME_SRCDIR}/Headers/version.h.in
+	${GAME_GENERATED_INCLUDE_DIR}/version.h
+	@ONLY)
 
 # Glob all source files
 file(GLOB_RECURSE GAME_SOURCES CONFIGURE_DEPENDS ${GAME_SRCDIR}/*.c ${GAME_SRCDIR}/*.cpp ${GAME_SRCDIR}/*.h)
@@ -181,8 +238,13 @@ source_group(TREE ${GAME_SRCDIR} PREFIX "" FILES ${GAME_SOURCES})
 
 if(WIN32)
 	# Windows resource file
-	configure_file(${CMAKE_SOURCE_DIR}/packaging/win32.rc.in ${CMAKE_SOURCE_DIR}/packaging/${GAME_TARGET}.exe.rc)
-	list(APPEND GAME_SOURCES ${CMAKE_SOURCE_DIR}/packaging/${GAME_TARGET}.exe.rc)
+	set(GAME_WINDOWS_RESOURCE "${CMAKE_CURRENT_BINARY_DIR}/${GAME_TARGET}.exe.rc")
+	configure_file(
+		${CMAKE_SOURCE_DIR}/packaging/${GAME_TARGET}.ico
+		${CMAKE_CURRENT_BINARY_DIR}/${GAME_TARGET}.ico
+		COPYONLY)
+	configure_file(${CMAKE_SOURCE_DIR}/packaging/win32.rc.in ${GAME_WINDOWS_RESOURCE} @ONLY)
+	list(APPEND GAME_SOURCES ${GAME_WINDOWS_RESOURCE})
 elseif(APPLE)
 	list(APPEND GAME_SOURCES ${CMAKE_SOURCE_DIR}/packaging/${GAME_TARGET}.icns)
 	set_source_files_properties(${CMAKE_SOURCE_DIR}/packaging/${GAME_TARGET}.icns PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
@@ -194,7 +256,9 @@ else()
 	add_executable(${GAME_TARGET} ${GAME_SOURCES})
 endif()
 
-target_include_directories(${GAME_TARGET} PRIVATE ${GAME_SRCDIR}/Headers)
+target_include_directories(${GAME_TARGET} PRIVATE
+	${GAME_GENERATED_INCLUDE_DIR}
+	${GAME_SRCDIR}/Headers)
 if(ANDROID OR CMAKE_SYSTEM_NAME STREQUAL "iOS" OR CMAKE_SYSTEM_NAME STREQUAL "tvOS")
 	target_include_directories(${GAME_TARGET} PRIVATE extern/gl4es/include)
 endif()
@@ -364,10 +428,10 @@ set_target_properties(${GAME_TARGET} PROPERTIES
 	# Build it as an .app bundle
 	MACOSX_BUNDLE						TRUE
 
-	# Set framework search path to (App bundle)/Contents/Frameworks so the game can use its embedded SDL3.framework
+	# Set framework search path to (App bundle)/Contents/Frameworks for legacy prebuilt-framework builds.
 	XCODE_ATTRIBUTE_LD_RUNPATH_SEARCH_PATHS "@executable_path/../Frameworks"
 
-	# Explicitly turn off code signing, otherwise downloaded app will be quarantined forever
+	# Default Apple targets to no identity. Desktop release signing is configured below.
 	XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY ""
 
 	# Set up Info.plist values
@@ -378,11 +442,6 @@ set_target_properties(${GAME_TARGET} PROPERTIES
 	MACOSX_BUNDLE_BUNDLE_NAME			${GAME_FULL_NAME}		# CFBundleName - user-visible short name for the bundle, up to 15 characters
 	MACOSX_BUNDLE_GUI_IDENTIFIER		${GAME_IDENTIFIER}		# CFBundleIdentifier - unique bundle ID in reverse-DNS format
 
-	# If CODE_SIGN_IDENTITY is NOT empty: tell Xcode to codesign the app properly
-	# Otherwise, if it's empty: explicitly turn off code signing, otherwise downloaded app will be quarantined forever
-	XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY "${CODE_SIGN_IDENTITY}"
-	XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY[variant=Debug] ""		# don't bother signing debug build
-
 	# Bundle ID required for code signing - must match CFBundleIdentifier otherwise xcode will complain
 	XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER ${GAME_IDENTIFIER}
 
@@ -392,8 +451,30 @@ set_target_properties(${GAME_TARGET} PROPERTIES
 	XCODE_ATTRIBUTE_COPY_PHASE_STRIP[variant=Debug]	"NO"		# avoid "skipping copy phase strip" warning while working on Debug config
 )
 
-# Embed SDL3 framework only if not statically linked (must be outside set_target_properties)
-if(NOT SDL_STATIC)
+# Desktop macOS release signing is opt-in. Signed builds use the hardened runtime;
+# unsigned local builds continue to avoid Xcode's implicit/ad-hoc signing behavior.
+if(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT CMAKE_SYSTEM_NAME STREQUAL "tvOS")
+	if(CMR_MACOS_CODE_SIGN_IDENTITY)
+		set_target_properties(${GAME_TARGET} PROPERTIES
+			XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY "${CMR_MACOS_CODE_SIGN_IDENTITY}"
+			XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Manual"
+			XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED "YES"
+			XCODE_ATTRIBUTE_ENABLE_HARDENED_RUNTIME "YES"
+			XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY[variant=Debug] ""
+			XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED[variant=Debug] "NO"
+			XCODE_ATTRIBUTE_ENABLE_HARDENED_RUNTIME[variant=Debug] "NO"
+		)
+	else()
+		set_target_properties(${GAME_TARGET} PROPERTIES
+			XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY ""
+			XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED "NO"
+			XCODE_ATTRIBUTE_ENABLE_HARDENED_RUNTIME "NO"
+		)
+	endif()
+endif()
+
+# A prebuilt Apple framework must be embedded. Source builds are static on Apple.
+if(APPLE AND NOT BUILD_SDL_FROM_SOURCE AND NOT SDL_STATIC)
 	set_target_properties(${GAME_TARGET} PROPERTIES
 		XCODE_EMBED_FRAMEWORKS "extern/SDL3.framework"
 		XCODE_EMBED_FRAMEWORKS_CODE_SIGN_ON_COPY "YES"
@@ -410,17 +491,23 @@ if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
 		XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "AppIcon"
 		XCODE_ATTRIBUTE_INFOPLIST_KEY_UILaunchStoryboardName "LaunchScreen"
 		XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER ${GAME_IDENTIFIER}
+		XCODE_ATTRIBUTE_MARKETING_VERSION ${GAME_VERSION}
+		XCODE_ATTRIBUTE_CURRENT_PROJECT_VERSION ${APPLE_BUILD_NUMBER}
 	)
 	
 	# Add iOS resources to bundle
 	target_sources(${GAME_TARGET} PRIVATE
 		"${CMAKE_SOURCE_DIR}/iOSBuild/CroMagRally/LaunchScreen.storyboard"
 		"${CMAKE_SOURCE_DIR}/iOSBuild/CroMagRally/Assets.xcassets"
+		"${CMAKE_SOURCE_DIR}/LICENSE.md"
+		"${CMAKE_SOURCE_DIR}/THIRD-PARTY-LICENSES.md"
 		"${GAME_DATADIR}"
 	)
 	set_source_files_properties(
 		"${CMAKE_SOURCE_DIR}/iOSBuild/CroMagRally/LaunchScreen.storyboard"
 		"${CMAKE_SOURCE_DIR}/iOSBuild/CroMagRally/Assets.xcassets"
+		"${CMAKE_SOURCE_DIR}/LICENSE.md"
+		"${CMAKE_SOURCE_DIR}/THIRD-PARTY-LICENSES.md"
 		"${GAME_DATADIR}"
 		PROPERTIES MACOSX_PACKAGE_LOCATION "Resources"
 	)
@@ -435,17 +522,23 @@ if(CMAKE_SYSTEM_NAME STREQUAL "tvOS")
 		XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "App Icon & Top Shelf Image"
 		XCODE_ATTRIBUTE_INFOPLIST_KEY_UILaunchStoryboardName "LaunchScreen"
 		XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER ${GAME_IDENTIFIER}
+		XCODE_ATTRIBUTE_MARKETING_VERSION ${GAME_VERSION}
+		XCODE_ATTRIBUTE_CURRENT_PROJECT_VERSION ${APPLE_BUILD_NUMBER}
 	)
 	
 	# Add tvOS resources to bundle
 	target_sources(${GAME_TARGET} PRIVATE
 		"${CMAKE_SOURCE_DIR}/tvOSBuild/CroMagRally/LaunchScreen.storyboard"
 		"${CMAKE_SOURCE_DIR}/tvOSBuild/CroMagRally/Assets.xcassets"
+		"${CMAKE_SOURCE_DIR}/LICENSE.md"
+		"${CMAKE_SOURCE_DIR}/THIRD-PARTY-LICENSES.md"
 		"${GAME_DATADIR}"
 	)
 	set_source_files_properties(
 		"${CMAKE_SOURCE_DIR}/tvOSBuild/CroMagRally/LaunchScreen.storyboard"
 		"${CMAKE_SOURCE_DIR}/tvOSBuild/CroMagRally/Assets.xcassets"
+		"${CMAKE_SOURCE_DIR}/LICENSE.md"
+		"${CMAKE_SOURCE_DIR}/THIRD-PARTY-LICENSES.md"
 		"${GAME_DATADIR}"
 		PROPERTIES MACOSX_PACKAGE_LOCATION "Resources"
 	)
@@ -474,13 +567,16 @@ endif()
 # TESTS
 #------------------------------------------------------------------------------
 
-include(CTest)
 if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT CMAKE_SYSTEM_NAME STREQUAL "tvOS")
 	add_executable(CroMagRallyValidationTests
 		Tests/ValidationTests.c
 		Source/Network/NetValidation.c
+		Source/System/DeterministicMath.c
+		Source/System/UserDataValidation.c
 		Source/System/TextUtils.c)
-	target_include_directories(CroMagRallyValidationTests PRIVATE ${GAME_SRCDIR}/Headers)
+	target_include_directories(CroMagRallyValidationTests PRIVATE
+		${GAME_GENERATED_INCLUDE_DIR}
+		${GAME_SRCDIR}/Headers)
 	if(MSVC)
 		target_compile_definitions(CroMagRallyValidationTests PRIVATE
 			WIN32_LEAN_AND_MEAN
@@ -498,6 +594,18 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 		target_link_libraries(CroMagRallyValidationTests PRIVATE m)
 	endif()
 	add_test(NAME validation COMMAND CroMagRallyValidationTests)
+	find_package(Python3 REQUIRED COMPONENTS Interpreter)
+	add_test(
+		NAME version_metadata
+		COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/Tests/VersionMetadataTests.py ${CMAKE_SOURCE_DIR})
+	if(WIN32)
+		# Keep the runtime-DLL staging hook beside the executable it belongs to so
+		# target existence and directory scope are unambiguous at configure time.
+		add_custom_command(TARGET CroMagRallyValidationTests POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E copy_if_different
+				$<TARGET_RUNTIME_DLLS:CroMagRallyValidationTests> $<TARGET_FILE_DIR:CroMagRallyValidationTests>
+			COMMAND_EXPAND_LISTS)
+	endif()
 endif()
 
 # macOS-specific post-build (skip for iOS/tvOS)
@@ -517,10 +625,12 @@ endif()
 
 # Windows-specific libraries
 if(WIN32)
-	# Copy SDL3 DLLs to output folder on Windows for convenience
+	# Source-built SDL lives in a subdirectory. Put its runtime DLL beside every
+	# executable so local runs, CTest, and packaging all use the same layout.
 	add_custom_command(TARGET ${GAME_TARGET} POST_BUILD
-		COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_RUNTIME_DLLS:${GAME_TARGET}> $<TARGET_FILE_DIR:${GAME_TARGET}>)
-
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			$<TARGET_RUNTIME_DLLS:${GAME_TARGET}> $<TARGET_FILE_DIR:${GAME_TARGET}>
+		COMMAND_EXPAND_LISTS)
 	# When installing (cmake --install), copy Visual Studio redistributable DLLs to install location
 	include(InstallRequiredSystemLibraries)
 endif()
@@ -538,9 +648,9 @@ configure_file(${CMAKE_SOURCE_DIR}/packaging/ReadMe.txt.in ${CMAKE_CURRENT_BINAR
 option(CMR_INSTALL "Generate FHS install rules + deb/rpm (CPack) packaging" OFF)
 
 # Copy SDL3 into the package's own private libdir. ON for self-contained packages that
-# build SDL from source (deb/rpm bundle the pinned SDL 3.2.8). Turn OFF when a system
-# SDL3 is used -- Arch ships 'sdl3'; Flatpak's SDL3 module already lives in /app/lib --
-# so we never ship a stray copy of a library the platform already provides.
+# build the SDL submodule from source, including the official Arch package. Turn it OFF
+# only when SDL is already installed into the package runtime (as Flatpak does) or when a
+# third-party packager explicitly opts into a system SDL package.
 option(CMR_BUNDLE_SDL "Bundle SDL3 into the package's private libdir" ON)
 
 if(CMR_INSTALL)
@@ -553,8 +663,9 @@ if(CMR_INSTALL)
 	# the $ORIGIN rpath makes the lib-vs-lib64 distinction irrelevant for the private payload.
 	set(CMR_PRIVATE_LIBDIR "lib/cromagrally")
 
-	# The installed binary finds its sibling/bundled SDL via $ORIGIN; for system-SDL builds
-	# (Arch/Flatpak) $ORIGIN is harmless and the loader falls through to the standard paths.
+	# The installed binary finds its sibling/bundled SDL via $ORIGIN. For an explicitly
+	# selected system-SDL build, $ORIGIN is harmless and the loader falls through to the
+	# standard paths.
 	set_target_properties(${GAME_TARGET} PROPERTIES
 		INSTALL_RPATH "$ORIGIN"
 		INSTALL_RPATH_USE_LINK_PATH OFF		# don't bake the CI's from-source SDL path into the binary
@@ -563,10 +674,13 @@ if(CMR_INSTALL)
 	# Executable (arch-dependent payload)
 	install(TARGETS ${GAME_TARGET} RUNTIME DESTINATION ${CMR_PRIVATE_LIBDIR})
 
-	# Bundled SDL3 (self-contained packages only). SDL3::SDL3 is an alias/interface that
-	# installs nothing -- the real shared imported target is SDL3::SDL3-shared. Glob its own
-	# libdir so the full libSDL3.so.0.x.x <- libSDL3.so.0 <- libSDL3.so symlink chain ships.
-	if(CMR_BUNDLE_SDL AND TARGET SDL3::SDL3-shared)
+	# Bundled SDL3 (self-contained packages only). A source build exposes the real
+	# SDL3-shared target; a system package exposes an imported SDL3::SDL3-shared target.
+	if(CMR_BUNDLE_SDL AND TARGET SDL3-shared)
+		install(TARGETS SDL3-shared
+			LIBRARY DESTINATION ${CMR_PRIVATE_LIBDIR}
+			RUNTIME DESTINATION ${CMR_PRIVATE_LIBDIR})
+	elseif(CMR_BUNDLE_SDL AND TARGET SDL3::SDL3-shared)
 		set(_sdl_so "")
 		get_target_property(_sdl_cfgs SDL3::SDL3-shared IMPORTED_CONFIGURATIONS)
 		if(_sdl_cfgs)
@@ -617,10 +731,22 @@ if(CMR_INSTALL)
 	install(FILES "${CMAKE_SOURCE_DIR}/packaging/${GAME_IDENTIFIER}-alternateicon.png"
 		DESTINATION share/icons/hicolor/512x512/apps RENAME "${GAME_IDENTIFIER}.png")
 
-	# Docs + license
+	# Docs + licenses. Debian Policy requires a package copyright file under
+	# /usr/share/doc/<package>; generate one containing both the primary license and every
+	# bundled dependency notice. Keep separate copies under /usr/share/licenses for Arch
+	# and for packagers that expose that convention.
+	file(READ "${CMAKE_SOURCE_DIR}/LICENSE.md" _cmr_primary_license)
+	file(READ "${CMAKE_SOURCE_DIR}/THIRD-PARTY-LICENSES.md" _cmr_third_party_licenses)
+	file(GENERATE
+		OUTPUT "${CMAKE_BINARY_DIR}/cromagrally-copyright"
+		CONTENT "Cro-Mag Rally license and copyright notices\n\n===== Primary license =====\n\n${_cmr_primary_license}\n\n===== Third-party notices =====\n\n${_cmr_third_party_licenses}\n")
 	install(FILES "${CMAKE_SOURCE_DIR}/CHANGELOG.md" "${CMAKE_SOURCE_DIR}/README.md"
 		DESTINATION share/doc/cromagrally)
-	install(FILES "${CMAKE_SOURCE_DIR}/LICENSE.md"
+	install(FILES "${CMAKE_BINARY_DIR}/cromagrally-copyright"
+		DESTINATION share/doc/cromagrally RENAME copyright)
+	install(FILES
+		"${CMAKE_SOURCE_DIR}/LICENSE.md"
+		"${CMAKE_SOURCE_DIR}/THIRD-PARTY-LICENSES.md"
 		DESTINATION share/licenses/cromagrally)		# Arch convention; harmless elsewhere
 
 	#--------------------------------------------------------------------------
@@ -629,8 +755,8 @@ if(CMR_INSTALL)
 	set(CPACK_PACKAGE_NAME "cromagrally")
 	set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 	set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "The wildest racing game since man invented the wheel!")
-	set(CPACK_PACKAGE_VENDOR "Pangea Software, Inc. / Iliyas Jorio")
-	set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/jorio/CroMagRally")
+	set(CPACK_PACKAGE_VENDOR "Pangea Software, Inc. / Cro-Mag Rally contributors")
+	set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/jm2/CroMagRally")
 	set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE.md")
 	set(CPACK_STRIP_FILES ON)
 	set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
@@ -649,14 +775,15 @@ if(CMR_INSTALL)
 	# CRITICAL: dpkg-shlibdeps would abort generation on the private, non-system libSDL3.so.0,
 	# so it's off and we declare runtime deps by hand.
 	set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS OFF)
-	set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6, libstdc++6, libgcc-s1, libgl1")
+	set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6, libstdc++6, libgcc-s1, libgl1, libglx0, libopengl0")
 	# SDL dlopen()s these at runtime (not in DT_NEEDED), and only one of X11/Wayland is needed
 	# on any given host, so they are Recommends rather than hard Depends.
 	set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "libx11-6, libxext6, libxcursor1, libxi6, libxrandr2, libxfixes3, libwayland-client0, libxkbcommon0, libasound2 | libasound2t64, libpulse0")
 
 	# ---- RPM ----
 	set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
-	set(CPACK_RPM_PACKAGE_LICENSE "CC-BY-NC-SA-4.0")
+	set(CPACK_RPM_PACKAGE_LICENSE
+		"CC-BY-NC-SA-4.0 AND Zlib AND MIT AND LGPL-2.1-or-later AND BSD-3-Clause AND BSL-1.0 AND CC0-1.0 AND Apache-2.0 AND SunPro")
 	set(CPACK_RPM_PACKAGE_GROUP "Amusements/Games")
 	set(CPACK_RPM_PACKAGE_URL "${CPACK_PACKAGE_HOMEPAGE_URL}")
 	# Keep autoreqprov ON: the bundled libSDL3's self-Provides cancels the exe's self-Require,

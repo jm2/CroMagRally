@@ -234,30 +234,17 @@ void InitMyRandomSeed(void)
 	InitSimRNG(0x2a80ce30);
 }
 
+/**************** DETERMINISTIC SIM EVENT FLOAT ****************/
 
-
-/**************** STATIC CHAOS *******************/
-//
-// Generates a deterministic float [0..1] based on inputs NOT the global RNG state.
-// Safe to use in conditional physics logic without causing network desync.
-//
-float ChaoticFloat(float seedVal, int modifier)
+float DeterministicSimEventFloat(uint32_t eventTag, uint32_t entityKey, uint32_t sampleIndex)
 {
-	// Reinterpret the IEEE-754 bit pattern rather than value-truncating the cast. Casting a
-	// negative float to uint32_t is UB (C11 6.3.1.4) and diverges across targets (AArch64 fcvtzu
-	// saturates to 0, x86 cvttss2si wraps), which desyncs peers when seedVal is a negative
-	// (off-map) coordinate. memcpy of the bit pattern is well-defined for all finite inputs and
-	// identical across all targets.
-	uint32_t h;
-	memcpy(&h, &seedVal, sizeof h);
-	h ^= gSimulationFrame; 			// Time varying
-	h += modifier;
-	h *= 0x85ebca6b;				
-	h ^= h >> 13;
-	h *= 0xc2b2ae35;
-	h ^= h >> 16;
-	return (h & 0xFFFFFF) * 0x1.0p-24f;
+	// gSimulationFrame may drift in variable-step network play. Both host and client increment
+	// gHostSendCounter before stepping the matching control frame, making counter-1 authoritative.
+	uint32_t frame = DeterministicFrameKey(gNetGameInProgress, gHostSendCounter, gSimulationFrame);
+	return DeterministicEventFloat(frame, eventTag, entityKey, sampleIndex);
 }
+
+
 
 /**************** POSITIVE MODULO *******************/
 
@@ -405,22 +392,33 @@ void SafeDisposePtr(void *ptr)
 
 /******************* VERIFY SYSTEM ******************/
 
-void InitPrefsFolder(bool createIt)
+OSErr InitPrefsFolder(bool createIt)
 {
 OSErr iErr;
 long createdDirID;
 
 			/* CHECK PREFERENCES FOLDER */
 
-	iErr = FindFolder(kOnSystemDisk,kPreferencesFolderType,kDontCreateFolder,		// locate the folder
+	iErr = FindFolder(kOnSystemDisk,kPreferencesFolderType,
+					createIt ? kCreateFolder : kDontCreateFolder,		// locate (and, for saves, create) the folder
 					&gPrefsFolderVRefNum,&gPrefsFolderDirID);
 	if (iErr != noErr)
-		DoAlert("Warning: Cannot locate the Preferences folder.");
+	{
+		SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Cannot locate the Preferences folder (error %d)", iErr);
+		return iErr;
+	}
 
 	if (createIt)
 	{
 		iErr = DirCreate(gPrefsFolderVRefNum, gPrefsFolderDirID, PREFS_FOLDER_NAME, &createdDirID);		// make folder in there
+		if (iErr != noErr)
+		{
+			SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Cannot create the game preferences folder (error %d)", iErr);
+			return iErr;
+		}
 	}
+
+	return noErr;
 }
 
 
@@ -443,10 +441,14 @@ unsigned long deltaTime;
 	Microseconds(&currTime);
 	deltaTime = currTime.lo - time.lo;
 
-	gFramesPerSecond = 1000000.0f / deltaTime;
+	gFramesPerSecond = deltaTime == 0
+		? MAX_GAME_FPS
+		: 1000000.0f / deltaTime;
 
 	if (gFramesPerSecond < DEFAULT_FPS)			// (avoid divide by 0's later)
 		gFramesPerSecond = DEFAULT_FPS;
+	else if (gFramesPerSecond > MAX_GAME_FPS)	// keep network timing inside its validated wire range
+		gFramesPerSecond = MAX_GAME_FPS;
 
 #if _DEBUG
 	if (GetKeyState(SDL_SCANCODE_KP_PLUS))		// debug speed-up with KP_PLUS

@@ -1,18 +1,9 @@
 name: Make Release Builds
 
-# Build every shippable platform for a release.
-#  - release:published  -> builds run automatically when you publish a GitHub Release
-#                          (artifacts are uploaded to the run; download + attach to the release).
-#  - workflow_dispatch  -> run manually from the Actions tab for test/smoke builds.
-# Triggers:
-#  - push of a v* tag (e.g. v3.1.0) -> builds run automatically (the usual release path).
-#  - release:published              -> also builds (e.g. if you publish a Release from the tag).
-#  - workflow_dispatch              -> run manually from the Actions tab for test/smoke builds.
-# Note: pushing a v* tag AND publishing a Release from that same tag will build twice.
+# Published releases are the single production trigger. Manual dispatches are smoke builds:
+# desktop/mobile artifacts that require credentials are explicitly labeled unsigned and are
+# never attached to a GitHub Release.
 on:
-  push:
-    tags:
-      - 'v*'
   release:
     types: [published]
   workflow_dispatch:
@@ -21,9 +12,73 @@ permissions:
   contents: read
 
 jobs:
+  release_metadata:
+    name: Validate release metadata
+    runs-on: ubuntu-24.04
+    outputs:
+      game_version: ${{ steps.version.outputs.game_version }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: Read canonical version
+        id: version
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^GAME_VERSION=//p' version.properties)
+          test -n "$version"
+          test "$(printf '%s\n' "$version" | wc -l)" -eq 1
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "game_version=$version" >> "$GITHUB_OUTPUT"
+      - name: Require the release tag to match the source version
+        if: ${{ github.event_name == 'release' }}
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          GAME_VERSION: ${{ steps.version.outputs.game_version }}
+        run: test "$RELEASE_TAG" = "v$GAME_VERSION"
+
+  build-source:
+    name: Source archive (including submodules)
+    needs: release_metadata
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with: {submodules: 'recursive'}
+      - name: Create reproducible source archive
+        env:
+          GAME_VERSION: ${{ needs.release_metadata.outputs.game_version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          prefix="CroMagRally-${GAME_VERSION}-source"
+          commit_time=$(git log -1 --format=%ct)
+          {
+            printf '%s  .\n' "$(git rev-parse HEAD)"
+            git submodule status --recursive | sed 's/^.//'
+          } > SUBMODULES.txt
+          {
+            git ls-files --recurse-submodules -z
+            printf 'SUBMODULES.txt\0'
+          } \
+            | tar --null --files-from=- --sort=name --owner=0 --group=0 --numeric-owner \
+                --mtime="@$commit_time" --transform="s,^,$prefix/," -cf - \
+            | gzip -9n > "dist/$prefix.tar.gz"
+          tar -tzf "dist/$prefix.tar.gz" > "$RUNNER_TEMP/source-files.txt"
+          grep -Fxq "$prefix/extern/SDL3/CMakeLists.txt" "$RUNNER_TEMP/source-files.txt"
+          grep -Fxq "$prefix/extern/Pomme/CMakeLists.txt" "$RUNNER_TEMP/source-files.txt"
+          grep -Fxq "$prefix/extern/gl4es/CMakeLists.txt" "$RUNNER_TEMP/source-files.txt"
+          grep -Fxq "$prefix/LICENSES/GPL-2.0-only.txt" "$RUNNER_TEMP/source-files.txt"
+          grep -Fxq "$prefix/LICENSES/LGPL-2.0-or-later.txt" "$RUNNER_TEMP/source-files.txt"
+          grep -Fxq "$prefix/SUBMODULES.txt" "$RUNNER_TEMP/source-files.txt"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: CroMagRally-${{ needs.release_metadata.outputs.game_version }}-source
+          path: dist/*.tar.gz
+          compression-level: 0
+          if-no-files-found: error
+
   build-linux-appimage:
+    needs: release_metadata
     runs-on: ${{ matrix.platform.os }}
-    timeout-minutes: 5
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -31,7 +86,7 @@ jobs:
           - { name: x86_64, os: ubuntu-22.04 }
           - { name: aarch64, os: ubuntu-22.04-arm }
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with: {submodules: 'recursive'}
       - name: Get build dependencies from APT
         # cf. https://github.com/libsdl-org/SDL/blob/main/docs/README-linux.md
@@ -40,7 +95,7 @@ jobs:
           sudo apt update
           sudo apt install -y libasound2-dev libpulse-dev \
             libaudio-dev libjack-dev libsndio-dev libx11-dev libxext-dev \
-            libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev \
+            libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev \
             libxkbcommon-dev libdrm-dev libgbm-dev libgl1-mesa-dev libgles2-mesa-dev \
             libegl1-mesa-dev libdbus-1-dev libibus-1.0-dev libudev-dev fcitx-libs-dev \
             libpipewire-0.3-dev libwayland-dev libdecor-0-dev liburing-dev \
@@ -50,17 +105,19 @@ jobs:
       - run: python3 build.py --configure
       - run: python3 build.py --build
       - run: python3 build.py --package
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{env.ARTIFACT_NAME}}
           path: dist/
           compression-level: 0
+          if-no-files-found: error
 
   build-windows:
+    needs: release_metadata
     runs-on: windows-2022
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with: {submodules: 'recursive'}
       - run: |
           $ARTIFACT_NAME = python3 build.py --print-artifact-name
@@ -69,19 +126,21 @@ jobs:
       - run: python3 build.py --configure -G 'Visual Studio 17 2022'
       - run: python3 build.py --build
       - run: python3 build.py --package
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{env.ARTIFACT_NAME}}
           path: dist/
           compression-level: 0
+          if-no-files-found: error
 
   build-windows-arm64:
+    needs: release_metadata
     # Near-exact clone of build-windows; only runs-on changes (windows-2022 -> windows-11-arm)
     # and `-A ARM64` is passed explicitly so the artifact name + VS platform are deterministic.
     runs-on: windows-11-arm
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with: {submodules: 'recursive'}
       - run: |
           $ARTIFACT_NAME = python3 build.py --print-artifact-name -A ARM64
@@ -90,137 +149,211 @@ jobs:
       - run: python3 build.py --configure -G 'Visual Studio 17 2022' -A ARM64
       - run: python3 build.py --build
       - run: python3 build.py --package
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{env.ARTIFACT_NAME}}
           path: dist/
           compression-level: 0
+          if-no-files-found: error
 
   build-macos:
-    runs-on: macos-latest  # as of January 2025, this still supports the macOS 10.13 deployment target
-    timeout-minutes: 15
-    env:
-      # Surfaced at job level so each signing step's `if:` can detect whether the Apple
-      # secrets are configured (a step's own step-level env is NOT visible to its `if:`).
-      # When they're absent -- e.g. on a fork without the certs -- the job still builds and
-      # uploads an UNSIGNED DMG instead of failing on the very first step.
-      CODE_SIGN_IDENTITY: ${{ secrets.APPLE_CODE_SIGN_IDENTITY }}
-      APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
+    needs: release_metadata
+    runs-on: macos-latest
+    timeout-minutes: 30
     steps:
+      - name: Require complete macOS signing configuration for a release
+        if: ${{ github.event_name == 'release' }}
+        env:
+          CODE_SIGN_IDENTITY: ${{ secrets.APPLE_CODE_SIGN_IDENTITY }}
+          APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
+          APPLE_NOTARY_USERNAME: ${{ secrets.APPLE_NOTARIZATION_USERNAME }}
+          APPLE_NOTARY_PASSWORD: ${{ secrets.APPLE_NOTARIZATION_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_DEVELOPMENT_TEAM }}
+        run: |
+          set -euo pipefail
+          for name in CODE_SIGN_IDENTITY APPLE_CERT_P12_BASE64 APPLE_CERT_PASSWORD APPLE_NOTARY_USERNAME APPLE_NOTARY_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing required macOS release secret: $name"
+              exit 1
+            fi
+          done
       - name: Import code-signing certificate
-        if: ${{ env.APPLE_CERT_P12_BASE64 != '' }}
-        uses: apple-actions/import-codesign-certs@v7
+        if: ${{ github.event_name == 'release' }}
+        uses: apple-actions/import-codesign-certs@5142e029c445c10ffc7149d172e540235a065466 # v7
         with:
           p12-file-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
           p12-password: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with: {submodules: 'recursive'}
       - name: Get artifact name
         run: echo "ARTIFACT_NAME=$(python3 build.py --print-artifact-name)" >> $GITHUB_ENV
       - run: python3 build.py --dependencies
-      - run: python3 build.py --configure
+      - name: Configure signed release
+        if: ${{ github.event_name == 'release' }}
+        env:
+          CODE_SIGN_IDENTITY: ${{ secrets.APPLE_CODE_SIGN_IDENTITY }}
+        run: python3 build.py --configure --macos-signing-identity "$CODE_SIGN_IDENTITY"
+      - name: Configure unsigned smoke build
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: python3 build.py --configure
       - run: python3 build.py --build
-      - run: python3 build.py --package
-      - name: Notarize
-        if: ${{ env.APPLE_CERT_P12_BASE64 != '' }}
+      - name: Verify the signed application
+        if: ${{ github.event_name == 'release' }}
         run: |
-          xcrun notarytool store-credentials GameNotarizationProfile --apple-id ${{ secrets.APPLE_NOTARIZATION_USERNAME }} --password ${{ secrets.APPLE_NOTARIZATION_PASSWORD }} --team-id ${{ secrets.APPLE_DEVELOPMENT_TEAM }}
+          set -euo pipefail
+          app=$(find build -type d -name 'CroMagRally.app' -print -quit)
+          test -n "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+      - run: python3 build.py --package
+      - name: Sign and verify the disk image
+        if: ${{ github.event_name == 'release' }}
+        env:
+          CODE_SIGN_IDENTITY: ${{ secrets.APPLE_CODE_SIGN_IDENTITY }}
+        run: |
+          set -euo pipefail
+          codesign --force --sign "$CODE_SIGN_IDENTITY" --timestamp "dist/$ARTIFACT_NAME"
+          codesign --verify --strict --verbose=2 "dist/$ARTIFACT_NAME"
+      - name: Label the manual smoke artifact as unsigned
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          set -euo pipefail
+          unsigned="${ARTIFACT_NAME%.dmg}-unsigned.dmg"
+          mv "dist/$ARTIFACT_NAME" "dist/$unsigned"
+          echo "ARTIFACT_NAME=$unsigned" >> "$GITHUB_ENV"
+      - name: Notarize
+        if: ${{ github.event_name == 'release' }}
+        env:
+          APPLE_NOTARY_USERNAME: ${{ secrets.APPLE_NOTARIZATION_USERNAME }}
+          APPLE_NOTARY_PASSWORD: ${{ secrets.APPLE_NOTARIZATION_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_DEVELOPMENT_TEAM }}
+        run: |
+          xcrun notarytool store-credentials GameNotarizationProfile --apple-id "$APPLE_NOTARY_USERNAME" --password "$APPLE_NOTARY_PASSWORD" --team-id "$APPLE_TEAM_ID"
           xcrun notarytool submit "dist/$ARTIFACT_NAME" --keychain-profile GameNotarizationProfile --wait
-      - name: Staple
-        if: ${{ env.APPLE_CERT_P12_BASE64 != '' }}
-        run: xcrun stapler staple "dist/$ARTIFACT_NAME"
-      - uses: actions/upload-artifact@v7
+      - name: Staple and validate notarization
+        if: ${{ github.event_name == 'release' }}
+        run: |
+          xcrun stapler staple "dist/$ARTIFACT_NAME"
+          xcrun stapler validate "dist/$ARTIFACT_NAME"
+          spctl --assess --type open --context context:primary-signature --verbose=2 "dist/$ARTIFACT_NAME"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{env.ARTIFACT_NAME}}
           path: dist/
           compression-level: 0
+          if-no-files-found: error
 
   build-android:
+    needs: release_metadata
     runs-on: ubuntu-latest
     timeout-minutes: 30   # SDL3 is compiled from source for TWO ABIs (x86_64 + arm64-v8a)
-    env:
-      # Surfaced at job level so the signing step's `if:` can detect whether a
-      # keystore secret is configured (step-level env is not visible to its own if:).
-      ANDROID_SIGNING_KEY: ${{ secrets.ANDROID_SIGNING_KEY }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with: {submodules: 'recursive'}   # extern/Pomme + extern/gl4es are required by CMakeLists
 
       - name: Extract game version
-        run: echo "GAME_VERSION=$(grep -m1 'set(GAME_VERSION' CMakeLists.txt | sed -E 's/.*\"([^\"]+)\".*/\1/')" >> "$GITHUB_ENV"
+        run: echo "GAME_VERSION=${{ needs.release_metadata.outputs.game_version }}" >> "$GITHUB_ENV"
 
       - name: Set up JDK 17   # AGP 9.0.0 / Gradle 9.2.1 require JDK 17+
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v4
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
 
       - name: Install SDK platform, build-tools and NDK
         run: |
-          sdkmanager --install "platforms;android-35" "build-tools;37.0.0" "ndk;27.2.12479018"
-          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          sdkmanager --install "platforms;android-35" "build-tools;37.0.0" "ndk;29.0.14206865"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/29.0.14206865" >> "$GITHUB_ENV"
 
-      - name: Build native libs + assets (CMake/NDK, Release)
-        # build_android.sh: fetches & sha256-verifies SDL3 3.2.8, builds libCroMagRally.so +
-        # libSDL3.so for x86_64 and arm64-v8a (CMAKE_BUILD_TYPE=Release, android-24), copies
-        # them into AndroidBuild/.../jniLibs, copies Data/ into assets, then assembleDebug.
+      - name: Require complete Android signing configuration for a release
+        if: ${{ github.event_name == 'release' }}
+        env:
+          ANDROID_SIGNING_KEY: ${{ secrets.ANDROID_SIGNING_KEY }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in ANDROID_SIGNING_KEY ANDROID_KEY_ALIAS ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing required Android release secret: $name"
+              exit 1
+            fi
+          done
+
+      - name: Build native libs, assets, and release APK
+        env:
+          GRADLE_TASK: assembleRelease
         run: ./build_android.sh
 
-      - name: Assemble release APK (unsigned)
-        run: ./gradlew assembleRelease
-        working-directory: AndroidBuild
-
-      - name: Sign release APK
-        id: sign_apk
-        # Only runs when a keystore secret is configured; otherwise the job still
-        # succeeds and uploads the UNSIGNED app-release-unsigned.apk.
-        if: ${{ env.ANDROID_SIGNING_KEY != '' }}
-        uses: r0adkll/sign-android-release@v1
-        with:
-          releaseDirectory: AndroidBuild/app/build/outputs/apk/release
-          signingKeyBase64: ${{ secrets.ANDROID_SIGNING_KEY }}
-          alias: ${{ secrets.ANDROID_KEY_ALIAS }}
-          keyStorePassword: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          keyPassword: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      - name: Sign and verify release APK
+        if: ${{ github.event_name == 'release' }}
         env:
-          BUILD_TOOLS_VERSION: "37.0.0"
-
-      - name: Stage release APK with a versioned name
-        # Prefer a signed APK if the keystore secret produced one; otherwise ship the
-        # unsigned APK. Either way, normalize to a single, correctly-versioned asset
-        # (the upload name was previously hard-coded to a stale 3.0.2).
+          ANDROID_SIGNING_KEY: ${{ secrets.ANDROID_SIGNING_KEY }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          dir=AndroidBuild/app/build/outputs/apk/release
-          apk=$(ls "$dir"/*signed*.apk 2>/dev/null | head -n1 || true)
-          if [ -z "$apk" ]; then apk=$(ls "$dir"/*.apk | head -n1); fi
-          cp "$apk" "CroMagRally-${GAME_VERSION}-android.apk"
-          echo "Staged $apk -> CroMagRally-${GAME_VERSION}-android.apk"
+          set -euo pipefail
+          unsigned=AndroidBuild/app/build/outputs/apk/release/app-release-unsigned.apk
+          aligned="$RUNNER_TEMP/CroMagRally-aligned.apk"
+          output="CroMagRally-${GAME_VERSION}-android.apk"
+          keystore="$RUNNER_TEMP/CroMagRally-release.jks"
+          test -f "$unsigned"
+          printf '%s' "$ANDROID_SIGNING_KEY" | base64 --decode > "$keystore"
+          build_tools="$ANDROID_SDK_ROOT/build-tools/37.0.0"
+          "$build_tools/zipalign" -f -P 16 4 "$unsigned" "$aligned"
+          "$build_tools/apksigner" sign \
+            --ks "$keystore" \
+            --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --ks-pass env:ANDROID_KEYSTORE_PASSWORD \
+            --key-pass env:ANDROID_KEY_PASSWORD \
+            --out "$output" \
+            "$aligned"
+          "$build_tools/zipalign" -c -P 16 -v 4 "$output"
+          "$build_tools/apksigner" verify --verbose --print-certs "$output"
+          rm -f "$keystore" "$aligned"
+          echo "ANDROID_ARTIFACT=$output" >> "$GITHUB_ENV"
+          echo "ANDROID_ARTIFACT_NAME=CroMagRally-${GAME_VERSION}-android" >> "$GITHUB_ENV"
 
-      - uses: actions/upload-artifact@v7
+      - name: Stage unsigned manual smoke APK
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          set -euo pipefail
+          source=AndroidBuild/app/build/outputs/apk/release/app-release-unsigned.apk
+          output="CroMagRally-${GAME_VERSION}-android-unsigned.apk"
+          test -f "$source"
+          cp "$source" "$output"
+          echo "ANDROID_ARTIFACT=$output" >> "$GITHUB_ENV"
+          echo "ANDROID_ARTIFACT_NAME=CroMagRally-${GAME_VERSION}-android-unsigned" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: CroMagRally-${{ env.GAME_VERSION }}-android
-          path: CroMagRally-${{ env.GAME_VERSION }}-android.apk
+          name: ${{ env.ANDROID_ARTIFACT_NAME }}
+          path: ${{ env.ANDROID_ARTIFACT }}
           compression-level: 0
+          if-no-files-found: error
 
   build-ios:
+    needs: release_metadata
     runs-on: macos-latest          # macOS 14/15 image: Xcode 15/16 + iOS SDK + CMake preinstalled
     timeout-minutes: 30            # SDL3-static-from-source + game via Xcode can take ~15-25 min
     steps:
-      - uses: actions/checkout@v6
-        with: {submodules: 'recursive'}   # extern/Pomme + extern/gl4es (gl4es required for iOS GL ES)
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with: {submodules: 'recursive'}   # extern/Pomme + extern/SDL3 + extern/gl4es
 
-      - uses: maxim-lobanov/setup-xcode@v1   # optional: pin Xcode (README wants 15+)
+      - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1; optional pin
         with:
           xcode-version: latest-stable
 
       - name: Extract game version
-        run: echo "GAME_VERSION=$(grep -m1 'set(GAME_VERSION' CMakeLists.txt | sed -E 's/.*\"([^\"]+)\".*/\1/')" >> "$GITHUB_ENV"
+        run: echo "GAME_VERSION=${{ needs.release_metadata.outputs.game_version }}" >> "$GITHUB_ENV"
 
-      # Single source of truth: run the same script developers use. It pins SDL
-      # release-3.2.8, builds the unsigned device .app (CODE_SIGNING_ALLOWED=NO keeps a
+      # Single source of truth: run the same script developers use. It builds the
+      # extern/SDL3 submodule and unsigned device .app (CODE_SIGNING_ALLOWED=NO keeps a
       # cert-less runner green), and packages the sideloadable unsigned .ipa.
       - name: Build + package unsigned iOS .ipa
         env:
@@ -228,32 +361,34 @@ jobs:
           PACKAGE: "1"
         run: ./build_ios.sh device
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: CroMagRally-${{ env.GAME_VERSION }}-ios-unsigned
           path: CroMagRally-${{ env.GAME_VERSION }}-ios-unsigned.ipa
           compression-level: 0
+          if-no-files-found: error
 
   build-tvos:
+    needs: release_metadata
     name: tvOS (Apple TV)
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with: {submodules: 'recursive'}
 
       - name: Extract game version
-        run: echo "GAME_VERSION=$(grep -m1 'set(GAME_VERSION' CMakeLists.txt | sed -E 's/.*\"([^\"]+)\".*/\1/')" >> "$GITHUB_ENV"
+        run: echo "GAME_VERSION=${{ needs.release_metadata.outputs.game_version }}" >> "$GITHUB_ENV"
 
       # macos-latest already includes a recent Xcode with the tvOS SDK + simulators.
       # Pin only if you need reproducibility across runner image updates.
       - name: Select Xcode
-        uses: maxim-lobanov/setup-xcode@v1
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:
           xcode-version: latest-stable
 
-      # Single source of truth: run the same script developers use. It pins SDL
-      # release-3.2.8, builds the unsigned Apple TV .app (CODE_SIGNING_ALLOWED=NO), and
+      # Single source of truth: run the same script developers use. It builds the
+      # extern/SDL3 submodule and unsigned Apple TV .app (CODE_SIGNING_ALLOWED=NO), then
       # zips it into a single versioned asset.
       #
       # For a SIGNED, store-distributable build you'd add an
@@ -265,22 +400,25 @@ jobs:
           PACKAGE: "1"
         run: ./build_tvos.sh device
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: CroMagRally-${{ env.GAME_VERSION }}-tvos-unsigned
           path: CroMagRally-${{ env.GAME_VERSION }}-tvos-unsigned.zip
           compression-level: 0
+          if-no-files-found: error
 
   # ──────────────────────────────────────────────────────────────────────────
   # Native Linux packages (deb / rpm / Arch / Flatpak), x86_64 + aarch64.
   # deb/rpm/arch build inside their target distro (containers) so runtime deps
   # and glibc match; flatpak uses host-native flatpak-builder (builds aarch64
-  # natively on the arm runner). All jobs bundle the pinned SDL 3.2.8 except
-  # Arch, which depends on the system 'sdl3'. Artifact-only, matching this
+  # natively on the arm runner). Every official package compiles the pinned SDL3
+  # submodule; Flatpak installs it as a separate module before the game module.
+  # Artifact-only, matching this
   # workflow's `contents: read` posture (download + attach to the Release).
   # ──────────────────────────────────────────────────────────────────────────
 
   build-linux-deb:
+    needs: release_metadata
     name: Debian package (${{ matrix.platform.arch }})
     runs-on: ${{ matrix.platform.runner }}
     timeout-minutes: 40
@@ -300,21 +438,23 @@ jobs:
           apt-get install -y --no-install-recommends \
             ca-certificates git python3 cmake make g++ pkg-config file dpkg-dev \
             libx11-dev libxext-dev libxcursor-dev libxi-dev libxrandr-dev libxfixes-dev \
-            libxss-dev libxkbcommon-dev libwayland-dev wayland-protocols libdecor-0-dev \
+            libxss-dev libxtst-dev libxkbcommon-dev libwayland-dev wayland-protocols libdecor-0-dev \
             libgl-dev libegl-dev libgles-dev libdrm-dev libgbm-dev \
             libasound2-dev libpulse-dev libdbus-1-dev libudev-dev libpipewire-0.3-dev
       - run: git config --global --add safe.directory '*'
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with: {submodules: 'recursive'}
       - name: Build SDL + game, package as .deb
         run: python3 build.py --dependencies --configure --build --deb
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: CroMagRally-linux-${{ matrix.platform.arch }}-deb
           path: dist/*.deb
           compression-level: 0
+          if-no-files-found: error
 
   build-linux-rpm:
+    needs: release_metadata
     name: RPM package (${{ matrix.platform.arch }})
     runs-on: ${{ matrix.platform.runner }}
     timeout-minutes: 40
@@ -332,22 +472,24 @@ jobs:
           dnf install -y \
             git python3 cmake make gcc gcc-c++ pkgconf-pkg-config file rpm-build \
             libX11-devel libXext-devel libXcursor-devel libXi-devel libXrandr-devel \
-            libXfixes-devel libXScrnSaver-devel libxkbcommon-devel \
+            libXfixes-devel libXScrnSaver-devel libXtst-devel libxkbcommon-devel \
             wayland-devel wayland-protocols-devel libdecor-devel libdrm-devel mesa-libgbm-devel \
             mesa-libGL-devel mesa-libEGL-devel mesa-libGLES-devel \
             alsa-lib-devel pulseaudio-libs-devel pipewire-devel dbus-devel systemd-devel
       - run: git config --global --add safe.directory '*'
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with: {submodules: 'recursive'}
       - name: Build SDL + game, package as .rpm
         run: python3 build.py --dependencies --configure --build --rpm
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: CroMagRally-linux-${{ matrix.platform.arch }}-rpm
           path: dist/*.rpm
           compression-level: 0
+          if-no-files-found: error
 
   build-linux-arch:
+    needs: release_metadata
     # x86_64 only: the official archlinux image has no arm64 variant.
     name: Arch package (x86_64)
     runs-on: ubuntu-24.04
@@ -356,9 +498,9 @@ jobs:
       image: archlinux:base-devel
     steps:
       - name: Install build dependencies
-        run: pacman -Syu --noconfirm git cmake ninja sdl3 libglvnd
+        run: pacman -Syu --noconfirm git cmake ninja libglvnd
       - run: git config --global --add safe.directory '*'
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with: {submodules: 'recursive'}
       - name: Build Arch package (makepkg refuses to run as root)
         run: |
@@ -366,20 +508,20 @@ jobs:
           echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
           cp -a "$GITHUB_WORKSPACE" /home/builder/src
           cp packaging/PKGBUILD /home/builder/src/PKGBUILD
-          # Pin pkgver to the in-tree game version so the package matches the build.
-          VERSION=$(grep -m1 'set(GAME_VERSION' CMakeLists.txt | sed -E 's/.*"([^"]+)".*/\1/')
-          sed -i "s/^pkgver=.*/pkgver=${VERSION}/" /home/builder/src/PKGBUILD
+          VERSION="${{ needs.release_metadata.outputs.game_version }}"
           chown -R builder:builder /home/builder/src
           su builder -c "cd /home/builder/src && BUILDDIR=/tmp/mk makepkg -sf --noconfirm --skipchecksums"
           mkdir -p dist
           cp /home/builder/src/*.pkg.tar.zst "dist/CroMagRally-${VERSION}-linux-x86_64.pkg.tar.zst"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: CroMagRally-linux-x86_64-arch
           path: dist/*.pkg.tar.zst
           compression-level: 0
+          if-no-files-found: error
 
   build-linux-flatpak:
+    needs: release_metadata
     name: Flatpak (${{ matrix.platform.arch }})
     runs-on: ${{ matrix.platform.runner }}
     timeout-minutes: 60
@@ -390,8 +532,8 @@ jobs:
           - { arch: x86_64,  runner: ubuntu-24.04 }
           - { arch: aarch64, runner: ubuntu-24.04-arm }
     steps:
-      - uses: actions/checkout@v6
-        with: {submodules: 'recursive'}   # extern/Pomme is copied into the flatpak `type: dir` source
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with: {submodules: 'recursive'}   # extern/Pomme and extern/SDL3 are `type: dir` sources
       - name: Install flatpak + flatpak-builder on the host
         run: |
           sudo apt-get update
@@ -407,23 +549,24 @@ jobs:
           EOF
           sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
       - name: Get game version
-        run: echo "GAME_VERSION=$(grep -m1 'set(GAME_VERSION' CMakeLists.txt | sed -E 's/.*\"([^\"]+)\".*/\1/')" >> "$GITHUB_ENV"
-      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        run: echo "GAME_VERSION=${{ needs.release_metadata.outputs.game_version }}" >> "$GITHUB_ENV"
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@401fe28a8384095fc1531b9d320b292f0ee45adb # v6
         with:
           bundle: CroMagRally-${{ env.GAME_VERSION }}-linux-${{ matrix.platform.arch }}.flatpak
           manifest-path: packaging/flatpak/io.jor.cromagrally.yml
-          cache-key: flatpak-${{ matrix.platform.arch }}-${{ hashFiles('packaging/flatpak/io.jor.cromagrally.yml') }}
+          cache-key: flatpak-${{ matrix.platform.arch }}-${{ hashFiles('packaging/flatpak/io.jor.cromagrally.yml', 'extern/SDL3/include/SDL3/SDL_version.h') }}
           arch: ${{ matrix.platform.arch }}
           # This action auto-uploads the bundle as a workflow artifact by default; turn it
           # off so the explicit upload-artifact step below is the ONLY flatpak artifact.
           # Otherwise each .flatpak is uploaded twice and publish-release sees the same
           # basename from two artifacts (which failed the v3.1.0 release attach).
           upload-artifact: false
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: CroMagRally-linux-${{ matrix.platform.arch }}-flatpak
           path: CroMagRally-${{ env.GAME_VERSION }}-linux-${{ matrix.platform.arch }}.flatpak
           compression-level: 0
+          if-no-files-found: error
 
   checksums:
     name: SHA256 checksums (Linux)
@@ -432,7 +575,7 @@ jobs:
     if: always()   # still checksum whatever succeeded even if one package job failed
     steps:
       - name: Download all Linux artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: artifacts
       - name: Generate SHA256SUMS.txt
@@ -442,11 +585,11 @@ jobs:
             -o -name '*.pkg.tar.zst' -o -name '*.flatpak' \) \
             -exec sha256sum {} + | sed 's|  \./|  |' | sort -k2 > ../SHA256SUMS.txt
           cat ../SHA256SUMS.txt
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: SHA256SUMS
           path: SHA256SUMS.txt
-          if-no-files-found: warn
+          if-no-files-found: error
 
   # ──────────────────────────────────────────────────────────────────────────
   # Attach the built artifacts to the GitHub Release.
@@ -458,14 +601,14 @@ jobs:
   # Release for the tag. It needs `contents: write`, scoped to this job only so the
   # build jobs keep the top-level least-privilege `contents: read`.
   #
-  # Runs only on a v* tag push or a published Release (both set github.ref to the tag);
-  # skipped for plain workflow_dispatch smoke builds. To backfill a release whose run
-  # predates this job, re-run from the tag (re-publish the Release, or dispatch this
-  # workflow with the v* tag selected as the ref).
+  # Runs only for the canonical release:published production trigger. A manual dispatch
+  # can never attach its unsigned smoke artifacts, even when a tag is selected as its ref.
   # ──────────────────────────────────────────────────────────────────────────
   publish-release:
     name: Attach artifacts to the Release
     needs:
+      - release_metadata
+      - build-source
       - build-linux-appimage
       - build-windows
       - build-windows-arm64
@@ -477,13 +620,13 @@ jobs:
       - build-linux-rpm
       - build-linux-arch
       - build-linux-flatpak
-    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    if: ${{ github.event_name == 'release' }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write   # job-level override of the top-level `contents: read`
     steps:
       - name: Download every build artifact from this run
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: artifacts
       - name: Collect a flat upload set + complete checksums
@@ -511,7 +654,7 @@ jobs:
           ( cd upload && sha256sum * | sort -k2 > SHA256SUMS.txt )
           echo "Release assets:"; ls -la upload
       - name: Attach to the Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: upload/*
           fail_on_unmatched_files: true

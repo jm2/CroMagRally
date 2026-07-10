@@ -5,9 +5,11 @@
 pcg32_random_t gSimRNG;
 pcg32_random_t gLocalRNG;
 
-// Core PCG Implementation
-// Source: PCG-Basic C Implementation (pcg-random.org)
-// Minimal C99 Implementation
+// Core PCG implementation adapted from PCG-Basic:
+// https://github.com/imneme/pcg-c-basic
+// Copyright 2014 Melissa O'Neill <oneill@pcg-random.org>
+// Licensed under the Apache License, Version 2.0. See THIRD-PARTY-LICENSES.md.
+// This is a modified, minimal C99 implementation.
 
 void pcg32_srandom_r(pcg32_random_t* rng, uint64_t initstate, uint64_t initseq)
 {

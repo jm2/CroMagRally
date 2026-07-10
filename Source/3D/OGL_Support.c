@@ -15,6 +15,10 @@
 #include <SDL3/SDL_opengl.h>
 #include <math.h>
 
+#if defined(__ANDROID__) || defined(__IOS__) || defined(__TVOS__)
+#include <gl4esinit.h>
+#endif
+
 extern SDL_Window *gSDLWindow;
 // extern	GWorldPtr		gTerrainDebugGWorld;
 
@@ -47,6 +51,10 @@ static void OGL_UpdatePaneDimensions(Byte whichPane);
 /*********************/
 
 SDL_GLContext gAGLContext = nil;
+
+#if defined(__ANDROID__) || defined(__IOS__) || defined(__TVOS__)
+static Boolean gGL4ESInitialized = false;
+#endif
 
 // OGLMatrix4x4	gViewToFrustumMatrix,gWorldToViewMatrix,gWorldToFrustumMatrix;
 OGLMatrix4x4 gViewToFrustumMatrix, gLocalToViewMatrix, gLocalToFrustumMatrix;
@@ -94,10 +102,6 @@ int gNumTexturesAllocated = 0;
 //
 
 void OGL_Boot(void) {
-#if defined(__ANDROID__) || defined(__IOS__) || defined(__TVOS__)
-  while (glGetError() != GL_NO_ERROR)
-    ; // Flush any SDL context creation errors
-#endif
   OGL_CreateDrawContext();
   OGL_CheckError();
 
@@ -354,12 +358,22 @@ static void OGL_CreateDrawContext(void) {
   if (!gAGLContext)
     DoFatalAlert(SDL_GetError());
 
-  GAME_ASSERT(glGetError() == GL_NO_ERROR);
-
   /* ACTIVATE CONTEXT */
 
   bool didMakeCurrent = SDL_GL_MakeCurrent(gSDLWindow, gAGLContext);
   GAME_ASSERT_MESSAGE(didMakeCurrent, SDL_GetError());
+
+#if defined(__ANDROID__) || defined(__IOS__) || defined(__TVOS__)
+  // gl4es must be initialized against the context the game actually renders with.
+  // Boot previously created and leaked a separate context solely for this setup.
+  set_getprocaddress((void *(*)(const char *)) SDL_GL_GetProcAddress);
+  initialize_gl4es();
+  gGL4ESInitialized = true;
+  while (glGetError() != GL_NO_ERROR)
+    ;
+#endif
+
+  GAME_ASSERT(glGetError() == GL_NO_ERROR);
 
 #if 0
 			/* GET OPENGL EXTENSIONS */
@@ -377,6 +391,13 @@ static void OGL_CreateDrawContext(void) {
 static void OGL_DisposeDrawContext(void) {
   if (!gAGLContext)
     return;
+
+#if defined(__ANDROID__) || defined(__IOS__) || defined(__TVOS__)
+  if (gGL4ESInitialized) {
+    close_gl4es();
+    gGL4ESInitialized = false;
+  }
+#endif
 
   SDL_GL_MakeCurrent(gSDLWindow, NULL); // make context not current
   SDL_GL_DestroyContext(gAGLContext);   // nuke context
