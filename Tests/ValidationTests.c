@@ -365,6 +365,121 @@ static void TestPlaceholderFormatting(void)
 	assert(FormatForTest("plain", NULL, 0, "%d", 1) == 0);
 }
 
+static PrefsType ValidPrefs(void)
+{
+	PrefsType prefs = {0};
+	prefs.difficulty = DIFFICULTY_MEDIUM;
+	prefs.splitScreenMode2P = SPLITSCREEN_MODE_2P_TALL;
+	prefs.splitScreenMode3P = SPLITSCREEN_MODE_3P_TALL;
+	prefs.language = LANGUAGE_ENGLISH;
+	prefs.tagDuration = 3;
+	prefs.antialiasingLevel = 2;
+	prefs.fullscreen = true;
+	prefs.musicVolumePercent = 60;
+	prefs.sfxVolumePercent = 60;
+	prefs.raceTimer = 1;
+	prefs.gamepadRumble = true;
+	prefs.bindings[0].key[0] = SDL_SCANCODE_SPACE;
+	prefs.bindings[0].pad[0] = (PadBinding){kInputTypeButton, SDL_GAMEPAD_BUTTON_SOUTH};
+	prefs.bindings[1].pad[0] = (PadBinding){kInputTypeAxisPlus, SDL_GAMEPAD_AXIS_LEFTX};
+	SDL_strlcpy(prefs.playerName, "PLAYER", sizeof(prefs.playerName));
+	return prefs;
+}
+
+static void TestPrefsSanitization(void)
+{
+	PrefsType defaults = ValidPrefs();
+	PrefsType prefs = defaults;
+	assert(!SanitizePrefs(&prefs, &defaults));
+
+#define CHECK_REPAIR(field, badValue) \
+	do \
+	{ \
+		prefs = defaults; \
+		prefs.field = (badValue); \
+		assert(SanitizePrefs(&prefs, &defaults)); \
+		assert(prefs.field == defaults.field); \
+	} while (0)
+
+	CHECK_REPAIR(difficulty, NUM_DIFFICULTIES);
+	CHECK_REPAIR(splitScreenMode2P, SPLITSCREEN_MODE_3P_TALL);
+	CHECK_REPAIR(splitScreenMode3P, SPLITSCREEN_MODE_2P_TALL);
+	CHECK_REPAIR(language, NUM_LANGUAGES);
+	CHECK_REPAIR(tagDuration, 0);
+	CHECK_REPAIR(antialiasingLevel, 31);
+	CHECK_REPAIR(fullscreen, 2);
+	CHECK_REPAIR(musicVolumePercent, 61);
+	CHECK_REPAIR(sfxVolumePercent, 255);
+	CHECK_REPAIR(raceTimer, 3);
+	CHECK_REPAIR(gamepadRumble, 2);
+	CHECK_REPAIR(tournamentProgression.numTracksCompleted, NUM_RACE_TRACKS + 1);
+
+#undef CHECK_REPAIR
+
+	prefs = defaults;
+	prefs.tournamentProgression.tournamentLapTimes[0][0] = NAN;
+	prefs.bindings[0].key[0] = -1;
+	prefs.bindings[0].pad[0] = (PadBinding){127, -1};
+	prefs.bindings[0].mouseButton = -1;
+	SDL_memset(prefs.playerName, 'X', sizeof(prefs.playerName));
+	assert(SanitizePrefs(&prefs, &defaults));
+	assert(prefs.tournamentProgression.tournamentLapTimes[0][0] == 0);
+	assert(prefs.bindings[0].key[0] == SDL_SCANCODE_SPACE);
+	assert(prefs.bindings[0].pad[0].type == kInputTypeButton);
+	assert(prefs.bindings[0].mouseButton == 0);
+	assert(strcmp(prefs.playerName, "PLAYER") == 0);
+
+	prefs = defaults;
+	prefs.bindings[kNeed_UIBack].key[0] = SDL_SCANCODE_F1;	// valid, but UI bindings are protected
+	prefs.bindings[kNeed_Forward].key[MAX_USER_BINDINGS_PER_NEED] = SDL_SCANCODE_F2;
+	assert(SanitizePrefs(&prefs, &defaults));
+	assert(prefs.bindings[kNeed_UIBack].key[0] == defaults.bindings[kNeed_UIBack].key[0]);
+	assert(prefs.bindings[kNeed_Forward].key[MAX_USER_BINDINGS_PER_NEED]
+		== defaults.bindings[kNeed_Forward].key[MAX_USER_BINDINGS_PER_NEED]);
+}
+
+static ScoreboardRecord ValidScoreboardRecord(int track)
+{
+	ScoreboardRecord record = {0};
+	record.timestamp = 1;
+	for (int lap = 0; lap < LAPS_PER_RACE; lap++)
+		record.lapTimes[lap] = 60.0f + lap;
+	record.trackNum = track;
+	record.difficulty = DIFFICULTY_MEDIUM;
+	record.gameMode = GAME_MODE_PRACTICE;
+	record.vehicleType = CAR_TYPE_MAMMOTH;
+	record.place = 0;
+	record.sex = 0;
+	record.skin = CAVEMAN_SKIN_BROWN;
+	return record;
+}
+
+static void TestScoreboardSanitization(void)
+{
+	Scoreboard scoreboard = {0};
+	scoreboard.records[0][0] = ValidScoreboardRecord(0);
+	assert(!SanitizeScoreboard(&scoreboard));
+
+	ScoreboardRecord validSecond = ValidScoreboardRecord(0);
+	validSecond.timestamp = 2;
+	scoreboard.records[0][0].lapTimes[1] = NAN;
+	scoreboard.records[0][1] = validSecond;
+	assert(SanitizeScoreboard(&scoreboard));
+	assert(scoreboard.records[0][0].timestamp == 2);
+	assert(scoreboard.records[0][1].timestamp == 0);
+
+	scoreboard = (Scoreboard){0};
+	scoreboard.records[0][0] = ValidScoreboardRecord(0);
+	scoreboard.records[0][0].trackNum = NUM_TRACKS;
+	assert(SanitizeScoreboard(&scoreboard));
+	assert(scoreboard.records[0][0].timestamp == 0);
+
+	scoreboard = (Scoreboard){0};
+	scoreboard.records[TRACK_NUM_ATLANTIS][0] = ValidScoreboardRecord(TRACK_NUM_ATLANTIS);
+	scoreboard.records[TRACK_NUM_ATLANTIS][0].vehicleType = CAR_TYPE_SUB;
+	assert(!SanitizeScoreboard(&scoreboard));
+}
+
 int main(void)
 {
 	TestEnvelopeValidation();
@@ -375,6 +490,8 @@ int main(void)
 	TestDeterministicEventMath();
 	TestCursorClamping();
 	TestPlaceholderFormatting();
+	TestPrefsSanitization();
+	TestScoreboardSanitization();
 	puts("Validation tests passed.");
 	return 0;
 }

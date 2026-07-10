@@ -392,22 +392,33 @@ void SafeDisposePtr(void *ptr)
 
 /******************* VERIFY SYSTEM ******************/
 
-void InitPrefsFolder(bool createIt)
+OSErr InitPrefsFolder(bool createIt)
 {
 OSErr iErr;
 long createdDirID;
 
 			/* CHECK PREFERENCES FOLDER */
 
-	iErr = FindFolder(kOnSystemDisk,kPreferencesFolderType,kDontCreateFolder,		// locate the folder
+	iErr = FindFolder(kOnSystemDisk,kPreferencesFolderType,
+					createIt ? kCreateFolder : kDontCreateFolder,		// locate (and, for saves, create) the folder
 					&gPrefsFolderVRefNum,&gPrefsFolderDirID);
 	if (iErr != noErr)
-		DoAlert("Warning: Cannot locate the Preferences folder.");
+	{
+		SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Cannot locate the Preferences folder (error %d)", iErr);
+		return iErr;
+	}
 
 	if (createIt)
 	{
 		iErr = DirCreate(gPrefsFolderVRefNum, gPrefsFolderDirID, PREFS_FOLDER_NAME, &createdDirID);		// make folder in there
+		if (iErr != noErr)
+		{
+			SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Cannot create the game preferences folder (error %d)", iErr);
+			return iErr;
+		}
 	}
+
+	return noErr;
 }
 
 

@@ -48,7 +48,7 @@ int Net_GetConnectionHint(void);
 
 // CMR7 Stage 4: frame-aligned events + connection-liveness policy.
 #define NET_BADGE_MS		1000				// >1s silence from a peer -> connection badge (substitution continues)
-#define NET_DROP_MS			10000				// >10s silence -> host frame-aligns a become-bot / client errors out
+#define NET_DROP_MS			30000				// 30s mobile-background grace before host bot conversion / client error
 #define NET_KEEPALIVE_MS	50					// 20Hz heartbeat throttle (lobby/barriers only; in-game streams 60pps)
 
 /**********************/
@@ -650,9 +650,8 @@ void ShutdownNetworkManager(void)
 
 void EndNetworkGame(void)
 {
-OSErr	iErr;
-
 	SetNetworkPowerMode(false);
+	SetNetworkDiscoveryMode(false);
 
 #if 0
 	if ((!gNetGameInProgress) || (!gNetGame))								// only if we're running a net game
@@ -730,6 +729,7 @@ bool UpdateNetSequence(void)
 		case kNetSequence_HostReadyToStartGame:
 			NSpGame_StopAdvertising(gNetGame);
 			NSpGame_StopAcceptingNewClients(gNetGame);
+			SetNetworkDiscoveryMode(false);
 			if (noErr == HostSendGameConfigInfo())
 			{
 				gNetSequenceState = kNetSequence_HostStartingGame;
@@ -777,6 +777,7 @@ bool UpdateNetSequence(void)
 
 				NSpSearch_Dispose(gNetSearch);
 				gNetSearch = NULL;
+				SetNetworkDiscoveryMode(false);
 			}
 			break;
 
@@ -957,6 +958,7 @@ bool UpdateNetSequence(void)
 Boolean SetupNetworkHosting(void)
 {
 	ResetNetGameTransientState();			// start from a clean slate (belt-and-suspenders vs EndNetworkGame)
+	SetNetworkDiscoveryMode(true);
 	SetNetworkPowerMode(true);
 	gNetSequenceState = kNetSequence_HostOffline;
 	gTargetFPS = OGL_GetMonitorRefreshRate();
@@ -982,6 +984,7 @@ Boolean SetupNetworkHosting(void)
 	if (!gNetGame)
 	{
 		SetNetworkPowerMode(false);
+		SetNetworkDiscoveryMode(false);
 		gNetSequenceState = kNetSequence_Error;
 		// Don't goto failure; show the error to the player
 		DoNetGatherScreen();
@@ -991,6 +994,7 @@ Boolean SetupNetworkHosting(void)
 	if (kNSpRC_OK != NSpGame_StartAdvertising(gNetGame))
 	{
 		SetNetworkPowerMode(false);
+		SetNetworkDiscoveryMode(false);
 		gNetSequenceState = kNetSequence_Error;
 		DoNetGatherScreen();
 		return true;
@@ -1014,6 +1018,7 @@ Boolean SetupNetworkHosting(void)
 failure:
 	NSpGame_Dispose(gNetGame, 0);
 	SetNetworkPowerMode(false);
+	SetNetworkDiscoveryMode(false);
 
 	return true;
 }
@@ -1027,9 +1032,8 @@ failure:
 
 Boolean SetupNetworkJoin(void)
 {
-OSStatus			status = noErr;
-
 	ResetNetGameTransientState();			// start from a clean slate
+	SetNetworkDiscoveryMode(true);
 	SetNetworkPowerMode(true);
 
 	gNetSequenceState = kNetSequence_ClientOffline;
@@ -1047,7 +1051,10 @@ OSStatus			status = noErr;
 
 	Boolean cancelled = DoNetGatherScreen();
 	if (cancelled)
+	{
 		SetNetworkPowerMode(false);
+		SetNetworkDiscoveryMode(false);
+	}
 	return cancelled;
 }
 

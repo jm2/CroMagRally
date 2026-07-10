@@ -27,7 +27,7 @@ extern	void InitMyRandomSeed(void);
 float DeterministicSimEventFloat(uint32_t eventTag, uint32_t entityKey, uint32_t sampleIndex);
 
 int PositiveModulo(int value, unsigned int m);
-void InitPrefsFolder(bool createIt);
+OSErr InitPrefsFolder(bool createIt);
 extern	float RandomFloat(void);
 extern	float VisualRandomFloat(void); // Now maps to LocalRNG
 uint16_t	RandomRange(unsigned short min, unsigned short max);

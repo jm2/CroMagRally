@@ -178,6 +178,7 @@ void NetCheck_ConnectionTimeouts(void);			// CMR7 Stage 4: per-frame lastHeard b
 void Net_MaybeSendKeepAlive(void);				// CMR7 Stage 4: throttled header-only heartbeat (lobby/barriers keep radios awake)
 void Net_RefreshLastHeard(void);				// CMR7 Stage 4: reset all liveness clocks to now (game-loop entry)
 void SetNetworkPowerMode(Boolean enabled);		// Android network-session WiFi/multicast locks; no-op elsewhere
+void SetNetworkDiscoveryMode(Boolean enabled);	// Android multicast lock while advertising/searching; no-op elsewhere
 
 void PlayerBroadcastVehicleType(void);
 Boolean GetVehicleSelectionFromNetPlayers(void);

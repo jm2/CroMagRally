@@ -44,6 +44,8 @@ unset(_sdl_static_default)
 
 option(SANITIZE "Build with asan/ubsan" OFF)
 
+include(CTest)
+
 if(WIN32 OR APPLE)
 	# Don't warn
 elseif(SANITIZE)
@@ -131,6 +133,12 @@ endif()
 # DEPENDENCIES
 #------------------------------------------------------------------------------
 
+if(NOT DEFINED POMME_BUILD_TESTING)
+	set(POMME_BUILD_TESTING OFF)
+	if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT CMAKE_SYSTEM_NAME STREQUAL "tvOS")
+		set(POMME_BUILD_TESTING ON)
+	endif()
+endif()
 add_subdirectory(extern/Pomme)
 
 if(ANDROID OR CMAKE_SYSTEM_NAME STREQUAL "iOS" OR CMAKE_SYSTEM_NAME STREQUAL "tvOS")
@@ -480,12 +488,12 @@ endif()
 # TESTS
 #------------------------------------------------------------------------------
 
-include(CTest)
 if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT CMAKE_SYSTEM_NAME STREQUAL "tvOS")
 	add_executable(CroMagRallyValidationTests
 		Tests/ValidationTests.c
 		Source/Network/NetValidation.c
 		Source/System/DeterministicMath.c
+		Source/System/UserDataValidation.c
 		Source/System/TextUtils.c)
 	target_include_directories(CroMagRallyValidationTests PRIVATE ${GAME_SRCDIR}/Headers)
 	if(MSVC)

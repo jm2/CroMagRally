@@ -335,7 +335,7 @@ int		i;
 void SetDefaultCameraModeForAllPlayers(void)
 {
 	bool is2PTall = (gNumLocalPlayers == 2 && gGamePrefs.splitScreenMode2P == SPLITSCREEN_MODE_2P_TALL);
-	bool is3PTall = (gNumLocalPlayers == 3 && gGamePrefs.splitScreenMode2P == SPLITSCREEN_MODE_3P_TALL);
+	bool is3PTall = (gNumLocalPlayers == 3 && gGamePrefs.splitScreenMode3P == SPLITSCREEN_MODE_3P_TALL);
 
 	for (int i = 0; i < gNumTotalPlayers; i++)
 	{
@@ -531,7 +531,6 @@ float					cross,dot;
 
 	return(rot);
 }
-
 
 
 

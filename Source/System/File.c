@@ -90,6 +90,8 @@ MOMaterialObject* gCavemanSkins[2][NUM_CAVEMAN_SKINS];
 
 PrefsType gDiskShadowPrefs;
 
+static Boolean gPrefsNeedSave = false;
+
 
 /****************** SET DEFAULT DIRECTORY ********************/
 //
@@ -437,11 +439,17 @@ FSSpec		file;
 long		count;
 long		eof = 0;
 char		fileMagic[64];
-long		magicLength = (long) SDL_strlen(magic) + 1;		// including null-terminator
 
-	GAME_ASSERT(magicLength < (long) sizeof(fileMagic));
+	if (!filename || !magic || payloadLength < 0 || (!payloadPtr && payloadLength != 0))
+		return paramErr;
 
-	InitPrefsFolder(false);
+	long magicLength = (long) SDL_strlen(magic) + 1;		// including null-terminator
+	if (magicLength >= (long) sizeof(fileMagic))
+		return paramErr;
+
+	iErr = InitPrefsFolder(false);
+	if (iErr != noErr)
+		return iErr;
 
 
 				/*************/
@@ -455,9 +463,9 @@ long		magicLength = (long) SDL_strlen(magic) + 1;		// including null-terminator
 
 				/* CHECK FILE LENGTH */
 
-	GetEOF(refNum, &eof);
+	iErr = GetEOF(refNum, &eof);
 
-	if (eof != magicLength + payloadLength)
+	if (iErr != noErr || eof != magicLength + payloadLength)
 		goto fileIsCorrupt;
 
 				/* READ HEADER */
@@ -466,7 +474,7 @@ long		magicLength = (long) SDL_strlen(magic) + 1;		// including null-terminator
 	iErr = FSRead(refNum, &count, fileMagic);
 	if (iErr ||
 		count != magicLength ||
-		0 != strncmp(magic, fileMagic, magicLength-1))
+		0 != SDL_memcmp(magic, fileMagic, magicLength))
 	{
 		goto fileIsCorrupt;
 	}
@@ -495,17 +503,29 @@ fileIsCorrupt:
 OSErr SaveUserDataFile(const char* filename, const char* magic, long payloadLength, Ptr payloadPtr)
 {
 FSSpec				file;
+FSSpec				tempFile;
 OSErr				iErr;
 short				refNum;
 long				count;
+char				tempFilename[256];
 
-	InitPrefsFolder(true);
+	if (!filename || !magic || payloadLength < 0 || (!payloadPtr && payloadLength != 0))
+		return paramErr;
 
-				/* CREATE BLANK FILE */
+	iErr = InitPrefsFolder(true);
+	if (iErr != noErr)
+		return iErr;
+
+	int tempFilenameLength = SDL_snprintf(tempFilename, sizeof(tempFilename), "%s.tmp", filename);
+	if (tempFilenameLength < 0 || tempFilenameLength >= (int) sizeof(tempFilename))
+		return bdNamErr;
+
+				/* CREATE A TEMPORARY FILE BESIDE THE DESTINATION */
 
 	MakeFSSpecForUserDataFile(filename, &file);
-	FSpDelete(&file);															// delete any existing file
-	iErr = FSpCreate(&file, 'CavM', 'Pref', smSystemScript);					// create blank file
+	MakeFSSpecForUserDataFile(tempFilename, &tempFile);
+	FSpDelete(&tempFile);												// discard a stale temp file from an interrupted save
+	iErr = FSpCreate(&tempFile, 'CavM', 'Pref', smSystemScript);
 	if (iErr)
 	{
 		return iErr;
@@ -513,32 +533,54 @@ long				count;
 
 				/* OPEN FILE */
 
-	iErr = FSpOpenDF(&file, fsRdWrPerm, &refNum);
+	iErr = FSpOpenDF(&tempFile, fsRdWrPerm, &refNum);
 	if (iErr)
 	{
-		FSpDelete(&file);
+		FSpDelete(&tempFile);
 		return iErr;
 	}
 
 				/* WRITE MAGIC */
 
-	count = (long) SDL_strlen(magic) + 1;
+	long magicLength = (long) SDL_strlen(magic) + 1;
+	count = magicLength;
 	iErr = FSWrite(refNum, &count, (Ptr) magic);
-	if (iErr)
+	if (iErr || count != magicLength)
 	{
 		FSClose(refNum);
-		return iErr;
+		FSpDelete(&tempFile);
+		return iErr != noErr ? iErr : ioErr;
 	}
 
 				/* WRITE DATA */
 
 	count = payloadLength;
 	iErr = FSWrite(refNum, &count, payloadPtr);
-	FSClose(refNum);
+	if (iErr == noErr && count != payloadLength)
+		iErr = ioErr;
+
+	OSErr closeErr = FSClose(refNum);
+	if (iErr == noErr)
+		iErr = closeErr;
+
+	if (iErr != noErr)
+	{
+		FSpDelete(&tempFile);
+		return iErr;
+	}
+
+				/* ATOMICALLY PUBLISH THE COMPLETE FILE */
+
+	iErr = FSpAtomicReplace(&tempFile, &file);
+	if (iErr != noErr)
+	{
+		FSpDelete(&tempFile);
+		return iErr;
+	}
 
 	SDL_Log("Wrote %s", file.cName);
 
-	return iErr;
+	return noErr;
 }
 
 
@@ -551,13 +593,24 @@ long				count;
 
 OSErr LoadPrefs(void)
 {
-	OSErr err = LoadUserDataFile(PREFS_FILENAME, PREFS_MAGIC, sizeof(PrefsType), (Ptr) &gGamePrefs);
+	PrefsType loadedPrefs;
+	InitDefaultPrefs();
+	PrefsType defaultPrefs = gGamePrefs;
 
-	if (err != noErr)
+	OSErr err = LoadUserDataFile(PREFS_FILENAME, PREFS_MAGIC, sizeof(loadedPrefs), (Ptr) &loadedPrefs);
+
+	if (err == noErr)
 	{
-		InitDefaultPrefs();
+		gPrefsNeedSave = SanitizePrefs(&loadedPrefs, &defaultPrefs);
+		gGamePrefs = loadedPrefs;
+	}
+	else
+	{
+		gGamePrefs = defaultPrefs;
+		gPrefsNeedSave = true;
 	}
 
+	gTagDuration = gGamePrefs.tagDuration;
 	SDL_memcpy(&gDiskShadowPrefs, &gGamePrefs, sizeof(gDiskShadowPrefs));
 
 	return err;
@@ -569,14 +622,22 @@ OSErr LoadPrefs(void)
 void SavePrefs(void)
 {
 	// If prefs didn't change relative to what's on disk, don't bother rewriting them
-	if (0 == SDL_memcmp(&gDiskShadowPrefs, &gGamePrefs, sizeof(gGamePrefs)))
+	if (!gPrefsNeedSave
+		&& 0 == SDL_memcmp(&gDiskShadowPrefs, &gGamePrefs, sizeof(gGamePrefs)))
 	{
 		return;
 	}
 
-	SaveUserDataFile(PREFS_FILENAME, PREFS_MAGIC, sizeof(PrefsType), (Ptr)&gGamePrefs);
-
-	SDL_memcpy(&gDiskShadowPrefs, &gGamePrefs, sizeof(gGamePrefs));
+	OSErr err = SaveUserDataFile(PREFS_FILENAME, PREFS_MAGIC, sizeof(PrefsType), (Ptr)&gGamePrefs);
+	if (err == noErr)
+	{
+		SDL_memcpy(&gDiskShadowPrefs, &gGamePrefs, sizeof(gGamePrefs));
+		gPrefsNeedSave = false;
+	}
+	else
+	{
+		SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Could not save preferences (error %d); will retry", err);
+	}
 }
 
 #pragma mark -
@@ -610,17 +671,19 @@ void SavePlayerFile(void)
 
 int GetNumAgesCompleted(void)
 {
-	return GAME_MIN(NUM_AGES, gGamePrefs.tournamentProgression.numTracksCompleted / TRACKS_PER_AGE);
+	int numTracksCompleted = GAME_MIN(NUM_RACE_TRACKS, gGamePrefs.tournamentProgression.numTracksCompleted);
+	return GAME_MIN(NUM_AGES, numTracksCompleted / TRACKS_PER_AGE);
 }
 
 int GetNumStagesCompletedInAge(void)
 {
-	return gGamePrefs.tournamentProgression.numTracksCompleted % TRACKS_PER_AGE;
+	int numTracksCompleted = GAME_MIN(NUM_RACE_TRACKS, gGamePrefs.tournamentProgression.numTracksCompleted);
+	return numTracksCompleted % TRACKS_PER_AGE;
 }
 
 int GetNumTracksCompletedTotal(void)
 {
-	return gGamePrefs.tournamentProgression.numTracksCompleted;
+	return GAME_MIN(NUM_RACE_TRACKS, gGamePrefs.tournamentProgression.numTracksCompleted);
 }
 
 int GetTrackNumFromAgeStage(int age, int stage)
@@ -630,7 +693,7 @@ int GetTrackNumFromAgeStage(int age, int stage)
 
 void SetPlayerProgression(int numTracksCompleted)
 {
-	gGamePrefs.tournamentProgression.numTracksCompleted = numTracksCompleted;
+	gGamePrefs.tournamentProgression.numTracksCompleted = GAME_CLAMP(numTracksCompleted, 0, NUM_RACE_TRACKS);
 }
 
 float GetTotalTournamentTime(void)
@@ -662,15 +725,28 @@ OSErr SaveScoreboardFile(void)
 
 OSErr LoadScoreboardFile(void)
 {
+	Scoreboard loadedScoreboard;
 	OSErr err = LoadUserDataFile(
 			"Scoreboard",
 			SCOREBOARD_MAGIC,
-			sizeof(gScoreboard),
-			(Ptr) &gScoreboard);
+			sizeof(loadedScoreboard),
+			(Ptr) &loadedScoreboard);
 
 	if (err != noErr)
 	{
 		SDL_memset(&gScoreboard, 0, sizeof(gScoreboard));
+	}
+	else
+	{
+		Boolean repaired = SanitizeScoreboard(&loadedScoreboard);
+		gScoreboard = loadedScoreboard;
+		if (repaired)
+		{
+			SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Discarded invalid scoreboard records");
+			OSErr saveErr = SaveScoreboardFile();
+			if (saveErr != noErr)
+				SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Could not rewrite the repaired scoreboard (error %d)", saveErr);
+		}
 	}
 
 	return err;

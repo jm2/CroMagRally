@@ -176,6 +176,7 @@ void InitDefaultPrefs(void)
 	gGamePrefs.difficulty			= DIFFICULTY_MEDIUM;
 	gGamePrefs.splitScreenMode2P	= SPLITSCREEN_MODE_2P_TALL;
 	gGamePrefs.splitScreenMode3P	= SPLITSCREEN_MODE_3P_TALL;
+	gGamePrefs.tagDuration			= 3;
 	gGamePrefs.displayNumMinus1		= 0;			// main monitor by default
 	gGamePrefs.fullscreen			= true;
 	gGamePrefs.musicVolumePercent	= 60;			// careful to set these two volumes to one of the
@@ -1807,12 +1808,36 @@ static void AndroidReleaseLock(JNIEnv* env, jobject* lock, const char* operation
 }
 #endif
 
+#if defined(__ANDROID__)
+static Boolean gNetworkPowerEnabled = false;
+static Boolean gNetworkDiscoveryEnabled = false;
+#endif
+
+void SetNetworkDiscoveryMode(Boolean enabled)
+{
+#if defined(__ANDROID__)
+	gNetworkDiscoveryEnabled = enabled;
+	if (!enabled)
+	{
+		JNIEnv* env = (JNIEnv*) SDL_GetAndroidJNIEnv();
+		if (env)
+			AndroidReleaseLock(env, &gAndroidMulticastLock, "MulticastLock.release");
+	}
+	else if (gNetworkPowerEnabled)
+	{
+		SetNetworkPowerMode(true);
+	}
+#else
+	(void) enabled;
+#endif
+}
+
 void SetNetworkPowerMode(Boolean enabled)
 {
 #if defined(__ANDROID__)
+	gNetworkPowerEnabled = enabled;
 	JNIEnv* env = (JNIEnv*) SDL_GetAndroidJNIEnv();
-	jobject activity = (jobject) SDL_GetAndroidActivity();
-	if (!env || !activity)
+	if (!env)
 		return;
 
 	if (!enabled)
@@ -1821,7 +1846,11 @@ void SetNetworkPowerMode(Boolean enabled)
 		AndroidReleaseLock(env, &gAndroidMulticastLock, "MulticastLock.release");
 		return;
 	}
-	if (gAndroidMulticastLock && gAndroidWifiLock)
+	if (gAndroidWifiLock && (!gNetworkDiscoveryEnabled || gAndroidMulticastLock))
+		return;
+
+	jobject activity = (jobject) SDL_GetAndroidActivity();
+	if (!activity)
 		return;
 
 	jclass contextClass = (*env)->FindClass(env, "android/content/Context");
@@ -1845,10 +1874,11 @@ void SetNetworkPowerMode(Boolean enabled)
 
 	jmethodID makeMulticast = (*env)->GetMethodID(env, managerClass,
 		"createMulticastLock", "(Ljava/lang/String;)Landroid/net/wifi/WifiManager$MulticastLock;");
-	jobject multicast = !gAndroidMulticastLock && makeMulticast
+	jobject multicast = gNetworkDiscoveryEnabled && !gAndroidMulticastLock && makeMulticast
 		? (*env)->CallObjectMethod(env, wifiManager, makeMulticast, tag)
 		: NULL;
-	if (!gAndroidMulticastLock && !AndroidClearException(env, "createMulticastLock") && multicast)
+	if (gNetworkDiscoveryEnabled && !gAndroidMulticastLock
+		&& !AndroidClearException(env, "createMulticastLock") && multicast)
 	{
 		jclass lockClass = (*env)->GetObjectClass(env, multicast);
 		jmethodID acquire = (*env)->GetMethodID(env, lockClass, "acquire", "()V");
@@ -1998,4 +2028,3 @@ void GameMain(void)
 		PlayGame();
 	}
 }
-

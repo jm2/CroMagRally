@@ -1353,8 +1353,8 @@ ObjNode	*newObj;
 		.moveCall 	= MoveStaticObject,
 		.rot 		= 0,
 		.scale 		= 1.0,
-		.coord.y 	= GetMinTerrainY(x,z, def.group, def.type, 1.0),
 	};
+	def.coord.y = GetMinTerrainY(x, z, def.group, def.type, 1.0);
 	newObj = MakeNewDisplayGroupObject(&def);
 	if (newObj == nil)
 		return(false);

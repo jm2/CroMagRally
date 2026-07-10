@@ -97,6 +97,7 @@ enum
 
 
 void InitInput(void);
+void InstallInputEventWatch(void);
 void ReadKeyboard(void);
 void InvalidateAllInputs(void);
 void InvalidateNeedState(int need);
