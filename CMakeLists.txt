@@ -239,6 +239,10 @@ source_group(TREE ${GAME_SRCDIR} PREFIX "" FILES ${GAME_SOURCES})
 if(WIN32)
 	# Windows resource file
 	set(GAME_WINDOWS_RESOURCE "${CMAKE_CURRENT_BINARY_DIR}/${GAME_TARGET}.exe.rc")
+	configure_file(
+		${CMAKE_SOURCE_DIR}/packaging/${GAME_TARGET}.ico
+		${CMAKE_CURRENT_BINARY_DIR}/${GAME_TARGET}.ico
+		COPYONLY)
 	configure_file(${CMAKE_SOURCE_DIR}/packaging/win32.rc.in ${GAME_WINDOWS_RESOURCE} @ONLY)
 	list(APPEND GAME_SOURCES ${GAME_WINDOWS_RESOURCE})
 elseif(APPLE)
