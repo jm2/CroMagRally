@@ -65,7 +65,11 @@ APP_BUNDLE="$BUILD_DIR/$OUT_SUBDIR/CroMagRally.app"
 # Device target only. NOTE: an unsigned tvOS .app is not installable on real Apple TV
 # hardware without re-signing in Xcode.
 if [ "${PACKAGE:-0}" == "1" ] && [ "$TARGET" == "device" ]; then
-    GAME_VERSION=$(grep -m1 'set(GAME_VERSION' CMakeLists.txt | sed -E 's/.*"([^"]+)".*/\1/')
+    GAME_VERSION=$(sed -n 's/^GAME_VERSION=//p' version.properties)
+    if [ -z "$GAME_VERSION" ]; then
+        echo "Error: GAME_VERSION is missing from version.properties"
+        exit 1
+    fi
     ZIP_ABS="$PWD/CroMagRally-${GAME_VERSION}-tvos-unsigned.zip"
     echo "=== Packaging $(basename "$ZIP_ABS") (UNSIGNED) ==="
     rm -f "$ZIP_ABS"

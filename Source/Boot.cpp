@@ -67,7 +67,9 @@ tryAgain:
     throw std::runtime_error("Couldn't find the Data folder.");
   }
 
+#if defined(__ANDROID__)
 verify:
+#endif
   attemptNum++;
 
   dataPath = dataPath.lexically_normal();

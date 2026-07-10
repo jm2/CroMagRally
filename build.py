@@ -8,7 +8,6 @@ import multiprocessing
 import os
 import os.path
 import platform
-import re
 import shutil
 import subprocess
 import sys
@@ -16,19 +15,20 @@ import tempfile
 import urllib.request
 import zipfile
 
-def parse_metadata(version_dot_h):
-    metadata = {}
-    with open(version_dot_h) as version_header:
-        for version_line in version_header.readlines():
-            version_line = version_line.strip()
-            match = re.match(r"#define\s+([A-Z_]+)\s+(.+)", version_line)
-            if not match:
+def parse_properties(path):
+    properties = {}
+    with open(path, encoding="utf-8") as property_file:
+        for line_number, raw_line in enumerate(property_file, start=1):
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
                 continue
-            key = match[1]
-            value = match[2]
-            value = value.removeprefix('"').removesuffix('"')
-            metadata[key] = value
-    return metadata
+            key, separator, value = line.partition("=")
+            if not separator or not key or not value:
+                raise ValueError(f"Malformed property at {path}:{line_number}")
+            if key in properties:
+                raise ValueError(f"Duplicate property {key} at {path}:{line_number}")
+            properties[key] = value
+    return properties
 
 #----------------------------------------------------------------
 
@@ -39,12 +39,18 @@ dist_dir            = os.path.abspath(root_dir + "/dist")
 build_dir           = os.path.abspath(root_dir + "/build")
 cache_dir           = os.path.abspath(tempfile.gettempdir() + "/pangea-games-build-cache")
 
-game_metadata       = parse_metadata(src_dir + "/Headers/version.h")
+game_metadata       = parse_properties(root_dir + "/version.properties")
+required_metadata   = ("GAME_NAME", "GAME_FULL_NAME", "GAME_IDENTIFIER", "GAME_VERSION")
+missing_metadata    = [key for key in required_metadata if not game_metadata.get(key)]
+if missing_metadata:
+    raise ValueError(f"Missing required metadata: {', '.join(missing_metadata)}")
 game_name           = game_metadata["GAME_NAME"]  # no spaces
 game_name_human     = game_metadata["GAME_FULL_NAME"]  # spaces and other special characters allowed
 game_package        = game_metadata["GAME_IDENTIFIER"]  # unique package identifier
 game_ver            = game_metadata["GAME_VERSION"]
-game_docs           = ["CHANGELOG.md", "SECRETS.md", "docs/Manual"]
+if len(game_ver.split(".")) != 3 or not all(part.isdigit() for part in game_ver.split(".")):
+    raise ValueError(f"GAME_VERSION must be a three-part numeric version, got {game_ver!r}")
+game_docs           = ["README.md", "CHANGELOG.md", "docs/Manual"]
 
 appimagetool_ver    = "1.9.0"
 
@@ -71,7 +77,7 @@ if SYSTEM == "Darwin":
     help_build = "build app from Xcode project"
     help_package = "package up the game into a DMG"
 elif SYSTEM == "Windows":
-    default_generator = "Visual Studio 18 2026"
+    default_generator = "Visual Studio 17 2022"
     if MACHINE == "ARM64":
         default_architecture = "ARM64"
     else:
@@ -105,6 +111,11 @@ parser.add_argument("--dist-dir", metavar="<dir>", default=dist_dir,
 
 parser.add_argument("--print-artifact-name", default=False, action="store_true",
         help="print artifact name and exit")
+
+if SYSTEM == "Darwin":
+    parser.add_argument("--macos-signing-identity", metavar="<identity>",
+        default="",
+        help="code-sign the macOS app with this identity (default: unsigned)")
 
 if SYSTEM == "Linux":
     parser.add_argument("--system-sdl", default=False, action="store_true",
@@ -249,6 +260,7 @@ class Project:
     def copy_documentation(self, appdir, everything=True):
         shutil.copy(f"{self.dir_name}/ReadMe.txt", f"{appdir}")
         shutil.copy(f"LICENSE.md", f"{appdir}/License.txt")
+        shutil.copy("THIRD-PARTY-LICENSES.md", appdir)
         if not everything:
             return
         os.makedirs(f"{appdir}/Documentation")
@@ -302,25 +314,61 @@ class MacProject(Project):
         self.build_configs = ["RelWithDebInfo"]
         self.build_args += ["-j", str(NPROC), "-quiet"]
         self.gen_args += ["-DSDL_STATIC=ON", "-DSDL_SHARED=OFF"]
+        self.signing_identity = args.macos_signing_identity
+        self.gen_args += [f"-DCMR_MACOS_CODE_SIGN_IDENTITY={self.signing_identity}"]
+
+    def get_configured_signing_identity(self):
+        if self.signing_identity:
+            return self.signing_identity
+
+        cache_path = os.path.join(self.dir_name, "CMakeCache.txt")
+        with contextlib.suppress(FileNotFoundError):
+            with open(cache_path, encoding="utf-8") as cache_file:
+                prefix = "CMR_MACOS_CODE_SIGN_IDENTITY:STRING="
+                for line in cache_file:
+                    if line.startswith(prefix):
+                        return line[len(prefix):].rstrip("\r\n")
+
+        return ""
+
+    def verify_code_signature(self, app_path):
+        if not self.get_configured_signing_identity():
+            return
+
+        call(["codesign", "--verify", "--deep", "--strict",
+            "--all-architectures", "--verbose=2", app_path])
+        call(["codesign", "--display", "--verbose=2", app_path])
+
+    def build(self):
+        super().build()
+        release_config = self.build_configs[0]
+        self.verify_code_signature(
+            f"{self.dir_name}/{release_config}/{game_name}.app")
 
     def get_artifact_name(self):
         return f"{game_name}-{game_ver}-mac.dmg"
 
     def package(self):
         release_config = self.build_configs[0]
-        appdir = f"{self.dir_name}/{release_config}"
-
-        # Human-friendly name for .app
-        os.rename(f"{appdir}/{game_name}.app", f"{appdir}/{game_name_human}.app")
-
-        self.copy_documentation(appdir)
+        source_app = f"{self.dir_name}/{release_config}/{game_name}.app"
 
         rm_if_exists(self.get_artifact_path())
-        call(["hdiutil", "create",
-            "-fs", "HFS+",
-            "-srcfolder", appdir,
-            "-volname", f"{game_name_human} {game_ver}",
-            self.get_artifact_path()])
+        os.makedirs(cache_dir, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix=f"{game_name}-dmg-", dir=cache_dir) as staging_dir:
+            staged_app = os.path.join(staging_dir, f"{game_name_human}.app")
+            shutil.copytree(source_app, staged_app, symlinks=True)
+            self.copy_documentation(staging_dir)
+
+            self.verify_code_signature(staged_app)
+
+            call(["hdiutil", "create",
+                "-ov",
+                "-format", "UDZO",
+                "-imagekey", "zlib-level=9",
+                "-fs", "HFS+",
+                "-srcfolder", staging_dir,
+                "-volname", f"{game_name_human} {game_ver}",
+                self.get_artifact_path()])
 
 
 class LinuxProject(Project):

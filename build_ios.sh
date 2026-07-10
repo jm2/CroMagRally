@@ -63,7 +63,11 @@ APP_BUNDLE="$BUILD_DIR/$OUT_SUBDIR/CroMagRally.app"
 # Step 3 (optional): wrap the .app in the conventional Payload/ layout as an UNSIGNED .ipa
 # for sideload/re-sign tools (AltStore / Sideloadly). Device target only.
 if [ "${PACKAGE:-0}" == "1" ] && [ "$TARGET" == "device" ]; then
-    GAME_VERSION=$(grep -m1 'set(GAME_VERSION' CMakeLists.txt | sed -E 's/.*"([^"]+)".*/\1/')
+    GAME_VERSION=$(sed -n 's/^GAME_VERSION=//p' version.properties)
+    if [ -z "$GAME_VERSION" ]; then
+        echo "Error: GAME_VERSION is missing from version.properties"
+        exit 1
+    fi
     IPA="CroMagRally-${GAME_VERSION}-ios-unsigned.ipa"
     echo "=== Packaging $IPA (UNSIGNED; re-sign with AltStore/Sideloadly to install) ==="
     rm -rf Payload "$IPA"

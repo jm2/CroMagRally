@@ -2,20 +2,58 @@ plugins {
      id 'com.android.application'
 }
 
+def versionPropertiesFile = rootProject.file('../version.properties')
+if (!versionPropertiesFile.isFile()) {
+    throw new GradleException("Missing shared version file: ${versionPropertiesFile}")
+}
+
+def versionProperties = new Properties()
+versionPropertiesFile.withInputStream { versionProperties.load(it) }
+
+def requiredVersionProperty = { String propertyName ->
+    def propertyValue = versionProperties.getProperty(propertyName)?.trim()
+    if (!propertyValue) {
+        throw new GradleException("${propertyName} is missing from version.properties")
+    }
+    propertyValue
+}
+
+def gameFullName = requiredVersionProperty('GAME_FULL_NAME')
+def gameIdentifier = requiredVersionProperty('GAME_IDENTIFIER')
+def gameVersion = requiredVersionProperty('GAME_VERSION')
+def androidVersionCode = requiredVersionProperty('ANDROID_VERSION_CODE')
+def externalNdkPath = System.getenv('ANDROID_NDK_HOME')?.trim()
+if (!(androidVersionCode ==~ /[1-9]\d*/)) {
+    throw new GradleException('ANDROID_VERSION_CODE in version.properties must be a positive integer')
+}
+
 android {
-    namespace "io.jor.cromagrally"
+    namespace gameIdentifier
     compileSdkVersion 35
     buildToolsVersion "37.0.0"
+    ndkVersion "29.0.14206865"
+    if (externalNdkPath) {
+        // Build scripts validate the external revision before invoking Gradle. Keeping
+        // the path in the environment avoids committing a machine-specific ndkPath.
+        ndkPath externalNdkPath
+    }
     defaultConfig {
-        applicationId "io.jor.cromagrally"
+        applicationId gameIdentifier
         minSdkVersion 24
         targetSdkVersion 35
-        versionCode 2
-        versionName "3.1.0"
+        versionCode androidVersionCode.toInteger()
+        versionName gameVersion
+        manifestPlaceholders = [applicationLabel: gameFullName]
     }
 
     buildTypes {
+        debug {
+            // Keep symbols in locally assembled APKs for native crash diagnosis.
+            jniDebuggable true
+        }
         release {
+            // Release packaging must run stripReleaseDebugSymbols with the pinned NDK.
+            jniDebuggable false
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             // Disable AAPT2 PNG crunching on release. Debug never crunches, so a bitmap that
