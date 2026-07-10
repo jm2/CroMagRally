@@ -112,3 +112,59 @@ tasks.register('verifySdlJavaGlue') {
 tasks.named('preBuild').configure {
     dependsOn tasks.named('verifySdlJavaGlue')
 }
+
+def stagedAssetsDir = file('src/main/assets')
+def stagedJniLibsDir = file('src/main/jniLibs')
+def verifyStagedPackageInputs = tasks.register('verifyStagedPackageInputs') {
+    group = 'verification'
+    description = 'Checks that the native libraries and game assets were staged by the repository build wrapper.'
+
+    // This task intentionally has no mandatory Gradle file inputs.  It must run
+    // even when the generated staging directories do not exist so it can emit an
+    // actionable error instead of Gradle's generic missing-input diagnostic.
+    doLast {
+        def missing = []
+        [
+            new File(stagedAssetsDir, 'Data/files.txt'),
+            new File(stagedAssetsDir, 'Data/System/gamecontrollerdb.txt'),
+            new File(stagedAssetsDir, 'LICENSE.md'),
+            new File(stagedAssetsDir, 'THIRD-PARTY-LICENSES.md'),
+        ].each { requiredFile ->
+            if (!requiredFile.isFile() || requiredFile.length() == 0) {
+                missing << project.relativePath(requiredFile)
+            }
+        }
+
+        def stagedAbis = stagedJniLibsDir.isDirectory()
+            ? (stagedJniLibsDir.listFiles() ?: []).findAll { it.isDirectory() }.sort { it.name }
+            : []
+        if (stagedAbis.isEmpty()) {
+            missing << "${project.relativePath(stagedJniLibsDir)}/<ABI>/{libmain.so,libSDL3.so}"
+        } else {
+            stagedAbis.each { abiDir ->
+                ['libmain.so', 'libSDL3.so'].each { libraryName ->
+                    def library = new File(abiDir, libraryName)
+                    if (!library.isFile() || library.length() == 0) {
+                        missing << project.relativePath(library)
+                    }
+                }
+            }
+        }
+
+        if (!missing.isEmpty()) {
+            throw new GradleException(
+                "Android package inputs have not been staged by the repository build wrapper. " +
+                "Run build_android.sh (or build_android.ps1) from the repository root. " +
+                "Missing or empty: ${missing.join(', ')}")
+        }
+    }
+}
+
+// Packaging consumes generated source-tree directories that are deliberately
+// gitignored.  Put the check immediately before AGP snapshots either directory;
+// lint and other non-packaging Gradle tasks remain independently usable.
+tasks.configureEach { task ->
+    if (task.name ==~ /^merge(?:Debug|Release)(?:Assets|JniLibFolders)$/) {
+        task.dependsOn verifyStagedPackageInputs
+    }
+}

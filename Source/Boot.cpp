@@ -223,13 +223,29 @@ static void Boot(int argc, char **argv) {
           if (line.back() == '\r')
             line.pop_back();
 
+          // Normalize once, require a file below the Data directory, and use that
+          // normalized path for both sides of the copy.  Validating one spelling
+          // but passing the raw manifest line to SDL/filesystem APIs would leave a
+          // path-traversal gap between the check and its use.
           fs::path assetPath = fs::path(line).lexically_normal();
-          bool safePath = !assetPath.is_absolute() && line.rfind("Data/", 0) == 0;
-          for (const fs::path &component : assetPath) {
-            if (component == "..") {
-              safePath = false;
-              break;
+          fs::path relativeAssetPath;
+          bool safePath = !line.empty() && line.find('\0') == std::string::npos &&
+                          !assetPath.empty() && !assetPath.is_absolute();
+          auto component = assetPath.begin();
+          if (!safePath || component == assetPath.end() ||
+              *component != fs::path("Data")) {
+            safePath = false;
+          } else {
+            for (++component; component != assetPath.end(); ++component) {
+              if (component->empty() || *component == fs::path(".") ||
+                  *component == fs::path("..")) {
+                safePath = false;
+                break;
+              }
+              relativeAssetPath /= *component;
             }
+            if (relativeAssetPath.empty())
+              safePath = false;
           }
           if (!safePath) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
@@ -238,25 +254,29 @@ static void Boot(int argc, char **argv) {
             break;
           }
 
+          const std::string normalizedAssetPath = assetPath.generic_string();
+
           // Create parent directories
-          fs::path filePath = stagingDir / line.substr(5);
+          fs::path filePath = stagingDir / relativeAssetPath;
           fs::create_directories(filePath.parent_path());
 
           // Copy
           size_t dataSize;
-          void *data = SDL_LoadFile(line.c_str(), &dataSize);
+          void *data = SDL_LoadFile(normalizedAssetPath.c_str(), &dataSize);
           if (data) {
             if (!SDL_SaveFile(
                     reinterpret_cast<const char *>(filePath.u8string().c_str()),
                     data, dataSize)) {
               SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                           "Failed to save extracted asset: %s", line.c_str());
+                           "Failed to save extracted asset: %s",
+                           normalizedAssetPath.c_str());
               extractionOK = false;
             }
             SDL_free(data);
           } else {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                         "Failed to load asset: %s", line.c_str());
+                         "Failed to load asset: %s",
+                         normalizedAssetPath.c_str());
             extractionOK = false;
           }
           if (!extractionOK)
