@@ -619,6 +619,8 @@ OGLVector2D	aimVec, toVec;
 void ChooseTaggedPlayer(void)
 {
 short	i,j;
+	for (int p = 0; p < gNumTotalPlayers; p++)
+		gPlayerInfo[p].isIt = false;
 
 	i = j = RandomRange(0, gNumTotalPlayers-1);
 
@@ -760,7 +762,6 @@ ObjNode *obj;
 		obj = obj->ChainNode;
 	}
 }
-
 
 
 

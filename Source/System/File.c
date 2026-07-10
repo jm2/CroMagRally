@@ -1069,6 +1069,8 @@ Ptr						tempBuffer16 = nil;
 	gNumPaths              	= (**header).numPaths;
 	gNumCheckpoints			= (**header).numCheckpoints;
 	ReleaseResource(hand);
+	if (gNumCheckpoints < 0 || gNumCheckpoints > MAX_CHECKPOINTS)
+		DoFatalAlert("ReadDataFromPlayfieldFile: invalid checkpoint count %ld", gNumCheckpoints);
 
 	if ((gTerrainTileWidth % SUPERTILE_SIZE) != 0)		// terrain must be non-fractional number of supertiles in w/h
 		DoFatalAlert("ReadDataFromPlayfieldFile: terrain width not a supertile multiple");
@@ -1433,9 +1435,6 @@ Ptr						tempBuffer16 = nil;
 
 	if (gNumCheckpoints > 0)
 	{
-		if (gNumCheckpoints > MAX_CHECKPOINTS)
-			DoFatalAlert("ReadDataFromPlayfieldFile: gNumCheckpoints > MAX_CHECKPOINTS");
-
 				/* READ CHECKPOINT LIST */
 
 		hand = GetResource('CkPt',1000);
@@ -1443,8 +1442,19 @@ Ptr						tempBuffer16 = nil;
 		{
 			DetachResource(hand);
 			HLock(hand);
+			const Size expectedCheckpointBytes = (Size) gNumCheckpoints * sizeof(CheckpointDefType);
+			const Size checkpointResourceBytes = GetHandleSize(hand);
+			if (checkpointResourceBytes != expectedCheckpointBytes)
+			{
+				ReleaseResource(hand);
+				DoFatalAlert(
+					"ReadDataFromPlayfieldFile: CkPt resource size mismatch (got %d, expected %d)",
+					(int) checkpointResourceBytes,
+					(int) expectedCheckpointBytes);
+				return;
+			}
 			UNPACK_STRUCTS_HANDLE(">HH2f2f", CheckpointDefType, gNumCheckpoints, hand);
-			BlockMove(*hand, &gCheckpointList[0], GetHandleSize(hand));
+			BlockMove(*hand, &gCheckpointList[0], expectedCheckpointBytes);
 			ReleaseResource(hand);
 
 						/* CONVERT COORDINATES */

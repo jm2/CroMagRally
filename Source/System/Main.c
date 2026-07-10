@@ -1637,8 +1637,10 @@ short	i,t,winner;
 
 				if (gPlayerInfo[gWhoIsIt].tagTimer <= 0.0f)					// if done, then eliminate this player from the battle
 				{
-					gPlayerInfo[gWhoIsIt].tagTimer = 0;
-					gPlayerInfo[gWhoIsIt].isEliminated = true;
+					const short eliminatedPlayer = gWhoIsIt;
+					gPlayerInfo[eliminatedPlayer].tagTimer = 0;
+					gPlayerInfo[eliminatedPlayer].isEliminated = true;
+					gPlayerInfo[eliminatedPlayer].isIt = false;
 
 					gNumPlayersEliminated++;
 					if (gNumPlayersEliminated == (gNumTotalPlayers-1))		// if all players eliminated except 1 then we're done!
@@ -1666,7 +1668,7 @@ short	i,t,winner;
 							/* ELIMINATE THIS PLAYER AND CHOOSE ANOTHER */
 					else
 					{
-						ShowWinLose(gWhoIsIt, 0, 0);						// this player is eliminated
+						ShowWinLose(eliminatedPlayer, 0, 0);					// this player is eliminated
 						ChooseTaggedPlayer();								// tagged guy is gone, so choose a new one
 					}
 

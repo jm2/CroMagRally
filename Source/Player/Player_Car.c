@@ -1831,6 +1831,8 @@ short		p2 = car2->PlayerNum;
 		case	GAME_MODE_TAG2:
 				if (!gTrackCompleted)
 				{
+					if (gPlayerInfo[p1].isEliminated || gPlayerInfo[p2].isEliminated)
+						break;
 
 						/* CAR 1 WAS IT */
 
@@ -3224,10 +3226,10 @@ ObjNode	*obj;
 				PlayerLoseHealth(i, d2 / BLAST_DAMAGE);
 			}
 
-				/* CAUSE DROP TORCH */
+				/* CAUSE DROP FLAG */
 
 			else
-			if (gGameMode == GAME_MODE_SURVIVAL)
+			if (gGameMode == GAME_MODE_CAPTUREFLAG)
 				PlayerDropFlag(obj);
 
 
@@ -3599,7 +3601,6 @@ new_group:
 
 
 }
-
 
 
 
