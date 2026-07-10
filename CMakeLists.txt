@@ -485,6 +485,7 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 	add_executable(CroMagRallyValidationTests
 		Tests/ValidationTests.c
 		Source/Network/NetValidation.c
+		Source/System/DeterministicMath.c
 		Source/System/TextUtils.c)
 	target_include_directories(CroMagRallyValidationTests PRIVATE ${GAME_SRCDIR}/Headers)
 	if(MSVC)

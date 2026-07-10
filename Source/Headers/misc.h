@@ -5,6 +5,7 @@
 #pragma once
 
 #include <stdarg.h>
+#include "deterministic_math.h"
 
 void	DoAlert(const char* format, ...);
 POMME_NORETURN void DoFatalAlert(const char* format, ...);
@@ -23,11 +24,11 @@ void *AllocPtrClear(long size);
 void *ReallocPtr(void* initialPtr, long newSize);
 void SafeDisposePtr(void* ptr);
 extern	void InitMyRandomSeed(void);
+float DeterministicSimEventFloat(uint32_t eventTag, uint32_t entityKey, uint32_t sampleIndex);
 
 int PositiveModulo(int value, unsigned int m);
 void InitPrefsFolder(bool createIt);
 extern	float RandomFloat(void);
-extern	float ChaoticFloat(float seedVal, int modifier); // Stateless/Safe for sensitive physics
 extern	float VisualRandomFloat(void); // Now maps to LocalRNG
 uint16_t	RandomRange(unsigned short min, unsigned short max);
 extern	void ShowSystemErr_NonFatal(long err);

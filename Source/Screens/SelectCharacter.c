@@ -162,9 +162,9 @@ ObjNode	*multiplayerText = NULL;
 			/*****************/
 
 
-			/* SEE IF DOING 2-PLAYER LOCALLY */
+			/* CREATE PLAYER/TEAM LABEL WHEN NEEDED */
 
-	if (gNumLocalPlayers > 1)
+	if (gNumLocalPlayers > 1 || gGameMode == GAME_MODE_CAPTUREFLAG)
 	{
 		NewObjectDefinitionType newObjDef =
 		{
@@ -411,5 +411,3 @@ short	p;
 
 	return(false);
 }
-
-

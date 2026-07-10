@@ -2022,13 +2022,15 @@ short		p2 = car2->PlayerNum;
 		car1->DeltaRot.y = PI2 * (1.0f- dot) * .1f;
 		car2->DeltaRot.y = -PI2 * (1.0f - dot) * .1f;
 
-		// Use ChaoticFloat (stateless) here to avoid advancing global SimRNG conditionally
-		// which causes desync on Android/ARM vs Intel due to float precision differences.
-		car1->DeltaRot.x = (ChaoticFloat(relSpeed, car1->PlayerNum) -.5f) * 3.0f;
-		car1->DeltaRot.z = (ChaoticFloat(relSpeed, car1->PlayerNum + 10) -.5f) * 3.0f;
+		// Collision jitter must be independent of locally corrected speed and call ordering.
+		uint32_t entityKey = DeterministicUnorderedPairKey(
+			(uint32_t) car1->PlayerNum,
+			(uint32_t) car2->PlayerNum);
+		car1->DeltaRot.x = (DeterministicSimEventFloat(kDeterministicEvent_CarCollision, entityKey, (uint32_t) car1->PlayerNum * 2) -.5f) * 3.0f;
+		car1->DeltaRot.z = (DeterministicSimEventFloat(kDeterministicEvent_CarCollision, entityKey, (uint32_t) car1->PlayerNum * 2 + 1) -.5f) * 3.0f;
 		
-		car2->DeltaRot.x = (ChaoticFloat(relSpeed, car2->PlayerNum) -.5f) * 3.0f;
-		car2->DeltaRot.z = (ChaoticFloat(relSpeed, car2->PlayerNum + 10) -.5f) * 3.0f;
+		car2->DeltaRot.x = (DeterministicSimEventFloat(kDeterministicEvent_CarCollision, entityKey, (uint32_t) car2->PlayerNum * 2) -.5f) * 3.0f;
+		car2->DeltaRot.z = (DeterministicSimEventFloat(kDeterministicEvent_CarCollision, entityKey, (uint32_t) car2->PlayerNum * 2 + 1) -.5f) * 3.0f;
 
 				/* SET SKID INFO */
 
@@ -3597,9 +3599,6 @@ new_group:
 
 
 }
-
-
-
 
 
 

@@ -50,6 +50,20 @@ static void MoveSeaMine(ObjNode *theNode);
 
 static Boolean DoTrig_Druid(ObjNode *theNode, ObjNode *whoNode, Byte sideBits);
 
+static uint32_t TerrainEventEntityKey(const ObjNode* node)
+{
+	const TerrainItemEntryType* item = node ? node->TerrainItemPtr : NULL;
+	if (!item)
+		return 0;
+
+	uint32_t params = (uint32_t) item->parm[0]
+		| ((uint32_t) item->parm[1] << 8)
+		| ((uint32_t) item->parm[2] << 16)
+		| ((uint32_t) item->parm[3] << 24);
+	uint32_t positionKey = DeterministicPairKey(item->x, item->y);
+	return DeterministicPairKey(positionKey, DeterministicPairKey(item->type, params));
+}
+
 
 /****************************/
 /*    CONSTANTS             */
@@ -887,13 +901,10 @@ float	speed;
 		theNode->Delta.z = gDelta.z * .3f;
 
 	speed *= .0015f;
-	// Use ChaoticFloat (stateless) to avoid network desync
-	// Original logic was RandomFloat2() * speed.
-	// ChaoticFloat is [0..1]. (ChaoticFloat - 0.5) is [-0.5..0.5].
-	// Multiply by 2.0 to get [-1..1], then by speed.
-	theNode->DeltaRot.x = (ChaoticFloat(speed, 1) - 0.5f) * 2.0f * speed; 
-	theNode->DeltaRot.z = (ChaoticFloat(speed, 2) - 0.5f) * 2.0f * speed;
-	theNode->DeltaRot.y = (ChaoticFloat(speed, 3) - 0.5f) * speed; // (raw * .5 * 2 = raw) 
+	// The cactus is no longer collidable after this hit; its tumble is purely visual.
+	theNode->DeltaRot.x = VisualRandomFloat2() * speed;
+	theNode->DeltaRot.z = VisualRandomFloat2() * speed;
+	theNode->DeltaRot.y = VisualRandomFloat2() * speed * 0.5f;
 
 		// The 1999 original spins only the cactus prop (theNode), not the car. The fork's
 		// car-spin on cactus hits (whoNode->DeltaRot) was a non-original addition; removed
@@ -1117,12 +1128,11 @@ static Boolean DoTrig_CampFire(ObjNode *theNode, ObjNode *whoNode, Byte sideBits
 	if (whoNode->Speed3D > 2000.0f)
 	{
 		/* MAKE CAR SPIN WILDLY */
-		// Legacy: VisualRandomFloat2() * 20.0f -> Range [-20..20]
-		// ChaoticFloat is [0..1]. (ChaoticFloat - 0.5) * 2 is [-1..1].
-		// So we need (ChaoticFloat - 0.5) * 2 * 20 = (ChaoticFloat - 0.5) * 40.
-
-		whoNode->DeltaRot.y = (ChaoticFloat(whoNode->Speed3D, whoNode->PlayerNum) - 0.5f) * 40.0f;
-		whoNode->DeltaRot.z = (ChaoticFloat(whoNode->Speed3D, whoNode->PlayerNum+10) - 0.5f) * 20.0f;
+		uint32_t entityKey = DeterministicPairKey(
+			TerrainEventEntityKey(theNode),
+			(uint32_t) whoNode->PlayerNum);
+		whoNode->DeltaRot.y = (DeterministicSimEventFloat(kDeterministicEvent_CampfireHit, entityKey, 0) - 0.5f) * 40.0f;
+		whoNode->DeltaRot.z = (DeterministicSimEventFloat(kDeterministicEvent_CampfireHit, entityKey, 1) - 0.5f) * 20.0f;
 
 
 
@@ -1433,10 +1443,12 @@ short	teamNum;
 
 			/* PUT TORCH ON BASE */
 
-	// The captured-torch placement sets capture/scoring geometry -> sim-affecting, so key it on
-	// the base coord + team via stateless ChaoticFloat instead of the unsynced VisualRandom stream.
-	theTorch->Coord.x = theNode->Coord.x + (ChaoticFloat(theNode->Coord.x, teamNum) - 0.5f) * 2.0f * 100.0f;
-	theTorch->Coord.z = theNode->Coord.z + (ChaoticFloat(theNode->Coord.z, teamNum + 1) - 0.5f) * 2.0f * 100.0f;
+	// Torch placement affects capture geometry, so use stable terrain/team/capture identity only.
+	uint32_t entityKey = DeterministicPairKey(
+		DeterministicPairKey(TerrainEventEntityKey(theNode), (uint32_t) teamNum),
+		(uint32_t) gCapturedFlagCount[teamNum]);
+	theTorch->Coord.x = theNode->Coord.x + (DeterministicStableFloat(kDeterministicEvent_FlagPlace, entityKey, 0) - 0.5f) * 2.0f * 100.0f;
+	theTorch->Coord.z = theNode->Coord.z + (DeterministicStableFloat(kDeterministicEvent_FlagPlace, entityKey, 1) - 0.5f) * 2.0f * 100.0f;
 	theTorch->Coord.y = theNode->Coord.y + gObjectGroupBBoxList[MODEL_GROUP_GLOBAL][GLOBAL_ObjType_TeamBaseRed].max.y;
 
 	UpdateObjectTransforms(theTorch);
@@ -2050,9 +2062,4 @@ short	p;
 
 	return(true);
 }
-
-
-
-
-
 

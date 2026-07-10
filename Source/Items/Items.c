@@ -834,7 +834,7 @@ ObjNode	*newObj;
 
 	// Stumps are solid/collidable (CBITS_ALLSOLID + collision box built from the mesh bbox
 	// below), so the mesh index changes collision geometry -> sim-affecting. Derive the variant
-	// from a PURE, frame-independent hash of the world coords only. ChaoticFloat must NOT be used
+	// from a PURE, frame-independent hash of the world coords only. The frame-varying event hash must NOT be used
 	// here: it folds in gSimulationFrame, and stumps stream in at peer-divergent frames (terrain
 	// streaming is driven by each machine's LOCAL camera position), so routing the persistent
 	// collision variant through it would desync the collision box across peers.
@@ -2023,4 +2023,3 @@ Boolean isVisible;
 		UpdateShadow(theNode);
 	}
 }
-

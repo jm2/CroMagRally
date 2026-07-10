@@ -1285,9 +1285,7 @@ NSpSearchReference NSpSearch_StartSearchingForGameHosts(void)
 	return search;
 
 fail:
-
-
-	SafeDisposePtr((Ptr) search);
+	NSpSearch_Dispose(search);
 	return NULL;
 }
 
@@ -1464,9 +1462,13 @@ static void NSpGame_WaitForClientsToCloseSockets(NSpGame* game)
 	const int retryDelay = 25;
 	const int maxDelay = 1000;
 
-	// 10 tries, 50 ms delay => wait at most half a second for everyone to close
+	// Give peers about one second to receive queued teardown data and close cleanly.
 	for (int tries = 0; tries < maxDelay/retryDelay; tries++)
 	{
+		// The termination message may be queued behind normal traffic. Progress every
+		// nonblocking peer send ring during the grace period before polling for EOF.
+		NSpGame_FlushSends(game);
+
 		int numSocketsToClose = MAX_CLIENTS;
 
 		for (int i = 0; i < MAX_CLIENTS; i++)
@@ -1533,6 +1535,9 @@ int NSpGame_Dispose(NSpGameReference inGame, int disposeFlags)
 	// Erase clients
 	for (int i = 0; i < MAX_CLIENTS; i++)
 	{
+		// NSpPlayer_Clear deliberately doesn't close sockets. Force-close any peer that
+		// didn't cooperate during the bounded grace period before erasing its descriptor.
+		CloseSocket(&game->players[i].sockfd);
 		NSpPlayer_Clear(&game->players[i]);
 	}
 
