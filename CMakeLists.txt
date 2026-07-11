@@ -598,6 +598,9 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 	add_test(
 		NAME version_metadata
 		COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/Tests/VersionMetadataTests.py ${CMAKE_SOURCE_DIR})
+	add_test(
+		NAME localization_data
+		COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/Tests/LocalizationDataTests.py ${CMAKE_SOURCE_DIR})
 	if(WIN32)
 		# Keep the runtime-DLL staging hook beside the executable it belongs to so
 		# target existence and directory scope are unambiguous at configure time.

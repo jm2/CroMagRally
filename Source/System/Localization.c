@@ -7,7 +7,7 @@
 
 #define CSV_PATH ":System:strings.csv"
 
-#define MAX_STRINGS (NUM_LOCALIZED_STRINGS + 1)
+#define MAX_STRINGS NUM_LOCALIZED_STRINGS
 
 static GameLanguageID	gCurrentStringsLanguage = LANGUAGE_ILLEGAL;
 static Ptr				gStringsBuffer = nil;
@@ -67,10 +67,28 @@ void LoadLocalizedStrings(GameLanguageID languageID)
 
 		if (myPhrase != NULL)
 		{
+			if (row >= MAX_STRINGS)
+			{
+				DoFatalAlert(
+					"Too many rows in " CSV_PATH " (expected %d localized strings)",
+					NUM_LOCALIZED_STRINGS - 1);
+				return;
+			}
 			gStringsTable[row] = myPhrase;
 			row++;
 		}
 	}
+
+	if (row != MAX_STRINGS)
+	{
+		DoFatalAlert(
+			"Wrong number of rows in " CSV_PATH " (got %d, expected %d)",
+			row - 1,
+			NUM_LOCALIZED_STRINGS - 1);
+		return;
+	}
+
+	gCurrentStringsLanguage = languageID;
 }
 
 const char* Localize(LocStrID stringID)
@@ -130,4 +148,6 @@ void DisposeLocalizedStrings(void)
 		SafeDisposePtr(gStringsBuffer);
 		gStringsBuffer = nil;
 	}
+
+	gCurrentStringsLanguage = LANGUAGE_ILLEGAL;
 }

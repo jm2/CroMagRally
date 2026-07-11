@@ -1,7 +1,8 @@
 name: Full Compile Check
 
 # Run automatically on pull requests and pushes to master so compile breakage is caught
-# in CI (Linux GCC/Clang, Windows VS2022, macOS), plus manual dispatch for ad-hoc checks.
+# in CI (Linux x86_64/ARM64, Windows VS2022, macOS, Apple mobile and Android), plus
+# manual dispatch for ad-hoc checks.
 on:
   workflow_dispatch:
   pull_request:
@@ -18,8 +19,10 @@ jobs:
       fail-fast: false
       matrix:
         platform:
-          - { name: Linux/GCC, os: ubuntu-latest }
+          # The GCC job also exercises the common CPack/FHS install path with DEB and RPM.
+          - { name: Linux/GCC, os: ubuntu-latest, packageflags: "--deb" }
           - { name: Linux/Clang, os: ubuntu-latest, prefix: "CC=clang CXX=clang++"}
+          - { name: Linux/ARM64, os: ubuntu-24.04-arm }
           - { name: Windows/VS2022, os: windows-2022, extraflags: "-G 'Visual Studio 17 2022'" }
           - { name: Mac, os: macos-latest }
 
@@ -40,19 +43,31 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with: {submodules: 'recursive'}
 
-      - run: ${{matrix.platform.prefix}} python3 build.py --dependencies --configure --build ${{matrix.platform.extraflags}}
+      - name: Install RPM packaging tool
+        if: matrix.platform.name == 'Linux/GCC'
+        run: sudo apt install -y rpm
+
+      - run: ${{matrix.platform.prefix}} python3 build.py --dependencies --configure --build ${{matrix.platform.packageflags}} ${{matrix.platform.extraflags}}
+
+      - name: Verify native Linux packages
+        if: matrix.platform.name == 'Linux/GCC'
+        run: |
+          test -s ../dist/*.deb
+          cpack -G RPM --config CPackConfig.cmake
+          test -s ./*.rpm
+        working-directory: build
 
       - name: Run validation tests (Linux)
         if: runner.os == 'Linux'
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build --output-on-failure --no-tests=error
 
       - name: Run validation tests (Windows)
         if: runner.os == 'Windows'
-        run: ctest --test-dir build --build-config Release --output-on-failure
+        run: ctest --test-dir build --build-config Release --output-on-failure --no-tests=error
 
       - name: Run validation tests (macOS)
         if: runner.os == 'macOS'
-        run: ctest --test-dir build --build-config RelWithDebInfo --output-on-failure
+        run: ctest --test-dir build --build-config RelWithDebInfo --output-on-failure --no-tests=error
 
       - name: Configure sanitizer validation tests
         if: matrix.platform.name == 'Linux/GCC'
@@ -62,7 +77,37 @@ jobs:
         if: matrix.platform.name == 'Linux/GCC'
         run: |
           cmake --build build-sanitize --target CroMagRallyValidationTests PommeFileTests PommeIEEEExtendedTests --parallel 2
-          ctest --test-dir build-sanitize --output-on-failure
+          ctest --test-dir build-sanitize --output-on-failure --no-tests=error
+
+  # Compile the exact unsigned ARM64 device targets used by the release workflow. Running
+  # the developer scripts catches SDK, bundle, SDL static-link and mobile CMake regressions;
+  # packaging/signing stays in ReleaseBuilds.yml.
+  apple-mobile-check:
+    name: Apple mobile (${{ matrix.target.name }})
+    runs-on: macos-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - { name: iOS, script: build_ios.sh }
+          - { name: tvOS, script: build_tvos.sh }
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with: {submodules: 'recursive'}
+
+      - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Compile unsigned ${{ matrix.target.name }} device app
+        env:
+          CODE_SIGNING_ALLOWED: "NO"
+        run: ./${{ matrix.target.script }} device
+
+  # Arch/Flatpak and Windows ARM64 remain release gates: each needs its own full build
+  # environment and would duplicate the expensive SDL/game compile. Linux ARM64 covers
+  # native ARM code generation here, while DEB+RPM cover the shared CPack/FHS package path.
 
   # The desktop matrix above can't catch breakage in the Android NDK build or the mobile
   # branches of the shared CMakeLists, which otherwise only surface at release-tag time.

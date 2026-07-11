@@ -58,11 +58,6 @@ static SDL_Gamepad *TryOpenAnyUnusedGamepad(bool showMessage);
 static int GetGamepadSlotFromJoystick(SDL_JoystickID joystickID);
 static void CloseGamepad(int gamepadSlot);
 
-// Touch Controls (enabled on all platforms, hidden until touch event)
-#if defined(__ANDROID__) || (defined(__IOS__) && !defined(__TVOS__))
-static SDL_Sensor *gAccelerometer = NULL;
-#endif
-
 // Touch Debugging
 #define TOUCH_DEBUG_LINES 0
 
@@ -246,27 +241,6 @@ static void EnableVirtualJoystick(void) {
     SDL_Log("Failed to add Virtual Gamepad: %s", SDL_GetError());
   }
 }
-
-#if defined(__ANDROID__) || (defined(__IOS__) && !defined(__TVOS__))
-static void InitMobileInput(void) {
-  InitTouchData();
-
-  if (!gAccelerometer) {
-    int num_sensors = 0;
-    SDL_SensorID *sensorIDs = SDL_GetSensors(&num_sensors);
-    if (sensorIDs) {
-      for (int i = 0; i < num_sensors; ++i) {
-        if (SDL_GetSensorTypeForID(sensorIDs[i]) == SDL_SENSOR_ACCEL) {
-          gAccelerometer = SDL_OpenSensor(sensorIDs[i]);
-          if (gAccelerometer)
-            break;
-        }
-      }
-      SDL_free(sensorIDs);
-    }
-  }
-}
-#endif
 
 void ValidateActiveFingers(void) {
     int num_touch_devices = 0;
@@ -711,9 +685,6 @@ void DoSDLMaintenance(void) {
 
   // Initialize touch input data (but don't create joystick yet on desktop)
   InitTouchData();
-#if defined(__ANDROID__) || (defined(__IOS__) && !defined(__TVOS__))
-  InitMobileInput();
-#endif
 
   /**********************/
   /* DO SDL MAINTENANCE */
@@ -748,7 +719,7 @@ void DoSDLMaintenance(void) {
     case SDL_EVENT_FINGER_MOTION: {
 #if !defined(__TVOS__)
       // Only activate touch controls from real touch events (not mouse-simulated)
-      if (event.tfinger.touchID == SDL_TOUCH_MOUSEID) break;
+      if (event.tfinger.touchID == SDL_MOUSE_TOUCHID) break;
 
       if (!gTouchControlsActive) {
          EnableVirtualJoystick(); // Lazy create

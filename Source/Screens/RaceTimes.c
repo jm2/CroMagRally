@@ -132,6 +132,14 @@ static Boolean IsNewRecord(int track, int rank)
 // Returns new rank, or negative value if not rankable
 int SaveRaceTime(int playerNum)
 {
+	// Scoreboard storage has rows for race tracks only. Network configuration validation
+	// enforces this too, but keep the persistence boundary safe if a caller ever installs
+	// an invalid track through a command line, custom asset, or future code path.
+	if ((unsigned int) gTrackNum >= NUM_RACE_TRACKS)
+	{
+		return -1;
+	}
+
 	const PlayerInfoType* pi = &gPlayerInfo[playerNum];
 	float raceTime = GetRaceTime(playerNum);
 	ScoreboardRecord* trackRecords = gScoreboard.records[gTrackNum];

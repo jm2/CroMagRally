@@ -102,6 +102,10 @@ static void UpdateNetGatherPrompt(void)
 			output = Localize(STR_YOU_WERE_KICKED);
 			break;
 
+		case kNetSequence_ClientOfflineBecauseJoinDenied:
+			output = Net_GetJoinDeniedReason();
+			break;
+
 		case kNetSequence_OfflineEverybodyLeft:
 			output = Localize(STR_EVERYBODY_LEFT);
 			break;
@@ -307,4 +311,3 @@ static int DoNetGatherControls(void)
 
 	return 0;
 }
-

@@ -34,7 +34,6 @@
 static OSErr HostSendGameConfigInfo(void);
 static Boolean HandleGameConfigMessage(NetConfigMessage *inMessage);
 static Boolean HandleOtherNetMessage(NSpMessageHeader	*message);
-static Boolean HandleOtherNetMessage(NSpMessageHeader	*message);
 static void PlayerUnexpectedlyLeavesGame(NSpPlayerLeftMessage *mess);
 static int FindHumanByNSpPlayerID(NSpPlayerID playerID);
 int Net_GetConnectionHint(void);
@@ -47,9 +46,10 @@ int Net_GetConnectionHint(void);
 #define LOADING_TIMEOUT	15						// # seconds to wait for clients to load a level
 
 // CMR7 Stage 4: frame-aligned events + connection-liveness policy.
-#define NET_BADGE_MS		1000				// >1s silence from a peer -> connection badge (substitution continues)
-#define NET_DROP_MS			30000				// 30s mobile-background grace before host bot conversion / client error
-#define NET_KEEPALIVE_MS	50					// 20Hz heartbeat throttle (lobby/barriers only; in-game streams 60pps)
+#define NET_BADGE_MS			1000				// >1s silence from a peer -> connection badge (substitution continues)
+#define NET_SILENCE_DROP_MS	5000				// deterministic clients cannot resume missed frames: drop after a short stall
+#define NET_KEEPALIVE_MS		50					// 20Hz heartbeat throttle (lobby/barriers only; in-game streams 60pps)
+#define NET_SEQUENCE_MESSAGE_BUDGET 32			// drain bursts without starving rendering/event processing
 
 /**********************/
 /*     VARIABLES      */
@@ -72,6 +72,9 @@ Str32			gPlayerNameStrings[MAX_PLAYERS];
 
 uint32_t			gClientSendCounter[MAX_PLAYERS];
 uint32_t			gHostSendCounter;
+
+static char			gNetJoinDeniedReason[sizeof(((NSpJoinDeniedMessage*) 0)->reason)] =
+	"THE HOST DENIED THE JOIN REQUEST.";
 
 NetHostControlInfoMessageType	gHostOutMess;
 NetClientControlInfoMessageType	gClientOutMess;
@@ -141,9 +144,16 @@ static inline Boolean IsValidPlayerNum(int n)
 
 static void MarkPlayerSynced(NSpPlayerID playerID)
 {
-	if (playerID < 0 || playerID >= 32)				// 1 << playerID is undefined outside this range
+	if (playerID < kNSpHostID || playerID >= kNSpHostID + MAX_CLIENTS)
 		return;
-	gPlayerSyncMask |= 1 << playerID;
+	gPlayerSyncMask |= 1u << (uint32_t) playerID;
+}
+
+static void ForgetPlayerSync(NSpPlayerID playerID)
+{
+	if (playerID < kNSpHostID || playerID >= kNSpHostID + MAX_CLIENTS)
+		return;
+	gPlayerSyncMask &= ~(1u << (uint32_t) playerID);
 }
 
 // (PlayerIsSynced was only used by the deleted HostReceive busy-spin; the lobby/level-prep
@@ -153,7 +163,8 @@ static Boolean AreAllPlayersSynced(void)
 
 {
 	uint32_t targetMask = NSpGame_GetActivePlayersIDMask(gNetGame);
-	return 0 == (gPlayerSyncMask ^ targetMask);
+	gPlayerSyncMask = NetRetainActiveSyncBits(gPlayerSyncMask, targetMask);
+	return NetAreAllActivePlayersSynced(gPlayerSyncMask, targetMask);
 }
 
 
@@ -381,7 +392,7 @@ static void RecordFrameEvent(uint32_t effectiveFrame, uint8_t type, int8_t playe
 }
 
 // HOST: schedule a frame-aligned event. Deduped against any un-applied (type,playerNum) already in
-// flight so a leave + a >10s drop for the same player don't double-convert. effectiveFrame is the
+// flight so a leave + a silence-timeout drop for the same player don't double-convert. effectiveFrame is the
 // frame ABOUT to be sent (gHostSendCounter) + lead, so all clients receive it before applying.
 static void Host_ScheduleFrameEvent(uint8_t type, int playerNum)
 {
@@ -534,9 +545,10 @@ void ApplyPendingFrameEvents(void)
 //
 // CMR7 Stage 4: per-connection lastHeard policy, replacing the old session-killing 4-strike
 // DATA_TIMEOUT. Called once/frame each role (main loop + pause). >1s silence raises a badge but
-// substitution continues; >10s schedules a frame-aligned become-bot (host) / errors out (client).
-// The TCP keepalive (5s + 3x1s) is the independent dead-peer backstop, surfacing ~8s as a
-// synthesized PlayerLeft/GameTerminated that feeds the same conversion path.
+// substitution continues. A deterministic client cannot resume after missing seconds of host
+// simulation, so sustained silence explicitly schedules a frame-aligned bot conversion and closes
+// that peer instead of claiming a long mobile-background grace that finite send buffers cannot honor.
+// Outbound-ring pressure may detect and drop an unread peer even sooner through the same leave path.
 //
 void NetCheck_ConnectionTimeouts(void)
 {
@@ -560,15 +572,22 @@ void NetCheck_ConnectionTimeouts(void)
 
 			uint32_t dt = now - NSpPlayer_GetLastHeard(gNetGame, pid);
 			gNetBadge[pn] = (dt > NET_BADGE_MS);			// substitution keeps the sim alive regardless
-			if (dt > NET_DROP_MS)
-				Host_ScheduleFrameEvent(kEvBecomeBot, pn);	// deduped; host keeps substituting until effectiveFrame
+			if (dt > NET_SILENCE_DROP_MS)
+			{
+				// Record the deterministic conversion before removing the low-level peer. Remaining
+				// clients ignore the immediate PlayerLeft during gameplay and apply this event from
+				// the ordered host-control stream at the same simulation frame as the host.
+				Host_ScheduleFrameEvent(kEvBecomeBot, pn);
+				NSpPlayer_Kick(gNetGame, pid);
+				break;								// active-player indexing changed; resume next frame
+			}
 		}
 	}
 	else if (gIsNetworkClient)
 	{
 		uint32_t dt = now - NSpGame_GetHostLastHeard(gNetGame);
 		gNetBadge[0] = (dt > NET_BADGE_MS);
-		if (dt > NET_DROP_MS)
+		if (dt > NET_SILENCE_DROP_MS)
 			NetGameFatalError(kNetSequence_ErrorNoResponseFromHost);
 	}
 }
@@ -597,7 +616,7 @@ void Net_MaybeSendKeepAlive(void)
 }
 
 // CMR7 Stage 4: reset every per-connection liveness clock to now. Called at game-loop entry so the
-// long lobby/vehicle-select/level-load gap (which can exceed NET_DROP_MS) can never trip a false drop.
+// long lobby/vehicle-select/level-load gap can never trip a false drop on game-loop entry.
 void Net_RefreshLastHeard(void)
 {
 	if (!gNetGameInProgress || gNetGame == nil)
@@ -689,9 +708,32 @@ void EndNetworkGame(void)
 
 #pragma mark - Net sequence
 
+static void SetJoinDeniedReason(const NSpJoinDeniedMessage* denied)
+{
+	size_t out = 0;
+
+	for (size_t in = 0;
+		in < sizeof(denied->reason) && denied->reason[in] != '\0' && out + 1 < sizeof(gNetJoinDeniedReason);
+		in++)
+	{
+		unsigned char c = (unsigned char) denied->reason[in];
+		if (c >= 0x20 && c <= 0x7e)
+			gNetJoinDeniedReason[out++] = (char) c;
+	}
+
+	gNetJoinDeniedReason[out] = '\0';
+	if (out == 0)
+		SDL_strlcpy(gNetJoinDeniedReason, "THE HOST DENIED THE JOIN REQUEST.", sizeof(gNetJoinDeniedReason));
+}
+
+const char* Net_GetJoinDeniedReason(void)
+{
+	return gNetJoinDeniedReason;
+}
+
 /****************** NETWORK SEQUENCE *********************/
 
-bool UpdateNetSequence(void)
+static bool UpdateNetSequenceOnce(Boolean runFrameTicks)
 {
 	NSpMessageHeader* message = NULL;
 
@@ -699,13 +741,14 @@ bool UpdateNetSequence(void)
 	{
 		case kNetSequence_HostLobbyOpen:
 		{
-			if (kNSpRC_OK != NSpGame_AdvertiseTick(gNetGame, gFramesPerSecondFrac))
+			if (runFrameTicks && kNSpRC_OK != NSpGame_AdvertiseTick(gNetGame, gFramesPerSecondFrac))
 			{
 				gNetSequenceState = kNetSequence_Error;
 				break;
 			}
 
-			NSpGame_AcceptNewClient(gNetGame);
+			if (runFrameTicks)
+				NSpGame_AcceptNewClient(gNetGame);
 
 			message = NSpMessage_Get(gNetGame);
 
@@ -727,6 +770,8 @@ bool UpdateNetSequence(void)
 		}
 
 		case kNetSequence_HostReadyToStartGame:
+			if (!runFrameTicks)
+				break;
 			NSpGame_StopAdvertising(gNetGame);
 			NSpGame_StopAcceptingNewClients(gNetGame);
 			SetNetworkDiscoveryMode(false);
@@ -741,6 +786,8 @@ bool UpdateNetSequence(void)
 			break;
 
 		case kNetSequence_ClientSearchingForGames:
+			if (!runFrameTicks)
+				break;
 			if (kNSpRC_OK != NSpSearch_Tick(gNetSearch))
 			{
 				gNetSequenceState = kNetSequence_Error;
@@ -752,6 +799,8 @@ bool UpdateNetSequence(void)
 			break;
 
 		case kNetSequence_ClientFoundGames:
+			if (!runFrameTicks)
+				break;
 			if (kNSpRC_OK != NSpSearch_Tick(gNetSearch))
 			{
 				gNetSequenceState = kNetSequence_Error;
@@ -803,6 +852,12 @@ bool UpdateNetSequence(void)
 					printf("Join approved! My player ID is %d\n", approvedMessage->header.to);
 					break;
 				}
+
+				case	kNSpJoinDenied:
+					SetJoinDeniedReason((const NSpJoinDeniedMessage*) message);
+					gNetSequenceState = kNetSequence_ClientOfflineBecauseJoinDenied;
+					EndNetworkGame();
+					break;
 
 				case	kNSpPlayerLeft:												// see if someone decided to un-join
 //					ShowNamesOfJoinedPlayers();
@@ -945,6 +1000,21 @@ bool UpdateNetSequence(void)
 	}
 }
 
+bool UpdateNetSequence(void)
+{
+	bool gotAnyMessage = false;
+
+	for (int i = 0; i < NET_SEQUENCE_MESSAGE_BUDGET; i++)
+	{
+		bool gotMessage = UpdateNetSequenceOnce(i == 0);
+		if (!gotMessage)
+			break;
+		gotAnyMessage = true;
+	}
+
+	return gotAnyMessage;
+}
+
 
 #pragma mark - Host/Join
 
@@ -1033,6 +1103,7 @@ failure:
 Boolean SetupNetworkJoin(void)
 {
 	ResetNetGameTransientState();			// start from a clean slate
+	SDL_strlcpy(gNetJoinDeniedReason, "THE HOST DENIED THE JOIN REQUEST.", sizeof(gNetJoinDeniedReason));
 	SetNetworkDiscoveryMode(true);
 	SetNetworkPowerMode(true);
 
@@ -2175,6 +2246,7 @@ Boolean HandleOtherNetMessage(NSpMessageHeader	*message)
 					/* A PLAYER UNEXPECTEDLY HAS LEFT THE GAME */
 
 		case	kNSpPlayerLeft:
+				ForgetPlayerSync(((NSpPlayerLeftMessage*) message)->playerID);
 				if (gNetSequenceState == kNetSequence_GameLoop)
 				{
 					// CMR7 Stage 4 (G3): a running sim must convert frame-aligned, not at TCP-arrival time.
