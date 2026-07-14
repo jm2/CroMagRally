@@ -10,6 +10,7 @@
 void	DoAlert(const char* format, ...);
 POMME_NORETURN void DoFatalAlert(const char* format, ...);
 POMME_NORETURN void CleanQuit(void);
+void	ResetCleanQuitGuard(void);
 // RNG Functions replaced by RNG.h
 #include "RNG.h"
 

@@ -11,6 +11,7 @@
 /****************************/
 
 #include "game.h"
+#include "network.h"		// Net_IsConnectionBadgeVisible for the in-game connection hint
 #include <stddef.h>
 
 /****************************/
@@ -33,6 +34,7 @@ static void Infobar_MovePOWTimer(ObjNode* objNode);
 static void Infobar_DrawTagTimer(Byte whichPane);
 static void Infobar_MoveFlag(ObjNode* objNode);
 static void Infobar_DrawHealth(Byte whichPane);
+static void Infobar_DrawNetBadge(Byte whichPane);
 
 static void MoveFinalPlace(ObjNode *theNode);
 static void MovePressAnyKey(ObjNode *theNode);
@@ -679,6 +681,35 @@ static void DrawInfobar(ObjNode* theNode)
 				Infobar_DrawHealth(gCurrentSplitScreenPane);
 				break;
 	}
+
+
+		/* NETWORK CONNECTION HINT */
+
+	if (Net_IsConnectionBadgeVisible())
+		Infobar_DrawNetBadge(gCurrentSplitScreenPane);
+}
+
+
+/********************** DRAW NET BADGE ****************************/
+//
+// Subtle "connection degraded" hint shown per pane while the host is substituting a quiet peer's
+// input (host view) or the local client's host link has stalled (client view). Purely informational
+// -- the sim keeps running; this just explains why a car is coasting or rubber-banding.
+//
+static void Infobar_DrawNetBadge(Byte whichPane)
+{
+	float lw = gGameView->panes[whichPane].logicalWidth;
+
+	OGLColorRGB savedFilter = gGlobalColorFilter;
+	float savedTransparency = gGlobalTransparency;
+
+	gGlobalColorFilter = (OGLColorRGB) { 1.0f, 0.8f, 0.15f };		// amber "attention" tint
+	gGlobalTransparency = 0.9f;
+
+	Atlas_DrawString(SPRITE_GROUP_FONT, "NET", lw * 0.5f, 30.0f, 0.4f, INFOBAR_SPRITE_FLAGS);
+
+	gGlobalColorFilter = savedFilter;
+	gGlobalTransparency = savedTransparency;
 }
 
 

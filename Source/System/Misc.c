@@ -38,6 +38,8 @@ float	gFramesPerSecond, gFramesPerSecondFrac;
 int		gNumPointers = 0;
 long	gRAMAlloced = 0;
 
+static Boolean	gCleanQuitStarted = false;	// CleanQuit teardown re-entrancy guard; reset per session (Android reuses the process)
+
 
 /**********************/
 /*     PROTOTYPES     */
@@ -88,13 +90,11 @@ void DoFatalAlert(const char* format, ...)
 
 void CleanQuit(void)
 {
-static Boolean	beenHere = false;
-
-	if (!beenHere)
+	if (!gCleanQuitStarted)
 	{
 		DeleteAllObjects();
 
-		beenHere = true;
+		gCleanQuitStarted = true;
 
 		SavePlayerFile();								// save player if any
 
@@ -123,6 +123,18 @@ static Boolean	beenHere = false;
 	SavePrefs();							// save prefs before bailing
 
 	ExitToShell();
+}
+
+
+/*********************** RESET CLEAN QUIT GUARD *******************/
+//
+// Android can reuse the process and re-enter main()/GameMain with C statics intact. Clear the
+// CleanQuit teardown guard at the start of each session so a second session actually saves the
+// player file and tears down the net game instead of skipping it all.
+//
+void ResetCleanQuitGuard(void)
+{
+	gCleanQuitStarted = false;
 }
 
 

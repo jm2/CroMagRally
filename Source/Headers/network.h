@@ -162,6 +162,7 @@ void ClientSend_ControlInfoToHost(void);
 void Client_PumpHostPackets(void);				// CMR7 Stage 3: non-blocking drain of host control packets into the client ring
 HostConsumeResult Client_ConsumeHostPacketFromRing(void);	// CMR7 Stage 3: pop one + apply via the verbatim handler
 Boolean Client_IsHoldBadgeVisible(void);		// CMR7 Stage 3: subtle net badge after ~250ms of host-packet absence
+Boolean Net_IsConnectionBadgeVisible(void);		// true when the in-game HUD should show a "connection degraded" hint (host or client)
 void ResetClientHostRing(void);					// CMR7 Stage 3: clear the client host-packet ring between net games
 
 void Host_PumpClientInputs(void);				// CMR7: non-blocking drain of client inputs into per-player queues

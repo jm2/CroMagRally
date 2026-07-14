@@ -220,7 +220,11 @@ Acceptance profile: mixed LAN with one congested-2.4GHz peer — wired client fr
 - [WIFI-NETCODE-CMR7.md](WIFI-NETCODE-CMR7.md#overview) — the full CMR7 rev B WiFi redesign: protocol, message formats, latency math, mixed-LAN handling, fidelity analysis, and the staged implementation plan.
 - [SUBMODULE-AUDIT.md](SUBMODULE-AUDIT.md) — audit of the forked `extern/Pomme` and `extern/gl4es` submodules vs upstream.
 
-Most of the P0/P1 findings in this review are **already fixed** on this branch (see the
-commit history); the items explicitly deferred to "CMR7 Stage 0" are tracked in the WiFi
-doc. The raw multi-agent analysis (per-finding verdicts, hunt reports, judge panel, raw
-JSON) is kept out of the repo under a local `cromag-review/` working directory.
+Nearly all of the P0/P1 findings in this review — including the full CMR7 redesign (Stages
+0–5) that §5 and §9 describe as future work — have **already shipped** on this branch; treat
+those sections as the original plan of record, not an open backlog. The companion WiFi doc is
+likewise historical, not a live to-do list. Known items that are genuinely still open are
+tracked separately (not in these two documents); one exception this review missed is that the
+**tvOS purgeable-storage P0 (§6) was not fixed** — saves still route through the OS-purgeable
+Caches directory. The raw multi-agent analysis (per-finding verdicts, hunt reports, judge
+panel, raw JSON) is kept out of the repo under a local `cromag-review/` working directory.

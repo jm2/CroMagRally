@@ -268,6 +268,10 @@ headers not compiled on every runner. Its distinct licensed material includes:
 - Public-domain and CC0 material including SDL's allocator, miniz, CRC,
   MurmurHash, date, debug-font, and tokenizer helpers. These carry no
   attribution condition but remain identified in their source headers.
+- SDL's Android Java glue vendored under `AndroidBuild/app/src/main/java/org/libsdl/app/`
+  (`SDLActivity.java`, `SDLControllerManager.java`, `HIDDevice*.java`, and siblings). This is
+  part of SDL3 and is covered by the same zlib license reproduced in the SDL3 section above;
+  it ships compiled into the Android APK.
 
 ## Pomme
 

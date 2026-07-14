@@ -627,7 +627,13 @@ ObjNode	*newObj;
 		.slot		= SLOT_OF_DUMB+9,
 		.moveCall	= MoveOilSpill,
 		.rot		= VisualRandomFloat() * PI2,
-		.scale		= 3.0f + RandomFloat() * 2.0f		// synced stream: this scale sets the oil slick's slip hitbox, which must match on every peer (the oil drop is input-driven, so the draw lands on the same frame everywhere and is safe to sync)
+		// Scale sets the oil slick's slip hitbox and must be identical on every peer. Unlike the
+		// input-driven events keyed via DeterministicSimEventFloat, the oil drop is an independently
+		// simulated projectile whose LANDING frame can diverge once rubber-banding has tolerated any
+		// position drift -- so this must not advance the shared sim RNG (a divergent draw count trips
+		// the seed check) and must not fold in the frame. Key a frame-independent deterministic sample
+		// on the quantized landing coords, mirroring the stump collision-variant in Items.c.
+		.scale		= 3.0f + DeterministicStableFloat(kDeterministicEvent_OilSlick, (uint32_t) x, (uint32_t) z) * 2.0f
 	};
 	newObj = MakeNewDisplayGroupObject(&def);
 

@@ -408,6 +408,7 @@ static void Host_ScheduleFrameEvent(uint8_t type, int playerNum)
 
 	uint32_t effF = gHostSendCounter + NET_MAX_EVENT_LEAD;
 
+	bool queuedForBroadcast = false;
 	for (int s = 0; s < NET_MAX_PENDING_EVENTS; s++)			// push into the outgoing re-broadcast ring
 	{
 		if (!sHostPendingEvents[s].active)
@@ -417,11 +418,18 @@ static void Host_ScheduleFrameEvent(uint8_t type, int playerNum)
 			sHostPendingEvents[s].ev.playerNum		= (int8_t) playerNum;
 			sHostPendingEvents[s].ev.pad			= 0;
 			sHostPendingEvents[s].active			= true;
+			queuedForBroadcast = true;
 			break;
 		}
 	}
 
-	RecordFrameEvent(effF, type, (int8_t) playerNum);			// host applies via the same shared table as the clients
+	// Only apply locally if we could also queue the event for broadcast. Applying it here while the
+	// re-broadcast ring is full would convert the player to a bot on the host but never tell the
+	// clients -> a one-sided state change and a guaranteed kNetSequence_SeedDesync. Dropping both
+	// matches RecordFrameEvent's own drop-on-full contract; the TCP-keepalive backstop still
+	// converts the peer via a later leave/drop.
+	if (queuedForBroadcast)
+		RecordFrameEvent(effF, type, (int8_t) playerNum);		// host applies via the same shared table as the clients
 }
 
 // HOST: map a leave message's NSpPlayerID to a dense player index and schedule its become-bot.
@@ -1706,6 +1714,30 @@ Boolean Client_IsHoldBadgeVisible(void)
 	if (gNoCarControls)									// suppress during start-light countdown
 		return false;
 	return (TickCount() - sLastHostArrivalTick) > CLIENT_HOLD_BADGE_TICKS;
+}
+
+//
+// True when the local machine should show a "connection degraded" HUD hint: a client whose host
+// link has gone quiet (the ~250ms hold or the >1s badge), or a host with any peer quiet for >1s.
+// Input substitution keeps the simulation alive in all these cases -- this is purely a visual cue
+// so the player understands why a car is coasting/rubber-banding.
+//
+Boolean Net_IsConnectionBadgeVisible(void)
+{
+	if (!gNetGameInProgress)
+		return false;
+
+	if (gIsNetworkClient)
+		return Client_IsHoldBadgeVisible() || gNetBadge[0];
+
+	if (gIsNetworkHost)
+	{
+		for (int i = 0; i < MAX_PLAYERS; i++)
+			if (gNetBadge[i])
+				return true;
+	}
+
+	return false;
 }
 
 

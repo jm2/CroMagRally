@@ -24,7 +24,6 @@
 #include <stdio.h>
 
 int			gTargetFPS = 0;  // 0 = uncapped (vsync), set during network game setup
-Boolean		gUseRedundancy = false;
 
 
 /****************************/
@@ -1669,7 +1668,14 @@ short	i,t,winner;
 					else
 					{
 						ShowWinLose(eliminatedPlayer, 0, 0);					// this player is eliminated
-						ChooseTaggedPlayer();								// tagged guy is gone, so choose a new one
+						// Re-select the tagged player WITHOUT advancing the synced RNG: this in-sim
+						// elimination can trigger a frame apart across peers if any residual drift exists,
+						// and a synced draw here would then desync the seed. Key a stateless deterministic
+						// sample on state identical across peers post-elimination (the eliminated count +
+						// who it was) so every peer picks the same new "it".
+						short reIdx = (short)(DeterministicStableFloat(kDeterministicEvent_TagReselect,
+							(uint32_t) gNumPlayersEliminated, (uint32_t) eliminatedPlayer) * (float) gNumTotalPlayers);
+						ChooseTaggedPlayerWithIndex(reIdx);						// tagged guy is gone, so choose a new one
 					}
 
 				}
@@ -1940,6 +1946,8 @@ void GameMain(void)
 				/**************/
 
 	ToolBoxInit();
+
+	ResetCleanQuitGuard();		// clear the CleanQuit teardown guard in case this process was reused (Android)
 
 
 

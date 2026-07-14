@@ -248,6 +248,11 @@ if(WIN32)
 elseif(APPLE)
 	list(APPEND GAME_SOURCES ${CMAKE_SOURCE_DIR}/packaging/${GAME_TARGET}.icns)
 	set_source_files_properties(${CMAKE_SOURCE_DIR}/packaging/${GAME_TARGET}.icns PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
+	if(TVOS)
+		# tvOS-only NSUserDefaults storage bridge (the Caches dir SDL_GetPrefPath returns is
+		# purgeable). Objective-C, so it isn't matched by the .c/.cpp/.h glob above.
+		list(APPEND GAME_SOURCES ${GAME_SRCDIR}/System/TVOSStorage.m)
+	endif()
 endif()
 
 if(ANDROID)
@@ -334,9 +339,15 @@ endif()
 # LINK LIBRARIES
 #------------------------------------------------------------------------------
 
-# Link sanitizers first
+# Link sanitizers first. Pass -fsanitize to the linker (not raw "asan"/"ubsan" library names,
+# which only exist for GCC) so the compiler links its own runtime -- works on both GCC and Clang.
 if(SANITIZE)
-	target_link_libraries(${GAME_TARGET} PRIVATE asan ubsan)
+	target_link_options(${GAME_TARGET} PRIVATE
+		-fsanitize=alignment
+		-fsanitize=address
+		-fsanitize=leak
+		-fsanitize=undefined
+	)
 endif()
 
 # Explicitly link math lib on Linux
@@ -587,7 +598,8 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 		target_compile_options(CroMagRallyValidationTests PRIVATE
 			-fsanitize=alignment,address,leak,undefined
 			-fno-omit-frame-pointer)
-		target_link_libraries(CroMagRallyValidationTests PRIVATE asan ubsan)
+		target_link_options(CroMagRallyValidationTests PRIVATE
+			-fsanitize=alignment,address,leak,undefined)
 	endif()
 	target_link_libraries(CroMagRallyValidationTests PRIVATE Pomme SDL3::SDL3)
 	if(NOT APPLE AND NOT WIN32)

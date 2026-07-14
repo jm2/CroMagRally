@@ -69,6 +69,18 @@
   <url type="bugtracker">https://github.com/jm2/CroMagRally/issues</url>
 
   <releases>
+    <release version="3.1.1" date="2026-07-13">
+      <url>https://github.com/jm2/CroMagRally/releases/tag/v3.1.1</url>
+      <description>
+        <p>New in this release:</p>
+        <ul>
+          <li>One pinned SDL3 source checkout across every supported platform</li>
+          <li>Hardened network message validation, deterministic simulation, and session teardown</li>
+          <li>More robust preferences, input handling, and mobile lifecycle behavior</li>
+          <li>Expanded native, sanitizer, Android, and packaging validation</li>
+        </ul>
+      </description>
+    </release>
     <release version="3.1.0" date="2026-06-15">
       <url>https://github.com/jm2/CroMagRally/releases/tag/v3.1.0</url>
       <description>

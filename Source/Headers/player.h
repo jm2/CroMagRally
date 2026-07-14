@@ -282,6 +282,7 @@ void InitPlayerInfo_Game(void);
 void InitPlayersAtStartOfLevel(void);
 void SetPlayerParmsFromTileAttributes(short playerNum, uint16_t flags);
 void ChooseTaggedPlayer(void);
+void ChooseTaggedPlayerWithIndex(short startIndex);
 void UpdateTagMarker(void);
 short FindClosestPlayer(ObjNode *thePlayer, float x, float z, float range, Boolean allowCPUCars, float *dist);
 short FindClosestPlayerInBack(ObjNode *theNode, float range, Boolean allowCPUCars, float *dist, float angle);

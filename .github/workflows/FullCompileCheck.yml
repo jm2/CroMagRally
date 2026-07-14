@@ -9,6 +9,15 @@ on:
   push:
     branches: [master]
 
+# Minimal token: this workflow only reads the code it builds.
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same ref (e.g. rapid PR pushes) to save CI minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   full-compile-check:
     name: ${{ matrix.platform.name }}
