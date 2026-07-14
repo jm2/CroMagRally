@@ -102,7 +102,6 @@ extern int						gNetSequenceError;
 extern uint32_t					gSimulationFrame;
 extern int						gNetSequenceState;
 extern int						gTargetFPS;
-extern Boolean					gUseRedundancy;
 extern int						gNumObjectNodes;
 
 extern int						gNumObjectsInBG3DGroupList[MAX_BG3D_GROUPS];

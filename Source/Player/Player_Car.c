@@ -2554,7 +2554,10 @@ short	bestFront,bestBack,bestShot;
 						gPlayerInfo[playerNum].controlBits_New |= (1L << kControlBit_ThrowBackward);
 					else
 						gPlayerInfo[playerNum].controlBits_New |= (1L << kControlBit_ThrowForward);
-					gPlayerInfo[playerNum].attackTimer = RandomFloat() * 1.1f;
+					// Stateless deterministic draw (does not advance gSimRNG): this fires only for CPU
+					// bots, whose throw decision reads divergence-prone positions, so a synced RandomFloat
+					// here could advance the seed a different number of times per peer -> seed-desync fatal.
+					gPlayerInfo[playerNum].attackTimer = DeterministicSimEventFloat(kDeterministicEvent_CpuAttack, playerNum, 0) * 1.1f;
 				}
 			}
 		}
@@ -2612,7 +2615,7 @@ short	targetP;
 			if (gPlayerInfo[playerNum].targetingTimer > 1.0f)						// see if we can fire!
 			{
 				gPlayerInfo[playerNum].controlBits_New |= (1L << kControlBit_ThrowForward);
-				gPlayerInfo[playerNum].attackTimer = RandomFloat() * .7f;
+				gPlayerInfo[playerNum].attackTimer = DeterministicSimEventFloat(kDeterministicEvent_CpuAttack, playerNum, 1) * .7f;	// stateless (see site 0)
 			}
 		}
 		else
@@ -2634,7 +2637,7 @@ short	targetP;
 static void DoCPUPOWLogic_Mine(short playerNum)
 {
 	gPlayerInfo[playerNum].controlBits_New |= (1L << kControlBit_ThrowBackward);
-	gPlayerInfo[playerNum].attackTimer = RandomFloat() * 2.0f;
+	gPlayerInfo[playerNum].attackTimer = DeterministicSimEventFloat(kDeterministicEvent_CpuAttack, playerNum, 2) * 2.0f;	// stateless (see site 0)
 }
 
 
@@ -2688,7 +2691,7 @@ Boolean	attackCPUCars, inFront;
 				else
 					gPlayerInfo[playerNum].controlBits_New |= (1L << kControlBit_ThrowBackward);
 
-				gPlayerInfo[playerNum].attackTimer = RandomFloat() * .7f;
+				gPlayerInfo[playerNum].attackTimer = DeterministicSimEventFloat(kDeterministicEvent_CpuAttack, playerNum, 3) * .7f;	// stateless (see site 0)
 			}
 		}
 		else

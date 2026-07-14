@@ -35,6 +35,7 @@ static void GetLocalKeyStateForPlayer(short playerNum, short gamepadSlot);
 
 void InitInput(void)
 {
+	ResetInputForNewSession();		// clear input statics left over from a reused process (Android)
 	InstallInputEventWatch();
 }
 

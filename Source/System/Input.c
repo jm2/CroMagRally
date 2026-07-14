@@ -137,9 +137,28 @@ static void InitTouchData(void) {
       SDL_Log("Detected stale Virtual Joystick ID! Resetting input state.");
       gVirtualJoystickID = 0;
       gVirtualJoystick = NULL;
-      ResetTouchInput(); 
+      ResetTouchInput();
     }
   }
+}
+
+// Clear all input statics that outlive a session. On Android the process can be reused (main()
+// re-runs after SDL_Quit()), so these file-scope statics survive into the next session while the
+// SDL objects they name do not. Called once per session from InitInput, before any gamepad is
+// opened -- the InitTouchData every-frame check only fires when a virtual joystick existed, which
+// misses a gamepad-only prior session and leaves gGamepads[].sdlGamepad dangling (a later
+// SDL_EVENT_GAMEPAD_ADDED would call SDL_GetGamepadID on freed memory). We overwrite the stale
+// handles rather than close them: they belong to the previous, already-torn-down SDL instance.
+void ResetInputForNewSession(void) {
+  SDL_memset(gGamepads, 0, sizeof(gGamepads));   // open=false, sdlGamepad=NULL for every slot
+  gUserPrefersGamepad = false;
+  gPlayerGamepadMappingLocked = false;
+  gTouchControlsActive = false;
+  gVirtualJoystickID = 0;
+  gVirtualJoystick = NULL;
+  SDL_memset(&gVirtualInput, 0, sizeof(gVirtualInput));
+  ResetTouchInput();
+  InvalidateAllInputs();		// clear stale keyboard/mouse/need states (a key held at last exit would otherwise stick)
 }
 
 static void DisableVirtualJoystick(void) {
@@ -204,13 +223,14 @@ static bool SDLCALL HandleAppLifecycleEvent(void* userdata, SDL_Event* event) {
 }
 
 void InstallInputEventWatch(void) {
-  static bool installed = false;
-  if (!installed) {
-    if (!SDL_AddEventWatch(HandleAppLifecycleEvent, NULL))
-      SDL_Log("Could not install application lifecycle event watch: %s", SDL_GetError());
-    else
-      installed = true;
-  }
+  // Remove-then-add is idempotent and, crucially, self-heals across an SDL_Quit()/SDL_Init()
+  // cycle: on Android the process can be reused (main() re-runs), and SDL_Quit() destroys the
+  // event-watch list. A persistent "installed" flag would survive that and wrongly skip
+  // re-registering, silently losing background/terminate autosave and the Wi-Fi lock. Removing a
+  // watcher that isn't present is a harmless no-op.
+  SDL_RemoveEventWatch(HandleAppLifecycleEvent, NULL);
+  if (!SDL_AddEventWatch(HandleAppLifecycleEvent, NULL))
+    SDL_Log("Could not install application lifecycle event watch: %s", SDL_GetError());
 }
 
 // Create virtual joystick if not exists (Lazy Load)

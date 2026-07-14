@@ -13,6 +13,9 @@ enum DeterministicEventTag
 	kDeterministicEvent_CannonShot = 0x43414E4E,	// CANN
 	kDeterministicEvent_SubStuck = 0x53554253,	// SUBS
 	kDeterministicEvent_CarCollision = 0x43415253,	// CARS
+	kDeterministicEvent_OilSlick = 0x4F494C53,	// OILS
+	kDeterministicEvent_CpuAttack = 0x43505541,	// CPUA
+	kDeterministicEvent_TagReselect = 0x54414752,	// TAGR
 };
 
 uint32_t DeterministicPairKey(uint32_t first, uint32_t second);

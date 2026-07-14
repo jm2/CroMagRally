@@ -11,6 +11,12 @@ on:
 permissions:
   contents: read
 
+# Serialize release builds so two runs can't publish artifacts for the same tag at once.
+# Never cancel in progress: a half-finished release build must be allowed to complete.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release_metadata:
     name: Validate release metadata
@@ -34,6 +40,17 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           GAME_VERSION: ${{ steps.version.outputs.game_version }}
         run: test "$RELEASE_TAG" = "v$GAME_VERSION"
+      - name: Require the AppStream metainfo to list this version
+        env:
+          GAME_VERSION: ${{ steps.version.outputs.game_version }}
+        run: |
+          set -euo pipefail
+          # The newest <release> in the metainfo must match GAME_VERSION, otherwise Flatpak and
+          # software centers advertise a stale version as the latest.
+          appdata="packaging/io.jor.cromagrally.appdata.xml"
+          newest=$(grep -oP '<release version="\K[0-9]+\.[0-9]+\.[0-9]+' "$appdata" | head -1)
+          echo "metainfo newest release: $newest ; GAME_VERSION: $GAME_VERSION"
+          test "$newest" = "$GAME_VERSION"
 
   build-source:
     name: Source archive (including submodules)

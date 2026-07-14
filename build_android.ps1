@@ -5,6 +5,15 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# PowerShell 7.4+ defaults $PSNativeCommandUseErrorActionPreference to $true, which turns any
+# non-zero exit from a native command into a terminating error under "Stop". This script polls
+# native tools that are *expected* to fail transiently (e.g. `adb get-state` while an emulator
+# boots) and already checks $LASTEXITCODE explicitly where a failure matters, so opt out of the
+# auto-throw to keep the -Run wait loop from aborting on the first pre-boot poll.
+if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -Scope Global -ErrorAction SilentlyContinue) {
+    $PSNativeCommandUseErrorActionPreference = $false
+}
+
 $HostIsWindows = Get-Variable -Name IsWindows -ValueOnly -ErrorAction SilentlyContinue
 $HostIsLinux = Get-Variable -Name IsLinux -ValueOnly -ErrorAction SilentlyContinue
 $HostIsMacOS = Get-Variable -Name IsMacOS -ValueOnly -ErrorAction SilentlyContinue

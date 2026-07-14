@@ -17,7 +17,7 @@
 
 static void VehicleActivatePOW(ObjNode *theVehicle, Boolean forwardThrow);
 static void MoveOilBullet(ObjNode *theNode);
-static void MakeOilSpill(float x, float z);
+static void MakeOilSpill(float x, float z, float scale);
 static void MoveOilSpill(ObjNode *theNode);
 static void PlayerThrowsWeapon(short playerNum, Boolean forwardThrow);
 static void MoveBoneWeapon(ObjNode *theNode);
@@ -73,6 +73,8 @@ static void DropLandMine(short playerNum);
 static const OGLPoint3D	gGunNozzelOff = {0,0,0};
 
 #define	MineArmingTimer		SpecialF[0]
+
+#define	OilSlickScale		SpecialF[2]		// oil bullet: peer-identical slip-hitbox scale, sampled at throw time
 
 
 /******************* CHECK POWERUP CONTROLS ************************/
@@ -571,6 +573,11 @@ ObjNode						*newObj,*head,*car;
 	SetThrowDeltas(newObj, car, .6, throwForward);
 	newObj->WhoThrew = (Ptr)car;														// remember who threw it
 
+	// The oil slick's scale IS its slip hitbox, so it must be identical on every peer. Sample it
+	// HERE -- at the input-driven throw, which lands on the same frame across peers -- keyed on the
+	// thrower, rather than at the drift-prone landing where the bullet's physics-derived position can
+	// differ. Stateless (no gSimRNG advance), so a divergent throw never desyncs the seed.
+	newObj->OilSlickScale = 3.0f + DeterministicSimEventFloat(kDeterministicEvent_OilSlick, (uint32_t) playerNum, 0) * 2.0f;
 }
 
 
@@ -600,7 +607,7 @@ float	fps = gFramesPerSecondFrac;
 	if ((gCoord.y <= GetTerrainY(gCoord.x, gCoord.z)) ||
 		DoSimplePointCollision(&gCoord, CTYPE_MISC|CTYPE_PLAYER, (ObjNode *)theNode->WhoThrew))
 	{
-		MakeOilSpill(gCoord.x, gCoord.z);
+		MakeOilSpill(gCoord.x, gCoord.z, theNode->OilSlickScale);		// scale was sampled peer-consistently at throw time
 		DeleteObject(theNode);
 		return;
 	}
@@ -612,7 +619,7 @@ float	fps = gFramesPerSecondFrac;
 
 /************************ MAKE OIL SPILL **********************/
 
-static void MakeOilSpill(float x, float z)
+static void MakeOilSpill(float x, float z, float scale)
 {
 ObjNode	*newObj;
 
@@ -627,7 +634,7 @@ ObjNode	*newObj;
 		.slot		= SLOT_OF_DUMB+9,
 		.moveCall	= MoveOilSpill,
 		.rot		= VisualRandomFloat() * PI2,
-		.scale		= 3.0f + RandomFloat() * 2.0f		// synced stream: this scale sets the oil slick's slip hitbox, which must match on every peer (the oil drop is input-driven, so the draw lands on the same frame everywhere and is safe to sync)
+		.scale		= scale			// peer-identical: sampled at the synced throw time (see ThrowOil), not here at the drift-prone landing
 	};
 	newObj = MakeNewDisplayGroupObject(&def);
 

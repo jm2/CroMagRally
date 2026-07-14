@@ -18,12 +18,12 @@ gl4es fix that is dormant today.
 
 | Submodule | Fork delta | Verdict |
 |-----------|-----------|---------|
-| `extern/Pomme` (jm2/Pomme @ 06607ff) | 2 commits on a clean, linear upstream-master base (2 ahead, 0 behind) | Functionally safe; needs hygiene cleanup before the next upstream bump |
+| `extern/Pomme` (jm2/Pomme @ 934d124) | 4 commits on a clean, linear upstream-master base (4 ahead, 0 behind) | Safe; the two newest commits change runtime behavior (not portability-only) but ship unit tests run in CI. See note below. |
 | `extern/gl4es` (jm2/gl4es @ 1f667c5) | 1 commit, direct child of upstream master | Safe for the current static iOS/tvOS build; complete the fix to remove a latent link landmine |
 
 ## Pomme
 
-Upstream: `jorio/Pomme`. The two fork commits are pure portability:
+Upstream: `jorio/Pomme`. The first two fork commits are pure portability:
 
 1. **macOS 26.2 compile fixes** (69b0d2f) — newer macOS SDKs now globally define the
    classic Toolbox symbols Pomme also declares, so the fork guards Pomme's own
@@ -32,6 +32,18 @@ Upstream: `jorio/Pomme`. The two fork commits are pure portability:
    `snprintf`/`fs::path`.
 2. **Android prefs path** (06607ff) — adds an Android branch to `FindFolder()` that
    resolves the preferences directory via `SDL_GetPrefPath`.
+
+Two later commits (added after the original audit) change *runtime behavior*, so the
+"portability-only" verdict above applies only to the first two. Both ship unit tests that
+run in the game's CI (`pomme_files`, `pomme_ieee_extended`), so they are guarded, but a
+security/correctness re-audit is warranted before the next upstream bump:
+
+3. **Atomic file replacement** (d0b6740) — `src/Files/Files.cpp` + `HostVolume.cpp` write
+   through a temp file and `rename()` so a save is never left half-written. Touches the
+   privileged host-volume write path.
+4. **Replace Apple-derived binary80 conversion** (934d124) — a 306-line rewrite of the
+   IEEE 80-bit extended-float conversion in `src/Utilities/IEEEExtended.cpp` (AIFF sample
+   rates). Load-bearing for audio asset parsing.
 
 The privileged code paths — the `FSSpec` directory-ID bounds check, AppleDouble (`.rsrc`)
 resource-fork parsing, case-insensitive host-path mapping, and `Str255` sizing — are

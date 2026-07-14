@@ -615,14 +615,27 @@ OGLVector2D	aimVec, toVec;
 
 
 /******************* CHOOSE TAGGED PLAYER *********************/
-
-void ChooseTaggedPlayer(void)
+//
+// Selects the tagged ("it") player starting from startIndex, skipping eliminated players. The
+// caller supplies startIndex so it can choose whether that index comes from the synced RNG (the
+// aligned init/leave contexts) or a stateless deterministic sample (the in-sim re-selection, which
+// must not advance gSimRNG lest a divergent trigger frame desync the seed).
+//
+void ChooseTaggedPlayerWithIndex(short startIndex)
 {
 short	i,j;
+	if (gNumTotalPlayers <= 0)					// nothing to tag; avoids a negative clamp -> gPlayerInfo[-1]
+		return;
+
 	for (int p = 0; p < gNumTotalPlayers; p++)
 		gPlayerInfo[p].isIt = false;
 
-	i = j = RandomRange(0, gNumTotalPlayers-1);
+	if (startIndex < 0)							// clamp into range (stateless sample can round up to ==count)
+		startIndex = 0;
+	if (startIndex >= gNumTotalPlayers)
+		startIndex = gNumTotalPlayers - 1;
+
+	i = j = startIndex;
 
 	while(gPlayerInfo[i].isEliminated)
 	{
@@ -636,6 +649,13 @@ short	i,j;
 	gPlayerInfo[i].isIt = true;
 	gWhoIsIt = i;
 
+}
+
+void ChooseTaggedPlayer(void)
+{
+	// Init (race start) and leave-conversion paths run at frame-aligned points, so the synced RNG
+	// draw lands at the same stream position on every peer.
+	ChooseTaggedPlayerWithIndex(RandomRange(0, gNumTotalPlayers-1));
 }
 
 /*********************** UPDATE TAG MARKER **********************/

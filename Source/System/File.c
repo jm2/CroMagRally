@@ -14,6 +14,10 @@
 #include "bones.h"
 #include "lzss.h"
 
+#if defined(__TVOS__)
+#include "TVOSStorage.h"		// tvOS keeps user data in NSUserDefaults (Caches is purgeable)
+#endif
+
 /****************************/
 /*    PROTOTYPES            */
 /****************************/
@@ -447,6 +451,16 @@ char		fileMagic[64];
 	if (magicLength >= (long) sizeof(fileMagic))
 		return paramErr;
 
+#if defined(__TVOS__)
+	switch (TVOS_LoadUserData(filename, magic, magicLength, payloadPtr, payloadLength))
+	{
+		case kTVOSStorage_OK:			return noErr;
+		case kTVOSStorage_NotFound:		return fnfErr;			// first launch: caller falls back to defaults
+		case kTVOSStorage_Corrupt:		return badFileFormat;
+		default:						return ioErr;
+	}
+#endif
+
 	iErr = InitPrefsFolder(false);
 	if (iErr != noErr)
 		return iErr;
@@ -511,6 +525,14 @@ char				tempFilename[256];
 
 	if (!filename || !magic || payloadLength < 0 || (!payloadPtr && payloadLength != 0))
 		return paramErr;
+
+#if defined(__TVOS__)
+	{
+		long magicLength = (long) SDL_strlen(magic) + 1;
+		return (TVOS_SaveUserData(filename, magic, magicLength, payloadPtr, payloadLength) == kTVOSStorage_OK)
+			? noErr : ioErr;
+	}
+#endif
 
 	iErr = InitPrefsFolder(true);
 	if (iErr != noErr)
@@ -1071,6 +1093,8 @@ Ptr						tempBuffer16 = nil;
 	ReleaseResource(hand);
 	if (gNumCheckpoints < 0 || gNumCheckpoints > MAX_CHECKPOINTS)
 		DoFatalAlert("ReadDataFromPlayfieldFile: invalid checkpoint count %ld", gNumCheckpoints);
+	if (gNumUniqueSuperTiles < 0 || gNumUniqueSuperTiles > MAX_SUPERTILE_TEXTURES)		// bounds the fixed gSuperTileTextureNames[] the loader writes into (LoadTerrainSuperTileTextures)
+		DoFatalAlert("ReadDataFromPlayfieldFile: invalid unique supertile count %ld", gNumUniqueSuperTiles);
 
 	if ((gTerrainTileWidth % SUPERTILE_SIZE) != 0)		// terrain must be non-fractional number of supertiles in w/h
 		DoFatalAlert("ReadDataFromPlayfieldFile: terrain width not a supertile multiple");
@@ -1131,6 +1155,14 @@ Ptr						tempBuffer16 = nil;
 			for (col = 0; col < gNumSuperTilesWide; col++)
 			{
 				gSuperTileTextureGrid[row][col] = *src++;
+				// superTileID indexes the fixed gSuperTileTextureNames[] (write) and the
+				// gNumUniqueSuperTiles-sized allImages buffer (read via TILEIMAGE), including
+				// for neighbor cells during edge stitching -- so every entry must be in range.
+				// 0 is the "blank" sentinel (skipped by the draw loop) and is always valid.
+				uint16_t superTileID = gSuperTileTextureGrid[row][col].superTileID;
+				if (superTileID != 0 && superTileID >= gNumUniqueSuperTiles)
+					DoFatalAlert("ReadDataFromPlayfieldFile: supertile grid references out-of-range texture %u (count %ld)",
+						superTileID, gNumUniqueSuperTiles);
 			}
 		ReleaseResource(hand);
 	}

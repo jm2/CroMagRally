@@ -11,6 +11,14 @@ play-test verification under the redesign).
 > before the CMR7 stages landed. “Pending,” effort, and baseline statements document the
 > implementation process, not the current state of the shipping code. See the current
 > source and `CHANGELOG.md` for implemented behavior.
+>
+> **The protocol-specification numbers below are NOT authoritative for the wire format.**
+> `Source/Headers/network.h` is the single source of truth, and it differs from this plan in
+> several places the design pre-sized differently, e.g. the drop timeout is
+> `NET_SILENCE_DROP_MS = 5000` (not 10000), the per-frame event block holds
+> `NET_MAX_PENDING_EVENTS = 8` events (not 2), and the telemetry arrays are `[MAX_PLAYERS]`
+> (6, not `[MAX_CLIENTS]`). Do not implement a peer against the constants or struct layouts in
+> this document — read the `_Static_assert`ed structs in `network.h`.
 
 ---
 ## Design name
