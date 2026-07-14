@@ -624,6 +624,9 @@ OGLVector2D	aimVec, toVec;
 void ChooseTaggedPlayerWithIndex(short startIndex)
 {
 short	i,j;
+	if (gNumTotalPlayers <= 0)					// nothing to tag; avoids a negative clamp -> gPlayerInfo[-1]
+		return;
+
 	for (int p = 0; p < gNumTotalPlayers; p++)
 		gPlayerInfo[p].isIt = false;
 

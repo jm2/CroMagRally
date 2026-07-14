@@ -158,6 +158,7 @@ void ResetInputForNewSession(void) {
   gVirtualJoystick = NULL;
   SDL_memset(&gVirtualInput, 0, sizeof(gVirtualInput));
   ResetTouchInput();
+  InvalidateAllInputs();		// clear stale keyboard/mouse/need states (a key held at last exit would otherwise stick)
 }
 
 static void DisableVirtualJoystick(void) {
