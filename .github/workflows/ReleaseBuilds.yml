@@ -3,6 +3,11 @@ name: Make Release Builds
 # Published releases are the single production trigger. Manual dispatches are smoke builds:
 # desktop/mobile artifacts that require credentials are explicitly labeled unsigned and are
 # never attached to a GitHub Release.
+#
+# Signing posture (this fork is sideload-only): Android releases REQUIRE the keystore
+# secrets. macOS releases use Developer-ID signing + notarization when all six Apple
+# secrets are configured, and fall back to an ad-hoc-signed, un-notarized disk image when
+# none are; a PARTIAL Apple secret set fails loudly instead of silently downgrading.
 on:
   release:
     types: [published]
@@ -178,7 +183,8 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
-      - name: Require complete macOS signing configuration for a release
+      - name: Detect macOS signing configuration
+        id: signing
         if: ${{ github.event_name == 'release' }}
         env:
           CODE_SIGN_IDENTITY: ${{ secrets.APPLE_CODE_SIGN_IDENTITY }}
@@ -189,14 +195,29 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_DEVELOPMENT_TEAM }}
         run: |
           set -euo pipefail
+          # Sideload-only fork: with no Apple secrets, a release still ships a dmg
+          # (ad-hoc signed, not notarized; first launch needs right-click > Open).
+          # A partial secret set is a misconfiguration and fails the release loudly.
+          present=0 missing=0
           for name in CODE_SIGN_IDENTITY APPLE_CERT_P12_BASE64 APPLE_CERT_PASSWORD APPLE_NOTARY_USERNAME APPLE_NOTARY_PASSWORD APPLE_TEAM_ID; do
             if [ -z "${!name}" ]; then
-              echo "::error::Missing required macOS release secret: $name"
-              exit 1
+              missing=$((missing+1))
+            else
+              present=$((present+1))
             fi
           done
+          if [ "$present" -gt 0 ] && [ "$missing" -gt 0 ]; then
+            echo "::error::Partial macOS signing configuration ($present of 6 secrets set); set all six or none"
+            exit 1
+          fi
+          if [ "$present" -eq 0 ]; then
+            echo "::notice::No macOS signing secrets configured; shipping an ad-hoc-signed, un-notarized disk image"
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          fi
       - name: Import code-signing certificate
-        if: ${{ github.event_name == 'release' }}
+        if: ${{ github.event_name == 'release' && steps.signing.outputs.signed == 'true' }}
         uses: apple-actions/import-codesign-certs@5142e029c445c10ffc7149d172e540235a065466 # v7
         with:
           p12-file-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
@@ -207,24 +228,32 @@ jobs:
         run: echo "ARTIFACT_NAME=$(python3 build.py --print-artifact-name)" >> $GITHUB_ENV
       - run: python3 build.py --dependencies
       - name: Configure signed release
-        if: ${{ github.event_name == 'release' }}
+        if: ${{ github.event_name == 'release' && steps.signing.outputs.signed == 'true' }}
         env:
           CODE_SIGN_IDENTITY: ${{ secrets.APPLE_CODE_SIGN_IDENTITY }}
         run: python3 build.py --configure --macos-signing-identity "$CODE_SIGN_IDENTITY"
-      - name: Configure unsigned smoke build
-        if: ${{ github.event_name == 'workflow_dispatch' }}
+      - name: Configure unsigned build
+        if: ${{ github.event_name == 'workflow_dispatch' || steps.signing.outputs.signed == 'false' }}
         run: python3 build.py --configure
       - run: python3 build.py --build
       - name: Verify the signed application
-        if: ${{ github.event_name == 'release' }}
+        if: ${{ github.event_name == 'release' && steps.signing.outputs.signed == 'true' }}
         run: |
           set -euo pipefail
-          app=$(find build -type d -name 'CroMagRally.app' -print -quit)
+          app=$(find build-xcode -type d -name 'CroMagRally.app' -print -quit)
           test -n "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+      - name: Ad-hoc sign the application (no signing secrets)
+        if: ${{ github.event_name == 'release' && steps.signing.outputs.signed == 'false' }}
+        run: |
+          set -euo pipefail
+          app=$(find build-xcode -type d -name 'CroMagRally.app' -print -quit)
+          test -n "$app"
+          codesign --force --deep --sign - "$app"
           codesign --verify --deep --strict --verbose=2 "$app"
       - run: python3 build.py --package
       - name: Sign and verify the disk image
-        if: ${{ github.event_name == 'release' }}
+        if: ${{ github.event_name == 'release' && steps.signing.outputs.signed == 'true' }}
         env:
           CODE_SIGN_IDENTITY: ${{ secrets.APPLE_CODE_SIGN_IDENTITY }}
         run: |
@@ -239,7 +268,7 @@ jobs:
           mv "dist/$ARTIFACT_NAME" "dist/$unsigned"
           echo "ARTIFACT_NAME=$unsigned" >> "$GITHUB_ENV"
       - name: Notarize
-        if: ${{ github.event_name == 'release' }}
+        if: ${{ github.event_name == 'release' && steps.signing.outputs.signed == 'true' }}
         env:
           APPLE_NOTARY_USERNAME: ${{ secrets.APPLE_NOTARIZATION_USERNAME }}
           APPLE_NOTARY_PASSWORD: ${{ secrets.APPLE_NOTARIZATION_PASSWORD }}
@@ -248,7 +277,7 @@ jobs:
           xcrun notarytool store-credentials GameNotarizationProfile --apple-id "$APPLE_NOTARY_USERNAME" --password "$APPLE_NOTARY_PASSWORD" --team-id "$APPLE_TEAM_ID"
           xcrun notarytool submit "dist/$ARTIFACT_NAME" --keychain-profile GameNotarizationProfile --wait
       - name: Staple and validate notarization
-        if: ${{ github.event_name == 'release' }}
+        if: ${{ github.event_name == 'release' && steps.signing.outputs.signed == 'true' }}
         run: |
           xcrun stapler staple "dist/$ARTIFACT_NAME"
           xcrun stapler validate "dist/$ARTIFACT_NAME"

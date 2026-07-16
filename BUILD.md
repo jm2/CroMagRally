@@ -120,7 +120,7 @@ The unsigned `.ipa` / `.app` must be re-signed (AltStore / Sideloadly, or your o
 
 ## CI release signing secrets
 
-`.github/workflows/ReleaseBuilds.yml` requires a complete signing configuration for published macOS and Android releases. Manual workflow runs are smoke builds and label credential-dependent outputs as **unsigned**. The iOS and tvOS jobs intentionally emit unsigned sideload artifacts that must be re-signed before installation on hardware.
+`.github/workflows/ReleaseBuilds.yml` requires the Android keystore secrets for published releases. For macOS, it uses Developer-ID signing + notarization when all six Apple secrets are configured, and falls back to an ad-hoc-signed, un-notarized disk image when none are set (first launch then needs right-click → Open); a partial Apple secret set fails the release instead of silently downgrading. Manual workflow runs are smoke builds and label credential-dependent outputs as **unsigned**. The iOS and tvOS jobs intentionally emit unsigned sideload artifacts that must be re-signed before installation on hardware.
 
 | Secret | Used for |
 |--------|----------|

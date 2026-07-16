@@ -1,8 +1,10 @@
 # Cro-Mag Rally Changelog
 
-- **3.1.1 (NOT RELEASED YET)**
+- **3.1.1 (July 15, 2026)**
     - Use one pinned SDL3 source checkout across every supported platform.
     - Harden network message validation, deterministic simulation, session teardown, preferences, input handling, and mobile lifecycle behavior.
+    - Store Apple TV save data in NSUserDefaults so tvOS can no longer purge it.
+    - Show an on-screen NET indicator when a network game's connection degrades.
     - Expand native, sanitizer, Android, and packaging validation.
     - Refresh build and network-play documentation and include third-party license notices in packaged releases.
 
