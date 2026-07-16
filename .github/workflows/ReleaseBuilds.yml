@@ -240,14 +240,16 @@ jobs:
         if: ${{ github.event_name == 'release' && steps.signing.outputs.signed == 'true' }}
         run: |
           set -euo pipefail
-          app=$(find build-xcode -type d -name 'CroMagRally.app' -print -quit)
+          # build.py -B defaults the CMake build tree to ./build
+          app=$(find build -type d -name 'CroMagRally.app' -print -quit)
           test -n "$app"
           codesign --verify --deep --strict --verbose=2 "$app"
       - name: Ad-hoc sign the application (no signing secrets)
         if: ${{ github.event_name == 'release' && steps.signing.outputs.signed == 'false' }}
         run: |
           set -euo pipefail
-          app=$(find build-xcode -type d -name 'CroMagRally.app' -print -quit)
+          # build.py -B defaults the CMake build tree to ./build
+          app=$(find build -type d -name 'CroMagRally.app' -print -quit)
           test -n "$app"
           codesign --force --deep --sign - "$app"
           codesign --verify --deep --strict --verbose=2 "$app"
