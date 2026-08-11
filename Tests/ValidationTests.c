@@ -11,6 +11,40 @@
 	exit(EXIT_FAILURE); \
 } } while (0)
 
+SuperTileStatus **gSuperTileStatusGrid;
+long gNumSuperTilesDeep;
+long gNumSuperTilesWide;
+
+static void TestTerrainRenderResidency(void)
+{
+	SuperTileStatus row0[2] =
+	{
+		{.supertileIndex = 3, .statusFlags = SUPERTILE_IS_DEFINED, .playerHereFlags = 1},
+		{.supertileIndex = 4, .statusFlags = 0, .playerHereFlags = 2},
+	};
+	SuperTileStatus row1[2] =
+	{
+		{.supertileIndex = 5, .statusFlags = SUPERTILE_IS_DEFINED | SUPERTILE_IS_USED_THIS_FRAME, .playerHereFlags = 4},
+		{.supertileIndex = 6, .statusFlags = SUPERTILE_IS_USED_THIS_FRAME, .playerHereFlags = 8},
+	};
+	SuperTileStatus* grid[2] = {row0, row1};
+
+	gSuperTileStatusGrid = grid;
+	gNumSuperTilesDeep = 2;
+	gNumSuperTilesWide = 2;
+
+	KeepTerrainAliveForRender();
+
+	assert(row0[0].statusFlags == (SUPERTILE_IS_DEFINED | SUPERTILE_IS_USED_THIS_FRAME));
+	assert(row0[1].statusFlags == 0);
+	assert(row1[0].statusFlags == (SUPERTILE_IS_DEFINED | SUPERTILE_IS_USED_THIS_FRAME));
+	assert(row1[1].statusFlags == SUPERTILE_IS_USED_THIS_FRAME);
+	assert(row0[0].supertileIndex == 3 && row0[0].playerHereFlags == 1);
+	assert(row0[1].supertileIndex == 4 && row0[1].playerHereFlags == 2);
+	assert(row1[0].supertileIndex == 5 && row1[0].playerHereFlags == 4);
+	assert(row1[1].supertileIndex == 6 && row1[1].playerHereFlags == 8);
+}
+
 static void TestEnvelopeValidation(void)
 {
 	NSpJoinRequestMessage join = {0};
@@ -515,6 +549,7 @@ static void TestScoreboardSanitization(void)
 
 int main(void)
 {
+	TestTerrainRenderResidency();
 	TestEnvelopeValidation();
 	TestCharacterValidation();
 	TestConfigValidation();

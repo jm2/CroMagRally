@@ -162,6 +162,7 @@ void CreateSuperTileMemoryList(void);
 void DisposeSuperTileMemoryList(void);
 extern 	void DisposeTerrain(void);
 void DrawTerrain(void);
+void KeepTerrainAliveForRender(void);
 extern	void GetSuperTileInfo(long x, long z, long *superCol, long *superRow, long *tileCol, long *tileRow);
 extern	void InitTerrainManager(void);
 float	GetTerrainY(float x, float z);
