@@ -25,7 +25,7 @@ This repository builds on [Iliyas Jorio’s modern source port](https://github.c
 Some of the new features include:
 
 - Up to 4 players in split-screen multiplayer (up from 2 in the original).
-- Up to 4 players over a LAN or Wi-Fi network.
+- Up to 6 players over a wired or Wi-Fi local area network.
 - The UI is subtly animated and has been tweaked to be pleasant to look at on modern widescreens.
 - Enable a timer in race modes to hone your racing skills, and keep track of your records in the all-new scoreboard!
 
