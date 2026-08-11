@@ -1064,6 +1064,7 @@ static void PlayArea(void)
 	while(true)
 	{
 		uint64_t startTick = SDL_GetPerformanceCounter();
+		Boolean terrainUpdatedThisFrame = false;
 
 		Net_Pump();						// Stage 1: drain non-blocking send rings (cheap no-op outside net games)
 		NetCheck_ConnectionTimeouts();	// CMR7 Stage 4: per-connection lastHeard badge/drop policy (no-op outside net games)
@@ -1075,7 +1076,7 @@ static void PlayArea(void)
 		// client is free-running (Stage 3): Net_Pump drains host packets into the ring, then
 		// it consumes up to gClientCatchUpMax this frame, stepping the sim once per applied
 		// packet (each replays its own host dt for a bit-identical trajectory). An empty ring
-		// => hold-last-frame: the unconditional render at Step 4 re-presents the prior image.
+		// holds the simulation; already-loaded terrain is retained separately before rendering.
 		//
 		if (!gNetGameInProgress)
 		{
@@ -1084,6 +1085,7 @@ static void PlayArea(void)
 			schedulePause = GetNewNeedStateAnyP(kNeed_UIPause);
 
 			StepGameSimulation();
+			terrainUpdatedThisFrame = true;
 		}
 		else if (gIsNetworkClient)
 		{
@@ -1096,6 +1098,7 @@ static void PlayArea(void)
 				if (r == kHostConsume_Applied)
 				{
 					StepGameSimulation();					// one sim step per applied host packet
+					terrainUpdatedThisFrame = true;
 					k++;
 				}
 				else if (r == kHostConsume_Dup)
@@ -1106,7 +1109,7 @@ static void PlayArea(void)
 				}
 				else
 				{
-					break;									// kHostConsume_Empty -> hold-last-frame this render frame
+					break;									// kHostConsume_Empty -> hold simulation; retain terrain before rendering
 				}
 			}
 		}
@@ -1120,6 +1123,7 @@ static void PlayArea(void)
 			HostSend_ControlInfoToClients();
 
 			StepGameSimulation();
+			terrainUpdatedThisFrame = true;
 		}
 
 
@@ -1153,6 +1157,12 @@ static void PlayArea(void)
 		//
 		// 4. RENDER
 		//
+		// DrawTerrain clears each supertile's USED_THIS_FRAME bit after drawing. A
+		// client hold frame has no simulation step to set those bits again, so retain
+		// the already-loaded geometry without advancing simulation or item streaming.
+		if (!terrainUpdatedThisFrame)
+			KeepTerrainAliveForRender();
+
 		OGL_DrawScene(DrawTerrain);
 
 
@@ -1232,7 +1242,8 @@ static void PlayArea(void)
 				break;
 		}
 
-		gDisableHiccupTimer = false;									// reenable this after the 1st frame
+		if (terrainUpdatedThisFrame)
+			gDisableHiccupTimer = false;								// reenable after the first terrain update
 
 			/* UPDATE SELF-RUNNING DEMO */
 

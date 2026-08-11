@@ -155,6 +155,8 @@ static void UpdatePausedMenuCallback(void)
 
 	if (gNetGameInProgress && gIsNetworkClient)
 	{
+		Boolean terrainUpdatedThisFrame = false;
+
 		Net_Pump();										// drain host packets into the ring + flush send rings (non-blocking)
 		NetCheck_ConnectionTimeouts();					// CMR7 Stage 4: host-link badge/drop policy (errors out the menu below if the host is gone)
 
@@ -176,6 +178,7 @@ static void UpdatePausedMenuCallback(void)
 					gSimulationPaused = true;
 					MoveObjects();						// frozen step — the host is running MoveObjects too
 					DoPlayerTerrainUpdate();
+					terrainUpdatedThisFrame = true;
 				}
 				else
 				{
@@ -183,6 +186,7 @@ static void UpdatePausedMenuCallback(void)
 					MoveEverything();					// stay in lockstep: same RNG draw count as the host
 					UpdateGameModeSpecifics();
 					DoPlayerTerrainUpdate();
+					terrainUpdatedThisFrame = true;
 					gSimulationFrame++;
 				}
 				k++;
@@ -211,6 +215,11 @@ static void UpdatePausedMenuCallback(void)
 			SampleAndSendLocalInput(&schedulePause);
 			Net_Pump();								// flush the just-enqueued input packets
 		}
+
+		// StartMenu draws the terrain after this callback. On an empty host ring,
+		// retain the previous active set without running terrain-item streaming.
+		if (!terrainUpdatedThisFrame)
+			KeepTerrainAliveForRender();
 
 		// CMR7 Stage 4: a dead net game (host gone / everybody left) must break the menu so PlayArea
 		// can tear it down, instead of spinning the pause loop forever.
