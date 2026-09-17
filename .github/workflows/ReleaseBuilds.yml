@@ -1,6 +1,6 @@
 name: Make Release Builds
 
-# Published releases are the single production trigger. Manual dispatches are smoke builds:
+# Pushed version tags are the single production trigger. Manual dispatches are smoke builds:
 # desktop/mobile artifacts that require credentials are explicitly labeled unsigned and are
 # never attached to a GitHub Release.
 #
@@ -9,8 +9,8 @@ name: Make Release Builds
 # secrets are configured, and fall back to an ad-hoc-signed, un-notarized disk image when
 # none are; a PARTIAL Apple secret set fails loudly instead of silently downgrading.
 on:
-  release:
-    types: [published]
+  push:
+    tags: ['v[0-9]*.[0-9]*.[0-9]*']
   workflow_dispatch:
 
 permissions:
@@ -40,9 +40,9 @@ jobs:
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           echo "game_version=$version" >> "$GITHUB_OUTPUT"
       - name: Require the release tag to match the source version
-        if: ${{ github.event_name == 'release' }}
+        if: ${{ github.event_name == 'push' }}
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ github.ref_name }}
           GAME_VERSION: ${{ steps.version.outputs.game_version }}
         run: test "$RELEASE_TAG" = "v$GAME_VERSION"
       - name: Require the AppStream metainfo to list this version
@@ -182,10 +182,12 @@ jobs:
     needs: release_metadata
     runs-on: macos-latest
     timeout-minutes: 30
+    outputs:
+      signed: ${{ steps.signing.outputs.signed }}
     steps:
       - name: Detect macOS signing configuration
         id: signing
-        if: ${{ github.event_name == 'release' }}
+        if: ${{ github.event_name == 'push' }}
         env:
           CODE_SIGN_IDENTITY: ${{ secrets.APPLE_CODE_SIGN_IDENTITY }}
           APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
@@ -217,7 +219,7 @@ jobs:
             echo "signed=true" >> "$GITHUB_OUTPUT"
           fi
       - name: Import code-signing certificate
-        if: ${{ github.event_name == 'release' && steps.signing.outputs.signed == 'true' }}
+        if: ${{ github.event_name == 'push' && steps.signing.outputs.signed == 'true' }}
         uses: apple-actions/import-codesign-certs@5142e029c445c10ffc7149d172e540235a065466 # v7
         with:
           p12-file-base64: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_P12_BASE64 }}
@@ -228,7 +230,7 @@ jobs:
         run: echo "ARTIFACT_NAME=$(python3 build.py --print-artifact-name)" >> $GITHUB_ENV
       - run: python3 build.py --dependencies
       - name: Configure signed release
-        if: ${{ github.event_name == 'release' && steps.signing.outputs.signed == 'true' }}
+        if: ${{ github.event_name == 'push' && steps.signing.outputs.signed == 'true' }}
         env:
           CODE_SIGN_IDENTITY: ${{ secrets.APPLE_CODE_SIGN_IDENTITY }}
         run: python3 build.py --configure --macos-signing-identity "$CODE_SIGN_IDENTITY"
@@ -237,7 +239,7 @@ jobs:
         run: python3 build.py --configure
       - run: python3 build.py --build
       - name: Verify the signed application
-        if: ${{ github.event_name == 'release' && steps.signing.outputs.signed == 'true' }}
+        if: ${{ github.event_name == 'push' && steps.signing.outputs.signed == 'true' }}
         run: |
           set -euo pipefail
           # build.py -B defaults the CMake build tree to ./build
@@ -245,7 +247,7 @@ jobs:
           test -n "$app"
           codesign --verify --deep --strict --verbose=2 "$app"
       - name: Ad-hoc sign the application (no signing secrets)
-        if: ${{ github.event_name == 'release' && steps.signing.outputs.signed == 'false' }}
+        if: ${{ github.event_name == 'push' && steps.signing.outputs.signed == 'false' }}
         run: |
           set -euo pipefail
           # build.py -B defaults the CMake build tree to ./build
@@ -255,22 +257,22 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$app"
       - run: python3 build.py --package
       - name: Sign and verify the disk image
-        if: ${{ github.event_name == 'release' && steps.signing.outputs.signed == 'true' }}
+        if: ${{ github.event_name == 'push' && steps.signing.outputs.signed == 'true' }}
         env:
           CODE_SIGN_IDENTITY: ${{ secrets.APPLE_CODE_SIGN_IDENTITY }}
         run: |
           set -euo pipefail
           codesign --force --sign "$CODE_SIGN_IDENTITY" --timestamp "dist/$ARTIFACT_NAME"
           codesign --verify --strict --verbose=2 "dist/$ARTIFACT_NAME"
-      - name: Label the manual smoke artifact as unsigned
-        if: ${{ github.event_name == 'workflow_dispatch' }}
+      - name: Label unnotarized macOS artifacts as unsigned
+        if: ${{ steps.signing.outputs.signed != 'true' }}
         run: |
           set -euo pipefail
           unsigned="${ARTIFACT_NAME%.dmg}-unsigned.dmg"
           mv "dist/$ARTIFACT_NAME" "dist/$unsigned"
           echo "ARTIFACT_NAME=$unsigned" >> "$GITHUB_ENV"
       - name: Notarize
-        if: ${{ github.event_name == 'release' && steps.signing.outputs.signed == 'true' }}
+        if: ${{ github.event_name == 'push' && steps.signing.outputs.signed == 'true' }}
         env:
           APPLE_NOTARY_USERNAME: ${{ secrets.APPLE_NOTARIZATION_USERNAME }}
           APPLE_NOTARY_PASSWORD: ${{ secrets.APPLE_NOTARIZATION_PASSWORD }}
@@ -279,7 +281,7 @@ jobs:
           xcrun notarytool store-credentials GameNotarizationProfile --apple-id "$APPLE_NOTARY_USERNAME" --password "$APPLE_NOTARY_PASSWORD" --team-id "$APPLE_TEAM_ID"
           xcrun notarytool submit "dist/$ARTIFACT_NAME" --keychain-profile GameNotarizationProfile --wait
       - name: Staple and validate notarization
-        if: ${{ github.event_name == 'release' && steps.signing.outputs.signed == 'true' }}
+        if: ${{ github.event_name == 'push' && steps.signing.outputs.signed == 'true' }}
         run: |
           xcrun stapler staple "dist/$ARTIFACT_NAME"
           xcrun stapler validate "dist/$ARTIFACT_NAME"
@@ -317,7 +319,7 @@ jobs:
           echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/29.0.14206865" >> "$GITHUB_ENV"
 
       - name: Require complete Android signing configuration for a release
-        if: ${{ github.event_name == 'release' }}
+        if: ${{ github.event_name == 'push' }}
         env:
           ANDROID_SIGNING_KEY: ${{ secrets.ANDROID_SIGNING_KEY }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -338,7 +340,7 @@ jobs:
         run: ./build_android.sh
 
       - name: Sign and verify release APK
-        if: ${{ github.event_name == 'release' }}
+        if: ${{ github.event_name == 'push' }}
         env:
           ANDROID_SIGNING_KEY: ${{ secrets.ANDROID_SIGNING_KEY }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -617,43 +619,30 @@ jobs:
           if-no-files-found: error
 
   checksums:
-    name: SHA256 checksums (Linux)
+    name: Validate complete artifact set and checksums
     runs-on: ubuntu-24.04
-    needs: [build-linux-appimage, build-linux-deb, build-linux-rpm, build-linux-arch, build-linux-flatpak]
-    if: always()   # still checksum whatever succeeded even if one package job failed
+    needs: [release_metadata, build-source, build-linux-appimage, build-windows, build-windows-arm64, build-macos, build-android, build-ios, build-tvos, build-linux-deb, build-linux-rpm, build-linux-arch, build-linux-flatpak]
     steps:
-      - name: Download all Linux artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: artifacts
-      - name: Generate SHA256SUMS.txt
-        run: |
-          cd artifacts
-          find . -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \
-            -o -name '*.pkg.tar.zst' -o -name '*.flatpak' \) \
-            -exec sha256sum {} + | sed 's|  \./|  |' | sort -k2 > ../SHA256SUMS.txt
-          cat ../SHA256SUMS.txt
+      - name: Require every artifact and generate complete checksums
+        env:
+          GAME_VERSION: ${{ needs.release_metadata.outputs.game_version }}
+          MAC_SIGNED: ${{ needs.build-macos.outputs.signed }}
+        run: python3 packaging/Release.py prepare
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: SHA256SUMS
-          path: SHA256SUMS.txt
+          name: release-bundle
+          path: upload/*
+          compression-level: 0
           if-no-files-found: error
 
-  # ──────────────────────────────────────────────────────────────────────────
-  # Attach the built artifacts to the GitHub Release.
-  #
-  # The build jobs above only upload to the *workflow run* (actions/upload-artifact);
-  # that store is separate from a Release's assets, so without this job a green run
-  # leaves the Release empty. This job downloads every run artifact, flattens it to a
-  # single asset set, generates a complete SHA256SUMS, and attaches everything to the
-  # Release for the tag. It needs `contents: write`, scoped to this job only so the
-  # build jobs keep the top-level least-privilege `contents: read`.
-  #
-  # Runs only for the canonical release:published production trigger. A manual dispatch
-  # can never attach its unsigned smoke artifacts, even when a tag is selected as its ref.
-  # ──────────────────────────────────────────────────────────────────────────
+  # A failed/skipped matrix child skips checksums and this publication job. The script
+  # independently verifies needs results, local checksums, and downloaded draft bytes.
   publish-release:
-    name: Attach artifacts to the Release
+    name: Verify draft assets and publish release
     needs:
       - release_metadata
       - build-source
@@ -668,41 +657,19 @@ jobs:
       - build-linux-rpm
       - build-linux-arch
       - build-linux-flatpak
-    if: ${{ github.event_name == 'release' }}
+      - checksums
+    if: ${{ success() && github.event_name == 'push' && github.ref_type == 'tag' }}
     runs-on: ubuntu-24.04
     permissions:
-      contents: write   # job-level override of the top-level `contents: read`
+      contents: write
     steps:
-      - name: Download every build artifact from this run
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          path: artifacts
-      - name: Collect a flat upload set + complete checksums
-        run: |
-          set -euo pipefail
-          mkdir -p upload
-          # Each artifact lands in artifacts/<artifact-name>/<file>. Every build job now
-          # uploads exactly one release-ready file, so flatten by basename. Skip the
-          # Linux-only SHA256SUMS.txt; a complete one is regenerated below.
-          while IFS= read -r f; do
-            b=$(basename "$f")
-            if [ -e "upload/$b" ]; then
-              # Same basename already collected. If the bytes are identical it's a harmless
-              # duplicate (e.g. an action that also auto-uploads its own bundle) -> skip it.
-              # Only a genuine content conflict between two different files is an error.
-              if cmp -s "$f" "upload/$b"; then
-                echo "Duplicate identical artifact, skipping: $b"
-                continue
-              fi
-              echo "::error::Two different artifacts share basename $b" >&2
-              exit 1
-            fi
-            cp "$f" "upload/$b"
-          done < <(find artifacts -type f ! -name 'SHA256SUMS.txt')
-          ( cd upload && sha256sum * | sort -k2 > SHA256SUMS.txt )
-          echo "Release assets:"; ls -la upload
-      - name: Attach to the Release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
-        with:
-          files: upload/*
-          fail_on_unmatched_files: true
+          name: release-bundle
+          path: upload
+      - name: Upload and verify private draft, then publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_NEEDS: ${{ toJSON(needs) }}
+        run: python3 packaging/Release.py publish

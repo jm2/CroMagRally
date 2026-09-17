@@ -14,8 +14,8 @@ Fresh-review backlog for HEAD `7d881127` / tag `v3.1.1`.
 - [ ] Add a bounded vehicle-selection readiness deadline and let the host remove only nonready peers instead of waiting indefinitely or cancelling the entire session.
 - [ ] Replace the level-ready barrier's session-wide fatal timeout with per-peer readiness tracking and removal of only stalled peers.
 - [ ] Add loopback/state-machine tests for silent handshakes, sparse lobby churn, stalled character selection, delayed level readiness, send-ring overflow, simultaneous leaves, leave while paused, and two games in one process.
-- [ ] Rework release production flow so builds run from a pushed version tag or draft release and the public GitHub Release is published only after every required artifact and checksum succeeds.
-- [ ] Add a release-workflow failure test proving that a failed matrix job cannot leave a public empty or incomplete release.
+- [x] Rework release production flow so builds run from a pushed version tag or draft release and the public GitHub Release is published only after every required artifact and checksum succeeds.
+- [x] Add a release-workflow failure test proving that a failed matrix job cannot leave a public empty or incomplete release.
 - [ ] Generate a deterministic Android asset-manifest/content hash and use it to invalidate extracted assets instead of relying only on `GAME_VERSION` and one sentinel file.
 - [ ] Test same-version Android reinstall/update behavior by changing an asset without bumping the marketing version and verifying the extracted bytes are refreshed.
 
@@ -48,7 +48,7 @@ Fresh-review backlog for HEAD `7d881127` / tag `v3.1.1`.
 - [ ] Add a bounded offscreen/headless sanitizer boot smoke to exercise production startup, resource loading, and gameplay initialization.
 - [ ] Fix Android wrapper NDK-cache detection to compare the normalized toolchain path/revision or a wrapper-owned NDK stamp instead of requiring a missing `CMAKE_ANDROID_NDK` cache key.
 - [ ] Add a two-run Android wrapper test proving a matching NDK preserves the incremental CMake build tree.
-- [ ] Label ad-hoc-signed, unnotarized macOS release artifacts as unsigned and disclose that status prominently in release notes.
+- [x] Label ad-hoc-signed, unnotarized macOS release artifacts as unsigned and disclose that status prominently in release notes.
 - [ ] Add Gradle wrapper validation in CI while retaining the pinned distribution checksum.
 - [ ] Validate `build_ios.sh` and `build_tvos.sh` arguments explicitly and reject values other than `device` or `simulator`.
 - [ ] Add CI coverage for the iOS/tvOS simulator paths used by the scripts' defaults; consider PR coverage for Android x86_64/release and currently release-gated package paths.

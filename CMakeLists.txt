@@ -608,6 +608,8 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 	endif()
 	add_test(NAME validation COMMAND CroMagRallyValidationTests)
 	find_package(Python3 REQUIRED COMPONENTS Interpreter)
+	add_test(NAME release_workflow COMMAND ${Python3_EXECUTABLE}
+		${CMAKE_SOURCE_DIR}/Tests/ReleaseWorkflowTests.py ${CMAKE_SOURCE_DIR})
 	add_test(
 		NAME version_metadata
 		COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/Tests/VersionMetadataTests.py ${CMAKE_SOURCE_DIR})
