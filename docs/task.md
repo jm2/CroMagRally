@@ -41,7 +41,7 @@ Implementation steps: documentation reconciliation; startup and gameplay/input;
 network message invariants; resource validation; network lifetime/readiness and
 discovery; Android extraction/build caching; release publication; remaining CI
 and Apple dependency coverage. Each step requires a PR, passing CI, and a clean
-bot review before merge. Checkboxes describe landed work, not planned work.
+bot review before merge. Unchecked entries are open backlog items; checked entries represent completed tasks.
 
 ## Priority: correctness and availability
 
