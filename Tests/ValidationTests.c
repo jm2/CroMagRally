@@ -240,6 +240,15 @@ static void TestHostControlValidation(void)
 	assert(!NetValidateHostControlPayload(&message, 0));
 	assert(!NetValidateHostControlPayload(&message, MAX_LOCAL_PLAYERS + 1));
 
+	const float rates[] = {0, 1, 8, 9, 1000, 1001};
+	for (size_t i = 0; i < sizeof(rates) / sizeof(rates[0]); i++)
+	{
+		message.fps = rates[i];
+		message.fpsFrac = rates[i] > 0 ? 1.0f / rates[i] : 0;
+		assert(NetValidateHostControlPayload(&message, 4)
+			== (rates[i] >= NET_MIN_FPS && rates[i] <= MAX_GAME_FPS));
+	}
+
 	message.fps = 9.0f;
 	message.fpsFrac = 1.0f / 9.0f;
 	assert(NetValidateHostControlPayload(&message, 4));
