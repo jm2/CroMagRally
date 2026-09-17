@@ -43,7 +43,11 @@ int Net_GetConnectionHint(void);
 /*    CONSTANTS             */
 /****************************/
 
-#define LOADING_TIMEOUT	15						// # seconds to wait for clients to load a level
+#define VEHICLE_READY_TIMEOUT_MS 60000u
+#define LEVEL_READY_TIMEOUT_MS 15000u
+// Clients allow time for the host's own selection/loading plus its peer deadline.
+#define CLIENT_VEHICLE_TIMEOUT_MS 120000u
+#define CLIENT_LEVEL_TIMEOUT_MS 60000u
 
 // CMR7 Stage 4: frame-aligned events + connection-liveness policy.
 #define NET_BADGE_MS			1000				// >1s silence from a peer -> connection badge (substitution continues)
@@ -128,10 +132,12 @@ static void NetGameFatalError(int error)
 #pragma mark - Player sync mask
 
 uint32_t gPlayerSyncMask;
+static uint32_t gReadinessStartedMs;
 
 static void ClearPlayerSyncMask(void)
 {
 	gPlayerSyncMask = 0;
+	gReadinessStartedMs = (uint32_t) SDL_GetTicks();
 
 }
 
@@ -312,6 +318,8 @@ void ResetNetGameTransientState(void)
 	memset(sFrameEventTable, 0, sizeof(sFrameEventTable));
 	memset(gNetBadge, 0, sizeof(gNetBadge));
 	gLastNetSendMs = 0;
+	gPlayerSyncMask = 0;
+	gReadinessStartedMs = 0;
 	ResetClientHostRing();					// CMR7 Stage 3: empty the client host-packet ring + reset hold timers
 }
 
@@ -442,6 +450,7 @@ static void ScheduleBecomeBotFromLeave(NSpPlayerLeftMessage* mess)
 		return;
 	}
 	Host_ScheduleFrameEvent(kEvBecomeBot, i);
+	gNetBadge[i] = false;
 }
 
 // Convert gPlayerInfo[i] to a bot. This is the OLD PlayerUnexpectedlyLeavesGame body, now operating
@@ -451,6 +460,7 @@ static void ApplyBecomeBot(int i)
 {
 	if (!IsValidPlayerNum(i))
 		return;
+	gNetBadge[i] = false;
 	if (gPlayerInfo[i].isComputer)								// already a bot (dup event / leave+drop): nothing to do
 		return;
 
@@ -480,6 +490,34 @@ static void ApplyBecomeBot(int i)
 					ChooseTaggedPlayer();						// synced RNG draw — stream-aligned by the frame-aligned apply
 				break;
 	}
+}
+
+// Readiness is tracked in NSp ID space, not dense game-player indices. A deadline
+// removes only missing peers; ready peers keep their sockets and readiness bits.
+static void HostRemoveUnreadyPeers(uint32_t timeoutMs)
+{
+	if (!gIsNetworkHost || !gNetGame || (uint32_t) SDL_GetTicks() - gReadinessStartedMs < timeoutMs)
+		return;
+	uint32_t missing = NSpGame_GetActivePlayersIDMask(gNetGame) & ~gPlayerSyncMask & ~(1u << kNSpHostID);
+	for (int id = 1; id < MAX_CLIENTS; id++)
+	{
+		if (!(missing & (1u << id)))
+			continue;
+		int playerNum = FindHumanByNSpPlayerID(id);
+		NSpPlayer_Kick(gNetGame, id);
+		ForgetPlayerSync(id);
+		if (playerNum >= 0)
+			ApplyBecomeBot(playerNum);
+	}
+}
+
+static void HostAdvanceReadinessBarrier(uint32_t timeoutMs, int waitingState, int readyState)
+{
+	if (!gIsNetworkHost || gNetSequenceState != waitingState)
+		return;
+	HostRemoveUnreadyPeers(timeoutMs);
+	if (gNetSequenceState == waitingState && AreAllPlayersSynced())
+		gNetSequenceState = readyState;
 }
 
 // HOST: drain the pending-event ring into an outgoing host control message. The wire events[] is sized
@@ -586,6 +624,7 @@ void NetCheck_ConnectionTimeouts(void)
 				// clients ignore the immediate PlayerLeft during gameplay and apply this event from
 				// the ordered host-control stream at the same simulation frame as the host.
 				Host_ScheduleFrameEvent(kEvBecomeBot, pn);
+				gNetBadge[pn] = false;
 				NSpPlayer_Kick(gNetGame, pid);
 				break;								// active-player indexing changed; resume next frame
 			}
@@ -1022,6 +1061,22 @@ bool UpdateNetSequence(void)
 			break;
 		gotAnyMessage = true;
 	}
+	// Check after draining messages, including leaves. No final sync packet needs
+	// to arrive after the last stalled peer is removed for the barrier to finish.
+	if (gNetSequenceState == kNetSequence_WaitingForPlayerVehicles)
+	{
+		HostAdvanceReadinessBarrier(VEHICLE_READY_TIMEOUT_MS,
+			kNetSequence_WaitingForPlayerVehicles, kNetSequence_GotAllPlayerVehicles);
+		if (gNetSequenceState == kNetSequence_WaitingForPlayerVehicles && AreAllPlayersSynced())
+			gNetSequenceState = kNetSequence_GotAllPlayerVehicles;
+		else if (gIsNetworkClient && (uint32_t) SDL_GetTicks() - gReadinessStartedMs >= CLIENT_VEHICLE_TIMEOUT_MS)
+			NetGameFatalError(kNetSequence_ErrorNoResponseFromHost);
+	}
+	else if (gNetSequenceState == kNetSequence_HostWaitForPlayersToPrepareLevel)
+	{
+		HostAdvanceReadinessBarrier(LEVEL_READY_TIMEOUT_MS,
+			kNetSequence_HostWaitForPlayersToPrepareLevel, kNetSequence_GameLoop);
+	}
 
 	return gotAnyMessage;
 }
@@ -1268,7 +1323,6 @@ void HostWaitForPlayersToPrepareLevel(void)
 {
 OSStatus				status;
 NetSyncMessage			outMess;
-int						startTick = TickCount();
 
 		/********************************/
 		/* WAIT FOR ALL CLIENTS TO SYNC */
@@ -1284,12 +1338,6 @@ int						startTick = TickCount();
 		bool gotMess = UpdateNetSequence();
 
 		Net_MaybeSendKeepAlive();									// CMR7 Stage 4: heartbeat so radios stay awake + lastHeard stays fresh while loading
-
-		if ((TickCount() - startTick) > (60 * LOADING_TIMEOUT))		// if no response for a while, then time out
-		{
-			NetGameFatalError(kNetSequence_ErrorNoResponseFromClients);
-			return;
-		}
 
 		if (!gotMess && gNetSequenceState != kNetSequence_GameLoop)
 		{
@@ -1334,7 +1382,7 @@ void ClientTellHostLevelIsPrepared(void)
 {
 OSStatus				status;
 NetSyncMessage			outMess;
-int						startTick = TickCount();
+uint32_t				startTick = (uint32_t) SDL_GetTicks();
 
 		/***********************************/
 		/* TELL THE HOST THAT WE ARE READY */
@@ -1369,7 +1417,8 @@ int						startTick = TickCount();
 
 		Net_MaybeSendKeepAlive();										// CMR7 Stage 4: heartbeat so radios stay awake + hostLastHeard stays fresh while loading
 
-		if ((TickCount() - startTick) > (60 * LOADING_TIMEOUT))			// if no response for a while, then time out
+		if (gNetSequenceState == kNetSequence_ClientWaitForSyncFromHost
+			&& (uint32_t) SDL_GetTicks() - startTick >= CLIENT_LEVEL_TIMEOUT_MS)
 		{
 			NetGameFatalError(kNetSequence_ErrorNoResponseFromHost);
 			return;

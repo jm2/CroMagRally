@@ -85,7 +85,7 @@ jobs:
       - name: Run sanitizer validation tests
         if: matrix.platform.name == 'Linux/GCC'
         run: |
-          cmake --build build-sanitize --target CroMagRallyValidationTests CroMagRallyNetworkLifecycleTests PommeFileTests PommeIEEEExtendedTests --parallel 2
+          cmake --build build-sanitize --target CroMagRallyValidationTests CroMagRallyNetworkLifecycleTests CroMagRallyNetworkReadinessTests PommeFileTests PommeIEEEExtendedTests --parallel 2
           ctest --test-dir build-sanitize --output-on-failure --no-tests=error
 
   # Compile the exact unsigned ARM64 device targets used by the release workflow. Running
