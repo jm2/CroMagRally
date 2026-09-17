@@ -11,10 +11,12 @@ Android, iOS, tvOS).
 
 ## Verdict
 
-**Both forks are safe to keep as-is for the game's current targets.** Every change is
-portability-only; no security-relevant or runtime game logic was altered. The only
-action items are maintenance/divergence hygiene and one incomplete-in-the-general-case
-gl4es fix that is dormant today.
+**Both forks are retained for the game's current targets.** The initial audit
+covered portability changes. Pomme subsequently added runtime changes to atomic
+file replacement and binary80 conversion, with unit tests run in CI; those changes
+must not be described as portability-only or covered by the initial audit. Follow-up
+work includes runtime re-audit before the next Pomme bump, maintenance/divergence
+hygiene, and an incomplete gl4es Apple alias fix that is dormant in today's link.
 
 | Submodule | Fork delta | Verdict |
 |-----------|-----------|---------|
@@ -34,7 +36,7 @@ Upstream: `jorio/Pomme`. The first two fork commits are pure portability:
    resolves the preferences directory via `SDL_GetPrefPath`.
 
 Two later commits (added after the original audit) change *runtime behavior*, so the
-"portability-only" verdict above applies only to the first two. Both ship unit tests that
+"portability-only" description applies only to the first two. Both ship unit tests that
 run in the game's CI (`pomme_files`, `pomme_ieee_extended`), so they are guarded, but a
 security/correctness re-audit is warranted before the next upstream bump:
 
