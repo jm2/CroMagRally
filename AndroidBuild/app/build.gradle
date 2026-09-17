@@ -126,6 +126,7 @@ def verifyStagedPackageInputs = tasks.register('verifyStagedPackageInputs') {
         def missing = []
         [
             new File(stagedAssetsDir, 'Data/files.txt'),
+            new File(stagedAssetsDir, 'Data/content.sha256'),
             new File(stagedAssetsDir, 'Data/System/gamecontrollerdb.txt'),
             new File(stagedAssetsDir, 'LICENSE.md'),
             new File(stagedAssetsDir, 'THIRD-PARTY-LICENSES.md'),
@@ -133,6 +134,11 @@ def verifyStagedPackageInputs = tasks.register('verifyStagedPackageInputs') {
             if (!requiredFile.isFile() || requiredFile.length() == 0) {
                 missing << project.relativePath(requiredFile)
             }
+        }
+
+        def contentMarker = new File(stagedAssetsDir, 'Data/content.sha256')
+        if (contentMarker.isFile() && !(contentMarker.getText('UTF-8') ==~ /[0-9a-f]{64}/)) {
+            throw new GradleException('Invalid Android asset content identity. Run build_android.sh (or build_android.ps1) to restage assets.')
         }
 
         def stagedAbis = stagedJniLibsDir.isDirectory()

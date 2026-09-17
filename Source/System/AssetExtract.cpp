@@ -36,7 +36,11 @@ void ExtractAndroidAssets(const fs::path& destinationRoot)
     const fs::path marker = destination / ".asset-content";
     if (fs::exists(marker) && fs::exists(destination / "System" / "gamecontrollerdb.txt")
         && LoadAssetText(reinterpret_cast<const char*>(marker.u8string().c_str())) == contentId)
+    {
+        fs::remove_all(backup);
+        fs::remove_all(staging);
         return;
+    }
 
     fs::remove_all(staging);
     fs::create_directories(staging);

@@ -63,6 +63,12 @@ int main(int argc, char** argv)
         ExtractAndroidAssets(destination);
         Check(Read(destination / "Data/asset.bin") == "new bytes", "interrupted swap not recovered");
 
+        Write(destination / "Data.old/asset.bin", "stale backup");
+        Write(destination / "Data.new/asset.bin", "abandoned staging");
+        ExtractAndroidAssets(destination);
+        Check(!fs::exists(destination / "Data.old"), "completed swap retained old backup");
+        Check(!fs::exists(destination / "Data.new"), "current assets retained abandoned staging");
+
         Write("Data/content.sha256", std::string(64, 'c'));
         Write("Data/files.txt", "Data/../../outside\n");
         failed = false;
