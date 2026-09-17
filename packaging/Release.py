@@ -67,6 +67,25 @@ class GitHub:
         return result.stdout
 
 
+def signing_notice(mac_signed):
+    mac = ("**macOS: Developer-ID signed and notarized.**\n\n" if mac_signed else
+           "**macOS download is unsigned (ad-hoc signed) and not notarized.** "
+           "Gatekeeper may block first launch; use macOS Privacy & Security to allow it only if you trust this download.\n\n")
+    return mac + "iOS and tvOS downloads are unsigned sideload builds and require re-signing before installation.\n\n"
+
+
+def release_notes(body, mac_signed):
+    # Replace all previously managed prefixes, including contradictory prefixes
+    # from an interrupted retry, while retaining the author's release notes.
+    previous_notices = (signing_notice(False), signing_notice(True))
+    while True:
+        previous = next((notice for notice in previous_notices if body.startswith(notice)), None)
+        if previous is None:
+            break
+        body = body[len(previous):]
+    return signing_notice(mac_signed) + body
+
+
 def publish(upload, tag, needs, github):
     required = {"release_metadata", "checksums", *BUILD_JOBS}
     if set(needs) != required or any(needs[job]["result"] != "success" for job in required):
@@ -91,24 +110,17 @@ def publish(upload, tag, needs, github):
         if obsolete:
             raise RuntimeError(f"Draft {tag} contains unexpected assets: {', '.join(sorted(obsolete))}. "
                                "Remove these assets from the draft and retry; no release changes were made.")
-    notes = ("**macOS: Developer-ID signed and notarized.**\n\n" if mac_signed else
-             "**macOS download is unsigned (ad-hoc signed) and not notarized.** "
-             "Gatekeeper may block first launch; use macOS Privacy & Security to allow it only if you trust this download.\n\n")
-    notes += "iOS and tvOS downloads are unsigned sideload builds and require re-signing before installation.\n\n"
+    notes = release_notes((draft["body"] or "") if draft is not None else "", mac_signed)
     # All API mutations occur after every local validation above. Upload or download
     # failures leave the release private; the one publication call is last.
     with tempfile.TemporaryDirectory(prefix="cmr-release-", dir=os.environ.get("TMPDIR") or "/var/tmp") as folder:
         scratch = Path(folder)
         notes_file = scratch / "notes.md"
+        notes_file.write_text(notes, encoding="utf-8")
         if state is None:
-            notes_file.write_text(notes, encoding="utf-8")
             github.call("release", "create", tag, "--draft", "--verify-tag", "--title", tag,
                         "--generate-notes", "--notes-file", str(notes_file))
         else:
-            body = draft["body"] or ""
-            if not body.startswith(notes):
-                body = notes + body
-            notes_file.write_text(body, encoding="utf-8")
             github.call("release", "edit", tag, "--draft", "--notes-file", str(notes_file))
         github.call("release", "upload", tag, *[str(p) for p in sorted(upload.iterdir())], "--clobber")
         downloaded = scratch / "downloaded"
