@@ -52,11 +52,10 @@ Fresh-review backlog for HEAD `7d881127` / tag `v3.1.1`.
 - [ ] Add Gradle wrapper validation in CI while retaining the pinned distribution checksum.
 - [ ] Validate `build_ios.sh` and `build_tvos.sh` arguments explicitly and reject values other than `device` or `simulator`.
 - [ ] Add CI coverage for the iOS/tvOS simulator paths used by the scripts' defaults; consider PR coverage for Android x86_64/release and currently release-gated package paths.
-- [ ] Replace the gl4es Apple declaration-only aliases for `gl4es_glEnableClientStatei` and `gl4es_glDisableClientStatei` with real forwarding definitions.
-- [ ] Add an Apple gl4es link test that references `gl4es_GetProcAddress` and both client-state symbols so future shared/lookup configurations cannot regress silently.
+- [x] Replace the gl4es Apple declaration-only aliases for `gl4es_glEnableClientStatei` and `gl4es_glDisableClientStatei` with real forwarding definitions.
+- [x] Add an Apple gl4es link test that references `gl4es_GetProcAddress` and both client-state symbols so future shared/lookup configurations cannot regress silently.
 
 ## Priority: documentation
 
 - [ ] Update `docs/REVIEW.md` to remove the now-false claim that tvOS persistence still uses purgeable cache storage.
 - [ ] Reconcile `docs/SUBMODULE-AUDIT.md` wording so its verdict acknowledges the documented Pomme runtime changes as well as portability changes.
-
