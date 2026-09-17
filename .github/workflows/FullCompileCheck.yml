@@ -85,8 +85,12 @@ jobs:
       - name: Run sanitizer validation tests
         if: matrix.platform.name == 'Linux/GCC'
         run: |
-          cmake --build build-sanitize --target CroMagRallyValidationTests PommeFileTests PommeIEEEExtendedTests --parallel 2
+          cmake --build build-sanitize --parallel 2
           ctest --test-dir build-sanitize --output-on-failure --no-tests=error
+
+      - name: Smoke every CLI race track with sanitizers
+        if: matrix.platform.name == 'Linux/GCC'
+        run: python3 Tests/StartupSmokeTests.py build-sanitize/CroMagRally
 
   # Compile the exact unsigned ARM64 device targets used by the release workflow. Running
   # the developer scripts catches SDK, bundle, SDL static-link and mobile CMake regressions;

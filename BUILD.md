@@ -136,3 +136,17 @@ The unsigned `.ipa` / `.app` must be re-signed (AltStore / Sideloadly, or your o
 ## Licensing packaged builds
 
 Distributions must include both [LICENSE.md](LICENSE.md) and [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md). The latter contains the notices for the pinned SDL3, Pomme, and gl4es sources and for directly vendored support code and data. A system-provided SDL package remains subject to that package’s own license-distribution rules.
+## Startup smoke tests
+
+On Linux, `python3 Tests/StartupSmokeTests.py <path-to-CroMagRally>` exercises
+every CLI-selectable race track with SDL's offscreen video and dummy audio
+backends. It checks practice gameplay, host lobby startup, invalid track IDs,
+and teardown with isolated preferences and a 45-second limit per invocation.
+Host gameplay and peer readiness require separate network tests.
+
+The developer option `--smoke-test-frames N` (1–600) requires `--track` and exits
+after that many gameplay frames, or lobby frames when combined with `--host`.
+It cannot be used with `--join`. CI builds the full game with ASan/UBSan before
+running these tests; unit tests alone do not exercise asset loading. Leak
+detection remains enabled in the unit suite, but is disabled for the rendering
+smoke because Mesa/EGL retains process-lifetime driver allocations after unload.

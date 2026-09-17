@@ -116,6 +116,7 @@ typedef struct
 {
 	int		vsync;
 	int		bootToTrack;
+	int		smokeTestFrames;
 	int		car;
 	bool	netHost;
 	bool	netJoin;
