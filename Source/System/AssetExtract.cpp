@@ -7,8 +7,6 @@
 #include <stdexcept>
 #include <string>
 
-namespace fs = std::filesystem;
-
 static std::string LoadAssetText(const char* path)
 {
     size_t size = 0;
