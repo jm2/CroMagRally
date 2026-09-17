@@ -46,6 +46,7 @@ void LoadASkeleton(Byte num);
 extern	void FreeSkeletonFile(Byte skeletonType);
 extern	void FreeAllSkeletonFiles(short skipMe);
 extern	void FreeSkeletonBaseData(SkeletonObjDataType *data);
+int BuildBoneNormalList(const SkeletonDefType* skeleton, BoneDefinitionType* bone);
 
 
 #endif
