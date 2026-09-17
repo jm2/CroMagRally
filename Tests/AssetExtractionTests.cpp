@@ -45,6 +45,14 @@ int main(int argc, char** argv)
         ExtractAndroidAssets(destination);
         Check(fs::exists(destination / "Data/retained"), "same-content launch unnecessarily extracted");
 
+        // A damaged installed marker must be repaired even without an APK update.
+        fs::remove(destination / "Data/.asset-content");
+        fs::create_directory(destination / "Data/.asset-content");
+        Write(destination / "Data/asset.bin", "damaged bytes");
+        ExtractAndroidAssets(destination);
+        Check(Read(destination / "Data/asset.bin") == "old bytes", "unreadable marker prevented repair");
+        Check(Read(destination / "Data/.asset-content") == std::string(64, 'a'), "marker was not repaired");
+
         // Marketing version never changes: only the packaged bytes/content ID do.
         Write("Data/asset.bin", "new bytes");
         Write("Data/content.sha256", std::string(64, 'b'));
