@@ -19,6 +19,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  gradle-wrapper-check:
+    name: Gradle wrapper validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Validate the wrapper we execute. SDL's sample Android project is not part
+      # of our build; leave submodules uninitialized in this validation checkout.
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+
   full-compile-check:
     name: ${{ matrix.platform.name }}
     runs-on: ${{ matrix.platform.os }}
@@ -121,6 +131,7 @@ jobs:
   # branches of the shared CMakeLists, which otherwise only surface at release-tag time.
   # Build device/debug and emulator/release APKs so both packaging variants are checked.
   android-native-check:
+    needs: gradle-wrapper-check
     name: Android APK (${{ matrix.target.abi }}, ${{ matrix.target.variant }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -137,8 +148,6 @@ jobs:
       - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
         with:
           packages: platform-tools
-
-      - uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
 
       - uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
         with:
