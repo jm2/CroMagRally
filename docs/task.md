@@ -59,8 +59,8 @@ bot review before merge. Unchecked entries are open backlog items; checked entri
 - [ ] Add loopback/state-machine tests for silent handshakes, sparse lobby churn, stalled character selection, delayed level readiness, send-ring overflow, simultaneous leaves, leave while paused, and two games in one process.
 - [ ] Rework release production flow so builds run from a pushed version tag or draft release and the public GitHub Release is published only after every required artifact and checksum succeeds.
 - [ ] Add a release-workflow failure test proving that a failed matrix job cannot leave a public empty or incomplete release.
-- [ ] Generate a deterministic Android asset-manifest/content hash and use it to invalidate extracted assets instead of relying only on `GAME_VERSION` and one sentinel file.
-- [ ] Test same-version Android reinstall/update behavior by changing an asset without bumping the marketing version and verifying the extracted bytes are refreshed.
+- [x] Generate a deterministic Android asset-manifest/content hash and use it to invalidate extracted assets instead of relying only on `GAME_VERSION` and one sentinel file.
+- [x] Test same-version Android reinstall/update behavior by changing an asset without bumping the marketing version and verifying the extracted bytes are refreshed.
 
 ## Priority: resource and data hardening
 
@@ -89,8 +89,8 @@ bot review before merge. Unchecked entries are open backlog items; checked entri
 
 - [x] Build the full `CroMagRally` target in sanitizer CI, not only selected test executables.
 - [x] Add a bounded offscreen/headless sanitizer boot smoke to exercise production startup, resource loading, and gameplay initialization.
-- [ ] Fix Android wrapper NDK-cache detection to compare the normalized toolchain path/revision or a wrapper-owned NDK stamp instead of requiring a missing `CMAKE_ANDROID_NDK` cache key.
-- [ ] Add a two-run Android wrapper test proving a matching NDK preserves the incremental CMake build tree.
+- [x] Fix Android wrapper NDK-cache detection to compare the normalized toolchain path/revision or a wrapper-owned NDK stamp instead of requiring a missing `CMAKE_ANDROID_NDK` cache key.
+- [x] Add a two-run Android wrapper test proving a matching NDK preserves the incremental CMake build tree.
 - [ ] Label ad-hoc-signed, unnotarized macOS release artifacts as unsigned and disclose that status prominently in release notes.
 - [x] Add Gradle wrapper validation in CI while retaining the pinned distribution checksum.
 - [x] Validate `build_ios.sh` and `build_tvos.sh` arguments explicitly and reject values other than `device` or `simulator`.

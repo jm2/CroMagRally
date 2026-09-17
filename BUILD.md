@@ -116,7 +116,7 @@ The unsigned `.ipa` / `.app` must be re-signed (AltStore / Sideloadly, or your o
 ./build_android.sh run       # also installs + launches on a connected device/emulator
 ```
 
-`JAVA_HOME`, `ANDROID_HOME`, and the pinned NDK are auto-detected from a standard Android Studio install; set them explicitly if the build can't find them. Windows users can run `build_android.ps1`, which enforces the same SDK/NDK and staging rules. Environment knobs: `ABIS="arm64-v8a"` limits which supported ABIs are built, `GRADLE_TASK=assembleRelease` selects a different Gradle assembly task, and `SKIP_GRADLE=1` provides a local native-only compile check. Pull-request CI assembles and lints an arm64 debug APK.
+`JAVA_HOME`, `ANDROID_HOME`, and the pinned NDK are auto-detected from a standard Android Studio install; set them explicitly if the build can't find them. Both wrappers require Ninja and share the same CMake generator, so switching shells preserves compatible incremental builds. Windows users can run `build_android.ps1`, which enforces the same SDK/NDK and staging rules. Environment knobs: `ABIS="arm64-v8a"` limits which supported ABIs are built, `GRADLE_TASK=assembleRelease` selects a different Gradle assembly task, and `SKIP_GRADLE=1` provides a local native-only compile check. Pull-request CI assembles and lints an arm64 debug APK.
 
 ## CI release signing secrets
 

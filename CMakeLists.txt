@@ -609,6 +609,16 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 	endif()
 	add_test(NAME validation COMMAND CroMagRallyValidationTests)
 	find_package(Python3 REQUIRED COMPONENTS Interpreter)
+	add_executable(CroMagRallyAssetExtractionTests Tests/AssetExtractionTests.cpp Source/System/AssetExtract.cpp)
+	target_include_directories(CroMagRallyAssetExtractionTests PRIVATE ${GAME_SRCDIR}/Headers)
+	target_link_libraries(CroMagRallyAssetExtractionTests PRIVATE SDL3::SDL3)
+	if(SANITIZE)
+		target_compile_options(CroMagRallyAssetExtractionTests PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+		target_link_options(CroMagRallyAssetExtractionTests PRIVATE -fsanitize=address,undefined)
+	endif()
+	add_test(NAME android_assets_and_wrappers COMMAND ${Python3_EXECUTABLE}
+		${CMAKE_SOURCE_DIR}/Tests/AndroidBuildTests.py ${CMAKE_SOURCE_DIR}
+		$<TARGET_FILE:CroMagRallyAssetExtractionTests> ${CMAKE_COMMAND})
 	add_test(
 		NAME version_metadata
 		COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/Tests/VersionMetadataTests.py ${CMAKE_SOURCE_DIR})
@@ -616,6 +626,10 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 		NAME localization_data
 		COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/Tests/LocalizationDataTests.py ${CMAKE_SOURCE_DIR})
 	if(WIN32)
+		add_custom_command(TARGET CroMagRallyAssetExtractionTests POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E copy_if_different
+				$<TARGET_RUNTIME_DLLS:CroMagRallyAssetExtractionTests> $<TARGET_FILE_DIR:CroMagRallyAssetExtractionTests>
+			COMMAND_EXPAND_LISTS)
 		# Keep the runtime-DLL staging hook beside the executable it belongs to so
 		# target existence and directory scope are unambiguous at configure time.
 		add_custom_command(TARGET CroMagRallyValidationTests POST_BUILD

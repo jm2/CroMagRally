@@ -5,6 +5,7 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
+#include "assetextract.h"
 #include "Pomme.h"
 #include "PommeFiles.h"
 #include "PommeInit.h"
@@ -186,146 +187,18 @@ static void Boot(int argc, char **argv) {
   SDL_Log("Boot: Executable path: %s", executablePath ? executablePath : "NULL");
 
 #if defined(__ANDROID__)
-  // On Android, extract assets to internal storage because the game expects a
-  // real filesystem
   char *prefPath = SDL_GetPrefPath("Pangea Software", "CroMagRally");
-  if (prefPath) {
-    fs::path destDir = fs::path(prefPath) / "Data";
-    fs::path stagingDir = fs::path(prefPath) / "Data.new";
-    fs::path versionFile = destDir / ".asset-version";
-
-    bool assetsCurrent = false;
-    size_t versionSize = 0;
-    void *versionData = SDL_LoadFile(
-        reinterpret_cast<const char *>(versionFile.u8string().c_str()),
-        &versionSize);
-    if (versionData) {
-      assetsCurrent =
-          std::string(static_cast<const char *>(versionData), versionSize) ==
-              GAME_VERSION &&
-          fs::exists(destDir / "System" / "gamecontrollerdb.txt");
-      SDL_free(versionData);
-    }
-
-    if (!assetsCurrent) {
-      SDL_Log("Extracting assets for version %s...", GAME_VERSION);
-      fs::remove_all(stagingDir);
-      fs::create_directories(stagingDir);
-      bool extractionOK = true;
-
-      // Read file list
-      size_t fileSize;
-      void *fileData = SDL_LoadFile("Data/files.txt", &fileSize);
-      if (fileData) {
-        std::string fileList((char *)fileData, fileSize);
-        SDL_free(fileData);
-
-        std::stringstream ss(fileList);
-        std::string line;
-        while (std::getline(ss, line)) {
-          if (line.empty())
-            continue;
-
-          // Remove \r if present
-          if (line.back() == '\r')
-            line.pop_back();
-
-          // Normalize once, require a file below the Data directory, and use that
-          // normalized path for both sides of the copy.  Validating one spelling
-          // but passing the raw manifest line to SDL/filesystem APIs would leave a
-          // path-traversal gap between the check and its use.
-          fs::path assetPath = fs::path(line).lexically_normal();
-          fs::path relativeAssetPath;
-          bool safePath = !line.empty() && line.find('\0') == std::string::npos &&
-                          !assetPath.empty() && !assetPath.is_absolute();
-          auto component = assetPath.begin();
-          if (!safePath || component == assetPath.end() ||
-              *component != fs::path("Data")) {
-            safePath = false;
-          } else {
-            for (++component; component != assetPath.end(); ++component) {
-              if (component->empty() || *component == fs::path(".") ||
-                  *component == fs::path("..")) {
-                safePath = false;
-                break;
-              }
-              relativeAssetPath /= *component;
-            }
-            if (relativeAssetPath.empty())
-              safePath = false;
-          }
-          if (!safePath) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                         "Unsafe asset path in manifest: %s", line.c_str());
-            extractionOK = false;
-            break;
-          }
-
-          const std::string normalizedAssetPath = assetPath.generic_string();
-
-          // Create parent directories
-          fs::path filePath = stagingDir / relativeAssetPath;
-          fs::create_directories(filePath.parent_path());
-
-          // Copy
-          size_t dataSize;
-          void *data = SDL_LoadFile(normalizedAssetPath.c_str(), &dataSize);
-          if (data) {
-            if (!SDL_SaveFile(
-                    reinterpret_cast<const char *>(filePath.u8string().c_str()),
-                    data, dataSize)) {
-              SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                           "Failed to save extracted asset: %s",
-                           normalizedAssetPath.c_str());
-              extractionOK = false;
-            }
-            SDL_free(data);
-          } else {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                         "Failed to load asset: %s",
-                         normalizedAssetPath.c_str());
-            extractionOK = false;
-          }
-          if (!extractionOK)
-            break;
-        }
-      } else {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "Could not find Data/files.txt in assets!");
-        extractionOK = false;
-      }
-
-      fs::path stagingVersionFile = stagingDir / ".asset-version";
-      extractionOK = extractionOK &&
-          SDL_SaveFile(
-              reinterpret_cast<const char *>(stagingVersionFile.u8string().c_str()),
-              GAME_VERSION, SDL_strlen(GAME_VERSION));
-
-      if (!extractionOK) {
-        fs::remove_all(stagingDir);
-        SDL_free(prefPath);
-        throw std::runtime_error("Couldn't extract Android game assets.");
-      }
-
-      fs::remove_all(destDir);
-      fs::rename(stagingDir, destDir);
-    } else {
-      SDL_Log("Assets already extracted to %s", destDir.c_str());
-    }
-  }
+  if (!prefPath)
+    throw std::runtime_error("Couldn't locate Android asset storage.");
+  fs::path assetRoot(prefPath);
+  SDL_free(prefPath);
+  ExtractAndroidAssets(assetRoot);
 #endif
 
   fs::path dataPath = FindGameData(executablePath);
   auto dataPath8 = dataPath.u8string();
   SDL_Log("Boot: Data path found: %s",
           reinterpret_cast<const char *>(dataPath8.c_str()));
-#if defined(__ANDROID__)
-  if (prefPath) {
-    dataPath = fs::path(prefPath) / "Data";
-    SDL_free(prefPath);
-    prefPath = nullptr;
-  }
-#endif
 
   // Load game prefs before starting
   LoadPrefs();
