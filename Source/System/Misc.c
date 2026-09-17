@@ -517,5 +517,3 @@ EventRecord 	theEvent;
 
 
 /************* SDL_snprintf THAT APPENDS TO EXISTING STRING ****************/
-
-
