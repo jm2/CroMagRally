@@ -607,6 +607,18 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 		target_link_libraries(CroMagRallyValidationTests PRIVATE m)
 	endif()
 	add_test(NAME validation COMMAND CroMagRallyValidationTests)
+	if(UNIX)
+		add_executable(CroMagRallyNetworkLifecycleTests Tests/NetworkLifecycleTests.c
+			Source/Network/NetValidation.c Source/System/TextUtils.c)
+		target_include_directories(CroMagRallyNetworkLifecycleTests PRIVATE ${GAME_GENERATED_INCLUDE_DIR} ${GAME_SRCDIR}/Headers)
+		target_link_libraries(CroMagRallyNetworkLifecycleTests PRIVATE Pomme SDL3::SDL3)
+		if(SANITIZE)
+			target_compile_options(CroMagRallyNetworkLifecycleTests PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+			target_link_options(CroMagRallyNetworkLifecycleTests PRIVATE -fsanitize=address,undefined)
+		endif()
+		add_test(NAME network_lifecycle COMMAND CroMagRallyNetworkLifecycleTests)
+		set_tests_properties(network_lifecycle PROPERTIES TIMEOUT 30)
+	endif()
 	find_package(Python3 REQUIRED COMPONENTS Interpreter)
 	add_test(
 		NAME version_metadata

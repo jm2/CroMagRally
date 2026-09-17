@@ -819,22 +819,22 @@ static bool UpdateNetSequenceOnce(Boolean runFrameTicks)
 			}
 			else
 			{
-				// Automatically join the first game we found
+				// Try one live advertisement per tick. A failed entry is removed by NetLow.
 
 				gNetGame = NSpSearch_JoinGame(gNetSearch, 0);
 
 				if (gNetGame)
 				{
 					gNetSequenceState = kNetSequence_ClientJoiningGame;
+					NSpSearch_Dispose(gNetSearch);
+					gNetSearch = NULL;
+					SetNetworkDiscoveryMode(false);
 				}
 				else
 				{
-					gNetSequenceState = kNetSequence_Error;
+					gNetSequenceState = NSpSearch_GetNumGamesFound(gNetSearch) > 0
+						? kNetSequence_ClientFoundGames : kNetSequence_ClientSearchingForGames;
 				}
-
-				NSpSearch_Dispose(gNetSearch);
-				gNetSearch = NULL;
-				SetNetworkDiscoveryMode(false);
 			}
 			break;
 

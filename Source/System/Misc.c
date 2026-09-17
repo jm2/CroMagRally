@@ -518,15 +518,4 @@ EventRecord 	theEvent;
 
 /************* SDL_snprintf THAT APPENDS TO EXISTING STRING ****************/
 
-size_t snprintfcat(char* buf, size_t bufSize, char const* fmt, ...)
-{
-	size_t len = SDL_strnlen(buf, bufSize);
-	int result;
-	va_list args;
 
-	va_start(args, fmt);
-	result = SDL_vsnprintf(buf + len, bufSize - len, fmt, args);
-	va_end(args);
-
-	return result;
-}
