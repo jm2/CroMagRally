@@ -107,6 +107,20 @@ static void Session(void)
     CHECK(NSpGame_GetActivePlayersIDMask(host) == 1);
     CloseSocket(&legacy);
 
+    // A send failure before join approval also recycles silently.
+    LobbyInfo pendingLobby = {.hostAddr = address};
+    NSpGame* pending = JoinLobby(&pendingLobby);
+    CHECK(pending && NSpGame_AcceptNewClient(host) == 1);
+    NSpMessageHeader* pendingRequest = WaitMessage(host);
+    CHECK(pendingRequest->what == kNSpJoinRequest);
+    uint8_t handshakeBacklog[SEND_RING_CAPACITY] = {0};
+    CHECK(SendRing_Append(&host->players[1].sendRing, handshakeBacklog, sizeof(handshakeBacklog)));
+    CHECK(NSpGame_AckJoinRequest(host, pendingRequest) != kNSpRC_OK);
+    NSpMessage_Release(host, pendingRequest);
+    CHECK(host->players[1].state == kNSpPlayerState_Offline);
+    CHECK(!NSpMessage_Get(host));
+    NSpGame_Dispose(pending, 0);
+
     // Fill every slot without completing a handshake, including a partial header.
     int silent[MAX_CLIENTS - 1];
     for (int i = 0; i < MAX_CLIENTS - 1; i++)
