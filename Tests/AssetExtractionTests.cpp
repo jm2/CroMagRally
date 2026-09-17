@@ -1,12 +1,9 @@
 #include "assetextract.h"
 
-#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <string>
-
-namespace fs = std::filesystem;
 
 static void Check(bool condition, const char* message)
 {
@@ -17,14 +14,14 @@ static void Check(bool condition, const char* message)
 static void Write(const fs::path& path, const std::string& bytes)
 {
     fs::create_directories(path.parent_path());
-    std::ofstream file(path, std::ios::binary);
+    std::ofstream file(path.c_str(), std::ios::binary);
     file << bytes;
     Check(file.good(), "fixture write failed");
 }
 
 static std::string Read(const fs::path& path)
 {
-    std::ifstream file(path, std::ios::binary);
+    std::ifstream file(path.c_str(), std::ios::binary);
     return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
 }
 

@@ -612,7 +612,7 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 	find_package(Python3 REQUIRED COMPONENTS Interpreter)
 	add_executable(CroMagRallyAssetExtractionTests Tests/AssetExtractionTests.cpp Source/System/AssetExtract.cpp)
 	target_include_directories(CroMagRallyAssetExtractionTests PRIVATE ${GAME_SRCDIR}/Headers)
-	target_link_libraries(CroMagRallyAssetExtractionTests PRIVATE SDL3::SDL3)
+	target_link_libraries(CroMagRallyAssetExtractionTests PRIVATE Pomme SDL3::SDL3)
 	if(SANITIZE)
 		target_compile_options(CroMagRallyAssetExtractionTests PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
 		target_link_options(CroMagRallyAssetExtractionTests PRIVATE -fsanitize=address,undefined)
