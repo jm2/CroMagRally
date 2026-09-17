@@ -92,6 +92,10 @@ jobs:
         if: matrix.platform.name == 'Linux/GCC'
         run: python3 Tests/StartupSmokeTests.py build-sanitize/CroMagRally
 
+      - name: Reject malformed playfield and skeleton fixtures with sanitizers
+        if: matrix.platform.name == 'Linux/GCC'
+        run: python3 Tests/MalformedAssetTests.py build-sanitize/CroMagRally
+
   # Compile the exact unsigned ARM64 device targets used by the release workflow. Running
   # the developer scripts catches SDK, bundle, SDL static-link and mobile CMake regressions;
   # packaging/signing stays in ReleaseBuilds.yml.

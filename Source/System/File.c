@@ -307,9 +307,9 @@ SkeletonFile_AnimHeader_Type	*animHeaderPtr;
 		HLock(hand);
 		UNPACK_STRUCTS_HANDLE(">i32b3fHH8L", File_BoneDefinitionType, 1, hand);
 		bonePtr = (File_BoneDefinitionType *)*hand;
-		if (bonePtr->parentBone < -1 || bonePtr->parentBone >= numJoints || bonePtr->parentBone == i
-			|| bonePtr->numPointsAttachedToBone > skeleton->numDecomposedPoints
-			|| bonePtr->numNormalsAttachedToBone > skeleton->numDecomposedNormals)
+		// Attachment lists may repeat a shared point/normal (the shipped flag
+		// model does). Validate each referenced index below, not list cardinality.
+		if (bonePtr->parentBone < -1 || bonePtr->parentBone >= numJoints || bonePtr->parentBone == i)
 			DoFatalAlert("Invalid skeleton bone definition");
 
 			/* COPY BONE DATA INTO ARRAY */
@@ -362,13 +362,20 @@ SkeletonFile_AnimHeader_Type	*animHeaderPtr;
 
 			/* COPY NORMAL INDEX ARRAY INTO BONE STRUCT */
 
+		int numLiveNormals = 0;
 		for (j=0; j < skeleton->Bones[i].numNormalsAttachedToBone; j++)
 		{
 			uint16_t index = UnpackU16BE(&indexPtr[j]);
-			if (index >= skeleton->numDecomposedNormals)
+			if (index >= MAX_DECOMPOSED_NORMALS)
 				DoFatalAlert("Invalid skeleton normal index");
-			skeleton->Bones[i].normalList[j] = index;
+			// The shipped Scandinavia models retain authoring-time normal slots
+			// that the reference mesh no longer uses after normal deduplication.
+			// No decomposed vertex can reference these slots: omit them instead
+			// of transforming uninitialized normals from the fixed-capacity array.
+			if (index < skeleton->numDecomposedNormals)
+				skeleton->Bones[i].normalList[numLiveNormals++] = index;
 		}
+		skeleton->Bones[i].numNormalsAttachedToBone = numLiveNormals;
 		ReleaseResource(hand);
 
 	}

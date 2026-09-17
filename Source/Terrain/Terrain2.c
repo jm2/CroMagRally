@@ -303,7 +303,7 @@ Boolean			flag;
 		type = itemPtr[i].type;									// get item #
 		if (type > MAX_ITEM_NUM)								// error check!
 		{
-			DoFatalAlert("Illegal Map Item Type: %d", type);
+			DoFatalAlert("Illegal Map Item Type: %ld", type);
 			return;
 		}
 
