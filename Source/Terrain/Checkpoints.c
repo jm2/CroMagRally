@@ -63,6 +63,9 @@ OGLVector2D	checkToCheck,aim,deltaVec;
 
 		/* SEE IF NEED TO DO THIS */
 
+	if (gPlayerInfo[p].raceComplete)
+		return;
+
 	switch(gGameMode)
 	{
 		case	GAME_MODE_TAG1:
@@ -356,6 +359,9 @@ next:
 
 void PlayerCompletedRace(short playerNum)
 {
+	if (gPlayerInfo[playerNum].raceComplete)
+		return;
+
 	gPlayerInfo[playerNum].raceComplete = true;
 
 
@@ -401,7 +407,6 @@ void PlayerCompletedRace(short playerNum)
 		}
 	}
 }
-
 
 
 

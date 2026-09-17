@@ -4,6 +4,7 @@
 
 #include "game.h"
 #include "network.h"
+#include "inputstate.h"
 
 extern SDL_Window *gSDLWindow;
 
@@ -11,26 +12,12 @@ extern SDL_Window *gSDLWindow;
 /* CONSTANTS   */
 /***************/
 
-enum {
-  KEYSTATE_ACTIVE_BIT = 0b001,
-  KEYSTATE_CHANGE_BIT = 0b010,
-  KEYSTATE_IGNORE_BIT = 0b100,
-
-  KEYSTATE_OFF = 0b000,
-  KEYSTATE_PRESSED = KEYSTATE_ACTIVE_BIT | KEYSTATE_CHANGE_BIT,
-  KEYSTATE_HELD = KEYSTATE_ACTIVE_BIT,
-  KEYSTATE_UP = KEYSTATE_OFF | KEYSTATE_CHANGE_BIT,
-  KEYSTATE_IGNOREHELD = KEYSTATE_OFF | KEYSTATE_IGNORE_BIT,
-};
-
 #define kJoystickDeadZoneFrac (.33f)
 #define kJoystickDeadZoneFrac_UI (.66f)
 
 /**********************/
 /*     PROTOTYPES     */
 /**********************/
-
-typedef uint8_t KeyState;
 
 typedef struct Gamepad {
   bool open;
@@ -495,26 +482,6 @@ static void UpdateVirtualGamepad(void) {
                                  btnY);
     SDL_SetJoystickVirtualButton(gVirtualJoystick, SDL_GAMEPAD_BUTTON_START,
                                  btnStart);
-  }
-}
-
-static inline void UpdateKeyState(KeyState *state, bool downNow) {
-  switch (*state) // look at prev state
-  {
-  case KEYSTATE_HELD:
-  case KEYSTATE_PRESSED:
-    *state = downNow ? KEYSTATE_HELD : KEYSTATE_UP;
-    break;
-
-  case KEYSTATE_OFF:
-  case KEYSTATE_UP:
-  default:
-    *state = downNow ? KEYSTATE_PRESSED : KEYSTATE_OFF;
-    break;
-
-  case KEYSTATE_IGNOREHELD:
-    *state = downNow ? KEYSTATE_IGNOREHELD : KEYSTATE_OFF;
-    break;
   }
 }
 
@@ -1004,17 +971,9 @@ static float GetAnalogValue(int needID, int playerID) {
 
   const Gamepad *gamepad = &gGamepads[playerID];
 
-  // Keyboard takes precedence when the key is pressed
-  if ((gNumLocalPlayers <= 1 || gamepad->fallbackToKeyboard) &&
-      gNeedStates[needID]) {
-    return 1.0f;
-  }
-
-  if (gamepad->open) {
-    return gamepad->needAnalog[needID];
-  }
-
-  return 0;
+  return ResolveAnalogInput(gNeedStates[needID],
+                            gNumLocalPlayers <= 1 || gamepad->fallbackToKeyboard,
+                            gamepad->open, gamepad->needAnalog[needID]);
 }
 
 float GetNeedAxis1D(int negativeNeedID, int positiveNeedID, int playerID) {

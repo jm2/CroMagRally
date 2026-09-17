@@ -1,5 +1,6 @@
 #include "game.h"
 #include "net_validation.h"
+#include "inputstate.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,6 +15,40 @@
 SuperTileStatus **gSuperTileStatusGrid;
 long gNumSuperTilesDeep;
 long gNumSuperTilesWide;
+
+static void TestInputStates(void)
+{
+	KeyState state = KEYSTATE_OFF;
+	UpdateKeyState(&state, true);
+	assert(state == KEYSTATE_PRESSED);
+	assert(ResolveAnalogInput(state, true, false, 0) == 1.0f);
+	UpdateKeyState(&state, true);
+	assert(state == KEYSTATE_HELD);
+	UpdateKeyState(&state, false);
+	assert(state == KEYSTATE_UP);
+	assert(ResolveAnalogInput(state, true, false, 0) == 0.0f);
+	UpdateKeyState(&state, false);
+	assert(state == KEYSTATE_OFF);
+
+	state = KEYSTATE_IGNOREHELD;
+	UpdateKeyState(&state, true);
+	assert(state == KEYSTATE_IGNOREHELD);
+	assert(ResolveAnalogInput(state, true, false, 0) == 0.0f);
+	UpdateKeyState(&state, false);
+	assert(state == KEYSTATE_OFF);
+	UpdateKeyState(&state, true);
+	assert(state == KEYSTATE_PRESSED);
+
+	// Eligible keyboard input wins over a stick, but release/invalidation must
+	// immediately expose the stick value without a spurious full-scale frame.
+	assert(ResolveAnalogInput(state, true, true, 0.25f) == 1.0f);
+	assert(ResolveAnalogInput(state, false, true, 0.25f) == 0.25f);
+	assert(ResolveAnalogInput(state, false, false, 0.25f) == 0.0f);
+	UpdateKeyState(&state, false);
+	assert(ResolveAnalogInput(state, true, true, 0.25f) == 0.25f);
+	assert(ResolveAnalogInput(KEYSTATE_IGNOREHELD, true, true, 0.5f) == 0.5f);
+	assert(ResolveAnalogInput(KEYSTATE_OFF, true, true, 0.0f) == 0.0f);
+}
 
 static void TestTerrainRenderResidency(void)
 {
@@ -549,6 +584,7 @@ static void TestScoreboardSanitization(void)
 
 int main(void)
 {
+	TestInputStates();
 	TestTerrainRenderResidency();
 	TestEnvelopeValidation();
 	TestCharacterValidation();

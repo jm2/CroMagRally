@@ -30,11 +30,11 @@ Fresh-review backlog for HEAD `7d881127` / tag `v3.1.1`.
 
 ## Priority: gameplay and input correctness
 
-- [ ] Mask keyboard need states with `KEYSTATE_ACTIVE_BIT` in analog input lookup so `KEYSTATE_UP` and `KEYSTATE_IGNOREHELD` do not produce full-scale input.
-- [ ] Add input-state tests covering press, hold, release, invalidation, keyboard fallback, and mixed keyboard/gamepad analog behavior.
-- [ ] Stop checkpoint processing for players whose race is already complete and make `PlayerCompletedRace` idempotent so race times/UI cannot be recorded twice during cooldown.
-- [ ] Saturate or cap gong weapon-quantity doubling so signed `powQuantity` cannot overflow.
-- [ ] Pass the bird-bomb projectile, not its thrower, to `MakeBombExplosion` so thrower attribution and announcer behavior are preserved.
+- [x] Mask keyboard need states with `KEYSTATE_ACTIVE_BIT` in analog input lookup so `KEYSTATE_UP` and `KEYSTATE_IGNOREHELD` do not produce full-scale input.
+- [x] Add input-state tests covering press, hold, release, invalidation, keyboard fallback, and mixed keyboard/gamepad analog behavior.
+- [x] Stop checkpoint processing for players whose race is already complete and make `PlayerCompletedRace` idempotent so race times/UI cannot be recorded twice during cooldown.
+- [x] Saturate or cap gong weapon-quantity doubling so signed `powQuantity` cannot overflow.
+- [x] Pass the bird-bomb projectile, not its thrower, to `MakeBombExplosion` so thrower attribution and announcer behavior are preserved.
 
 ## Priority: network polish
 
@@ -59,4 +59,3 @@ Fresh-review backlog for HEAD `7d881127` / tag `v3.1.1`.
 
 - [ ] Update `docs/REVIEW.md` to remove the now-false claim that tvOS persistence still uses purgeable cache storage.
 - [ ] Reconcile `docs/SUBMODULE-AUDIT.md` wording so its verdict acknowledges the documented Pomme runtime changes as well as portability changes.
-
