@@ -9,7 +9,15 @@ set -e
 #   PACKAGE                set to 1 to emit a sideloadable    (default: 0)
 #                          unsigned .ipa (device target only)
 
-TARGET=${1:-simulator}
+if [ "$#" -gt 1 ]; then
+    echo "Usage: $0 [device|simulator]" >&2
+    exit 2
+fi
+TARGET=${1-simulator}
+case "$TARGET" in
+    device|simulator) ;;
+    *) echo "Usage: $0 [device|simulator]" >&2; exit 2 ;;
+esac
 
 echo "=== Building Cro-Mag Rally for iOS ($TARGET) ==="
 
