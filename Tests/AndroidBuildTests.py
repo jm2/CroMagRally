@@ -40,6 +40,16 @@ def manifest_test(scratch):
     (assets / "Data/a.bin").rename(assets / "Data/renamed.bin")
     run(command)
     assert marker.read_bytes() != before, "asset rename did not change identity"
+    before = marker.read_bytes()
+    for name in ("semi;colon.bin", "nested;dir/asset.bin"):
+        invalid = assets / "Data" / name
+        write(invalid, "unsupported")
+        result = subprocess.run([str(a) for a in command], text=True, capture_output=True)
+        assert result.returncode != 0 and "cannot contain semicolons" in result.stderr
+        assert marker.read_bytes() == before, "invalid filename changed the current manifest identity"
+        invalid.unlink()
+        if invalid.parent != assets / "Data":
+            invalid.parent.rmdir()
 
 
 def wrapper_test(scratch, shell, script):
