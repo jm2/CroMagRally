@@ -190,5 +190,3 @@ char				tempFilename[256];
 
 	return noErr;
 }
-
-
