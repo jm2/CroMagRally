@@ -952,6 +952,11 @@ static bool UpdateNetSequenceOnce(Boolean runFrameTicks)
 			if (message) switch (message->what)
 			{
 				case	kNetSyncMessage:
+					if (!NetValidateSyncPayload(kNetInbound_Host, (NetSyncMessage*) message))
+					{
+						RejectProtocolMessage(message);
+						break;
+					}
 					MarkPlayerSynced(message->from);					// we got another player
 					if (AreAllPlayersSynced())							// see if that's all of them
 						gNetSequenceState = kNetSequence_GameLoop;
@@ -972,15 +977,13 @@ static bool UpdateNetSequenceOnce(Boolean runFrameTicks)
 			{
 				case kNetSyncMessage:
 					// CMR7 Stage 4: adopt the host-finalized LCD framerate before entering the game loop.
-					if (message->messageLen >= sizeof(NetSyncMessage))
+					if (!NetValidateSyncPayload(kNetInbound_Client, (NetSyncMessage*) message))
 					{
-						uint16_t fps = ((NetSyncMessage*) message)->targetFPS;
-						if (fps > 0)
-						{
-							gTargetFPS = fps;
-							printf("Adopted host-finalized TargetFPS: %d\n", gTargetFPS);
-						}
+						RejectProtocolMessage(message);
+						break;
 					}
+					gTargetFPS = ((NetSyncMessage*) message)->targetFPS;
+					printf("Adopted host-finalized TargetFPS: %d\n", gTargetFPS);
 					gNetSequenceState = kNetSequence_GameLoop;
 					puts("Got sync from host! Let's go!");
 					break;
@@ -1039,7 +1042,7 @@ Boolean SetupNetworkHosting(void)
 	SetNetworkDiscoveryMode(true);
 	SetNetworkPowerMode(true);
 	gNetSequenceState = kNetSequence_HostOffline;
-	gTargetFPS = OGL_GetMonitorRefreshRate();
+	gTargetFPS = GAME_CLAMP(OGL_GetMonitorRefreshRate(), NET_MIN_FPS, MAX_GAME_FPS);
 	sClientConnectionHint[0] = (Net_GetConnectionHint() == 1) ? 1 : 0;	// CMR7: host is always player 0; per-client D_init seed
 	printf("Hosting Game. Local Refresh Rate: %dHz, WiFi: %d\n", gTargetFPS, sClientConnectionHint[0]);
 
@@ -1149,7 +1152,7 @@ Boolean SetupNetworkJoin(void)
 
 static OSErr HostSendGameConfigInfo(void)
 {
-OSStatus				status;
+OSStatus				status = noErr;
 NetConfigMessage		message;
 
 			/* GET PLAYER INFO */
@@ -1341,6 +1344,8 @@ int						startTick = TickCount();
 	outMess.h.to 			= kNSpHostID;										// send to this host
 	outMess.h.what 			= kNetSyncMessage;									// set message type
 	outMess.h.messageLen 	= sizeof(outMess);									// set size of message
+	outMess.targetFPS		= 0;
+	outMess.pad				= 0;
 	status = NSpMessage_Send(gNetGame, &outMess.h, kNSpSendFlag_Registered);	// send message
 	if (status)
 	{
@@ -2224,7 +2229,7 @@ NetPlayerCharTypeMessage	outMess;
 	outMess.vehicleType		= gPlayerInfo[gMyNetworkPlayerNum].vehicleType;
 	outMess.sex				= gPlayerInfo[gMyNetworkPlayerNum].sex;
 	outMess.skin			= gPlayerInfo[gMyNetworkPlayerNum].skin;
-	outMess.refreshRate		= OGL_GetMonitorRefreshRate();
+	outMess.refreshRate		= GAME_CLAMP(OGL_GetMonitorRefreshRate(), NET_MIN_FPS, MAX_GAME_FPS);
 	outMess.connectionType	= Net_GetConnectionHint();
 
 			/* SEND IT */

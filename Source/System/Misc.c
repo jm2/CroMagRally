@@ -21,7 +21,6 @@ extern	SDL_Window* 	gSDLWindow;
 /*    CONSTANTS             */
 /****************************/
 
-#define	DEFAULT_FPS			9
 #define	PTRCOOKIE_SIZE		16
 
 /**********************/
@@ -457,8 +456,8 @@ unsigned long deltaTime;
 		? MAX_GAME_FPS
 		: 1000000.0f / deltaTime;
 
-	if (gFramesPerSecond < DEFAULT_FPS)			// (avoid divide by 0's later)
-		gFramesPerSecond = DEFAULT_FPS;
+	if (gFramesPerSecond < NET_MIN_FPS)			// keep production timing inside the validated network range
+		gFramesPerSecond = NET_MIN_FPS;
 	else if (gFramesPerSecond > MAX_GAME_FPS)	// keep network timing inside its validated wire range
 		gFramesPerSecond = MAX_GAME_FPS;
 

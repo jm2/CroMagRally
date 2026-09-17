@@ -7,6 +7,8 @@
 #include "main.h"
 #include "netsprocket.h"
 
+// Every negotiated cap and simulated network frame must obey the same minimum.
+#define NET_MIN_FPS 9
 
 enum
 {
