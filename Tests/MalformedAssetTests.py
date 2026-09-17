@@ -37,10 +37,10 @@ def resource_locations(data: bytes) -> dict[tuple[bytes, int], tuple[int, int, i
 
 def run_fixture(binary: Path, source: Path, asset: str, kind: bytes, offset: int,
                 fmt: str, value: int | float, expected: str, operation: str = "field",
-                accept: bool = False) -> None:
+                accept: bool = False, resource_id: int = 1000, track: int = 1) -> None:
     original = (source / "Data" / asset).read_bytes()
     changed = bytearray(original)
-    start, _, ref = resource_locations(original)[kind, 1000]
+    start, _, ref = resource_locations(original)[kind, resource_id]
     if operation == "size":
         start -= 4
     elif operation == "missing":
@@ -64,7 +64,7 @@ def run_fixture(binary: Path, source: Path, asset: str, kind: bytes, offset: int
                    LIBGL_ALWAYS_SOFTWARE="1", XDG_CONFIG_HOME=str(prefs),
                    XDG_CACHE_HOME=str(prefs), ASAN_OPTIONS="halt_on_error=1:detect_leaks=0",
                    UBSAN_OPTIONS="halt_on_error=1:print_stacktrace=1")
-        result = subprocess.run([str(executable), "--track", "1", "--no-vsync", "--smoke-test-frames", "1"],
+        result = subprocess.run([str(executable), "--track", str(track), "--no-vsync", "--smoke-test-frames", "1"],
                                 env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, timeout=45)
         output = result.stdout
@@ -109,10 +109,18 @@ def main() -> None:
     run_fixture(binary, source, skeleton, b"NumK", 0, ">B", 255, "Invalid skeleton keyframe count")
     for kind in (b"Hedr", b"Bone", b"BonP", b"BonN", b"AnHd", b"Evnt", b"NumK", b"KeyF", b"RelP"):
         run_fixture(binary, source, skeleton, kind, 0, ">I", 0, "Invalid resource size/count", "size")
-    # Stale authoring slots inside the format's fixed table are safely omitted;
-    # no live mesh vertex references them. Values outside the table fail above.
+    # Removing Brog's authoring attachment for live normal 15 is repaired from
+    # the mesh's point references; the normal-list unit test checks coverage.
     run_fixture(binary, source, skeleton, b"BonN", 0, ">H", 799,
                 "SMOKE: practice track 1 rendered 1 frames", accept=True)
+    # Troll has 277 live normals; BonN 1004 begins with obsolete authoring slot
+    # 279. Replacing that unused entry preserves every live-normal attachment.
+    troll = "Skeletons/Troll.skeleton.rsrc"
+    troll_bytes = (source / "Data" / troll).read_bytes()
+    stale_start, _, _ = resource_locations(troll_bytes)[b"BonN", 1004]
+    assert struct.unpack_from(">H", troll_bytes, stale_start)[0] == 279
+    run_fixture(binary, source, troll, b"BonN", 0, ">H", 799,
+                "SMOKE: practice track 8 rendered 1 frames", accept=True, resource_id=1004, track=8)
 
 
 if __name__ == "__main__":

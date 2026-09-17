@@ -626,8 +626,35 @@ static void TestScoreboardSanitization(void)
 	assert(!SanitizeScoreboard(&scoreboard));
 }
 
+static void TestBoneNormalCoverage(void)
+{
+	DecomposedPointType points[2] = {
+		{.numRefs = 2, .whichNormal = {2, 0}},
+		{.numRefs = 2, .whichNormal = {1, 2}},
+	};
+	SkeletonDefType skeleton = {.numDecomposedPoints = 2, .numDecomposedNormals = 3,
+		.decomposedPointList = points};
+	uint16_t attachedPoints[] = {1, 0, 1};
+	uint16_t normals[] = {799, 799, 799, 0xBEEF};
+	BoneDefinitionType bone = {.numPointsAttachedToBone = 3, .pointList = attachedPoints, .normalList = normals};
+	assert(BuildBoneNormalList(&skeleton, &bone) == 3);
+	assert(normals[0] == 1 && normals[1] == 2 && normals[2] == 0 && normals[3] == 0xBEEF);
+	bone.numPointsAttachedToBone = 1;
+	attachedPoints[0] = 0;
+	assert(BuildBoneNormalList(&skeleton, &bone) == 2);
+	assert(normals[0] == 2 && normals[1] == 0); // coverage belongs to this bone, not another bone
+	attachedPoints[0] = 2;
+	assert(BuildBoneNormalList(&skeleton, &bone) < 0);
+	attachedPoints[0] = 0;
+	points[0].whichNormal[0] = -1;
+	assert(BuildBoneNormalList(&skeleton, &bone) < 0);
+	points[0].whichNormal[0] = 3;
+	assert(BuildBoneNormalList(&skeleton, &bone) < 0);
+}
+
 int main(void)
 {
+	TestBoneNormalCoverage();
 	TestInputStates();
 	TestTerrainRenderResidency();
 	TestEnvelopeValidation();

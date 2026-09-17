@@ -323,7 +323,7 @@ SkeletonFile_AnimHeader_Type	*animHeaderPtr;
 		if (skeleton->Bones[i].pointList == nil)
 			DoFatalAlert("ReadDataFromSkeletonFile: AllocPtr/pointList failed!");
 
-		skeleton->Bones[i].normalList = (uint16_t *)AllocPtr(sizeof(uint16_t) * (int)skeleton->Bones[i].numNormalsAttachedToBone);
+		skeleton->Bones[i].normalList = (uint16_t *)AllocPtr(sizeof(uint16_t) * skeleton->numDecomposedNormals);
 		if (skeleton->Bones[i].normalList == nil)
 			DoFatalAlert("ReadDataFromSkeletonFile: AllocPtr/normalList failed!");
 
@@ -357,24 +357,22 @@ SkeletonFile_AnimHeader_Type	*animHeaderPtr;
 		HLock(hand);
 		indexPtr = (uint16_t *)(*hand);
 
-			/* COPY NORMAL INDEX ARRAY INTO BONE STRUCT */
+			/* VALIDATE AUTHORING-TIME NORMAL INDICES */
 
-		int numLiveNormals = 0;
 		for (j=0; j < skeleton->Bones[i].numNormalsAttachedToBone; j++)
 		{
 			uint16_t index = UnpackU16BE(&indexPtr[j]);
 			if (index >= MAX_DECOMPOSED_NORMALS)
 				DoFatalAlert("Invalid skeleton normal index");
-			// The shipped Scandinavia models retain authoring-time normal slots
-			// that the reference mesh no longer uses after normal deduplication.
-			// No decomposed vertex can reference these slots: omit them instead
-			// of transforming uninitialized normals from the fixed-capacity array.
-			if (index < skeleton->numDecomposedNormals)
-				skeleton->Bones[i].normalList[numLiveNormals++] = index;
 		}
-		skeleton->Bones[i].numNormalsAttachedToBone = numLiveNormals;
 		ReleaseResource(hand);
 
+		// Rebuild from the current mesh so stale authoring slots are omitted and
+		// missing live normals are restored, including in shipped legacy models.
+		int numLiveNormals = BuildBoneNormalList(skeleton, &skeleton->Bones[i]);
+		if (numLiveNormals < 0)
+			DoFatalAlert("Invalid skeleton point normal reference");
+		skeleton->Bones[i].numNormalsAttachedToBone = numLiveNormals;
 	}
 
 
