@@ -16,6 +16,9 @@ Boolean NetValidatePlayerCharPayload(const NetPlayerCharTypeMessage* message, in
 Boolean NetValidateClientControlPayload(const NetClientControlInfoMessageType* message, int expectedPlayer, int numRealPlayers);
 Boolean NetValidateHostControlPayload(const NetHostControlInfoMessageType* message, int numRealPlayers);
 
+// Unsupported monitor readings are unknown (0), not a minimum-FPS proposal.
+int NetNormalizeRefreshRate(int refreshRate);
+
 // Barrier masks are expressed in NSp player-ID space. Bits belonging to players who
 // have since disconnected must not keep an otherwise-complete barrier wedged.
 uint32_t NetRetainActiveSyncBits(uint32_t syncedMask, uint32_t activeMask);

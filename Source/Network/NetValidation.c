@@ -2,6 +2,13 @@
 #include "net_validation.h"
 #include <math.h>
 
+int NetNormalizeRefreshRate(int refreshRate)
+{
+	if (refreshRate < NET_MIN_FPS)
+		return 0;
+	return refreshRate > MAX_GAME_FPS ? MAX_GAME_FPS : refreshRate;
+}
+
 uint32_t NetExpectedMessageLength(int32_t what)
 {
 	switch (what)
