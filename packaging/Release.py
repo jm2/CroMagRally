@@ -82,9 +82,15 @@ def publish(upload, tag, needs, github):
     if (upload / "SHA256SUMS.txt").read_text(encoding="utf-8") != manifest:
         raise RuntimeError("Release checksums do not match upload bytes")
 
-    state = github.call("release", "view", tag, "--json", "isDraft,body", optional=True)
-    if state is not None and not json.loads(state)["isDraft"]:
+    state = github.call("release", "view", tag, "--json", "isDraft,body,assets", optional=True)
+    draft = json.loads(state) if state is not None else None
+    if draft is not None and not draft["isDraft"]:
         raise RuntimeError("Refusing to modify an already public release")
+    if draft is not None:
+        obsolete = {asset["name"] for asset in draft["assets"]} - expected - {"SHA256SUMS.txt"}
+        if obsolete:
+            raise RuntimeError(f"Draft {tag} contains unexpected assets: {', '.join(sorted(obsolete))}. "
+                               "Remove these assets from the draft and retry; no release changes were made.")
     notes = ("**macOS: Developer-ID signed and notarized.**\n\n" if mac_signed else
              "**macOS download is unsigned (ad-hoc signed) and not notarized.** "
              "Gatekeeper may block first launch; use macOS Privacy & Security to allow it only if you trust this download.\n\n")
@@ -99,7 +105,7 @@ def publish(upload, tag, needs, github):
             github.call("release", "create", tag, "--draft", "--verify-tag", "--title", tag,
                         "--generate-notes", "--notes-file", str(notes_file))
         else:
-            body = json.loads(state)["body"] or ""
+            body = draft["body"] or ""
             if not body.startswith(notes):
                 body = notes + body
             notes_file.write_text(body, encoding="utf-8")
