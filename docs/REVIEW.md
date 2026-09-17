@@ -170,7 +170,7 @@ Acceptance profile: mixed LAN with one congested-2.4GHz peer — wired client fr
 - Game Center entitlement declared with zero GameKit code, and the entitlements file isn't wired into the build at all.
 
 **tvOS**
-- **Fixed: tvOS persistent saves.** Prefs, scoreboard, and tournament progression now use the `NSUserDefaults` bridge in `Source/System/TVOSStorage.m` through `LoadUserDataFile`/`SaveUserDataFile`. The loader migrates legacy files from Caches when no persistent copy exists. Caches remains only the legacy migration source; it is no longer the save destination.
+- **Fixed: tvOS persistent saves.** Prefs, scoreboard, and tournament progression now use the `NSUserDefaults` bridge in `Source/System/TVOSStorage.m` through `LoadUserDataFile`/`SaveUserDataFile`. The loader returns defaults when no persistent copy exists; it does not migrate legacy files from Caches. Caches is no longer the save destination.
 - Siri-Remote slot logic is name-string fragile (`strstr(name,"Remote")`) and `CompactGamepadSlots` partially undoes the demotion — works in single-player by accident.
 
 **Touch/input (cross-platform)**
@@ -225,6 +225,6 @@ Nearly all of the P0/P1 findings in this review — including the full CMR7 rede
 those sections as the original plan of record, not an open backlog. The companion WiFi doc is
 likewise historical, not a live to-do list. Known items that are genuinely still open are
 tracked in [task.md](task.md), including the post-v3.1.1 follow-ups. The tvOS
-purgeable-storage P0 (§6) was fixed in PR #12 with persistent storage and legacy-save
-migration. The raw multi-agent analysis (per-finding verdicts, hunt reports, judge
+purgeable-storage P0 (§6) was fixed in PR #12 with persistent storage. The raw
+multi-agent analysis (per-finding verdicts, hunt reports, judge
 panel, raw JSON) is kept out of the repo under a local `cromag-review/` working directory.
