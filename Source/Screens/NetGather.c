@@ -303,13 +303,10 @@ static int DoNetGatherControls(void)
 	switch (gNetSequenceState)
 	{
 		case kNetSequence_OfflineEverybodyLeft:
-			// Abort an active wait when its last peer leaves or misses readiness.
-			// A later post-game error screen still waits for acknowledgement.
+			// Tear down the timed-out session, then show the error until the player
+			// acknowledges it here: pre-game aborts skip the post-game error screen.
 			if (gNetGameInProgress)
-			{
 				EndNetworkGame();
-				return -1;
-			}
 			break;
 
 		case kNetSequence_HostLobbyOpen:

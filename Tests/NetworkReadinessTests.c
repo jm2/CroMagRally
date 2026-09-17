@@ -14,8 +14,9 @@ Boolean gGameOver;
 Boolean gSimulationPaused;
 int gGameMode;
 static int taggedChoices;
+static Boolean backPressed;
 void ChooseTaggedPlayer(void) { taggedChoices++; }
-Boolean GetNewNeedStateAnyP(int needID) { (void)needID; return false; }
+Boolean GetNewNeedStateAnyP(int needID) { return needID == kNeed_UIBack && backPressed; }
 void SetNetworkPowerMode(Boolean enabled) { (void)enabled; }
 void SetNetworkDiscoveryMode(Boolean enabled) { (void)enabled; }
 
@@ -27,6 +28,7 @@ static NSpGame* BeginSession(NSpGame** first, NSpGame** second)
     gIsNetworkHost = true;
     gIsNetworkClient = false;
     gGameOver = false;
+    backPressed = false;
     gNumGatheredPlayers = gNumRealPlayers = gNumTotalPlayers = 3;
     gGameMode = GAME_MODE_MULTIPLAYERRACE;
     gNetPort = 0;
@@ -89,9 +91,13 @@ static void LastPeerTimeout(void)
     HostAdvanceReadinessBarrier(VEHICLE_READY_TIMEOUT_MS,
         kNetSequence_WaitingForPlayerVehicles, kNetSequence_GotAllPlayerVehicles);
     CHECK(gNetSequenceState == kNetSequence_OfflineEverybodyLeft && gGameOver);
-    CHECK(DoNetGatherControls() == -1);
+    CHECK(DoNetGatherControls() == 0);
     CHECK(!gNetGameInProgress && !gNetGame && !gIsNetworkHost);
-    CHECK(DoNetGatherControls() == 0); // Preserve the subsequent error acknowledgement.
+    CHECK(gNetSequenceState == kNetSequence_OfflineEverybodyLeft);
+    CHECK(DoNetGatherControls() == 0); // Display the error until it is acknowledged.
+    backPressed = true;
+    CHECK(DoNetGatherControls() == -1);
+    backPressed = false;
     NSpGame_Dispose(first, 0);
     NSpGame_Dispose(second, 0);
 }
