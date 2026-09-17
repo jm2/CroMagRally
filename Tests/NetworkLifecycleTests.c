@@ -1,6 +1,7 @@
 // Compile the real transport in this translation unit to inject only the clock and
 // inspect private ring/slot state. All traffic uses actual loopback TCP/UDP sockets.
 #include <SDL3/SDL.h>
+#include <poll.h>
 #include <stdarg.h>
 #include <stdlib.h>
 static uint32_t testNow = 100;
@@ -33,6 +34,23 @@ static struct sockaddr_in Address(sockfd_t socket)
     return address;
 }
 
+static void WaitReadable(sockfd_t socket)
+{
+    // The peer's connect/send can finish before our nonblocking socket is ready.
+    // Wait on real socket readiness without advancing the injected protocol clock.
+    struct pollfd readiness = {.fd = socket, .events = POLLIN};
+    int result = poll(&readiness, 1, 1000);
+    if (result != 1 || !(readiness.revents & POLLIN))
+        DoFatalAlert("Loopback socket %d not readable (poll=%d, events=%d, errno=%d)",
+            socket, result, readiness.revents, errno);
+}
+
+static NSpPlayerID AcceptClient(NSpGame* host)
+{
+    WaitReadable(host->hostListenSocket);
+    return NSpGame_AcceptNewClient(host);
+}
+
 static NSpMessageHeader* WaitMessage(NSpGame* game)
 {
     for (int i = 0; i < 1000; i++)
@@ -56,7 +74,7 @@ static NSpGame* Join(NSpGame* host)
     LobbyInfo lobby = {.hostAddr = Address(host->hostListenSocket)};
     NSpGame* client = JoinLobby(&lobby);
     CHECK(client);
-    CHECK(NSpGame_AcceptNewClient(host) > 0);
+    CHECK(AcceptClient(host) > 0);
     NSpMessageHeader* request = WaitMessage(host);
     CHECK(request->what == kNSpJoinRequest);
     CHECK(NSpGame_AckJoinRequest(host, request) == kNSpRC_OK);
@@ -90,7 +108,7 @@ static void Session(void)
     // instead of accepting it and then disconnecting during level preparation.
     int legacy = socket(AF_INET, SOCK_STREAM, 0);
     CHECK(connect(legacy, (struct sockaddr*)&address, sizeof(address)) == 0);
-    CHECK(NSpGame_AcceptNewClient(host) == 1);
+    CHECK(AcceptClient(host) == 1);
     NSpJoinRequestMessage legacyJoin = {0};
     NSpClearMessageHeader(&legacyJoin.header);
     legacyJoin.header.version = 'CMR7';
@@ -110,7 +128,7 @@ static void Session(void)
     // A send failure before join approval also recycles silently.
     LobbyInfo pendingLobby = {.hostAddr = address};
     NSpGame* pending = JoinLobby(&pendingLobby);
-    CHECK(pending && NSpGame_AcceptNewClient(host) == 1);
+    CHECK(pending && AcceptClient(host) == 1);
     NSpMessageHeader* pendingRequest = WaitMessage(host);
     CHECK(pendingRequest->what == kNSpJoinRequest);
     uint8_t handshakeBacklog[SEND_RING_CAPACITY] = {0};
@@ -127,7 +145,7 @@ static void Session(void)
     {
         silent[i] = socket(AF_INET, SOCK_STREAM, 0);
         CHECK(connect(silent[i], (struct sockaddr*)&address, sizeof(address)) == 0);
-        CHECK(NSpGame_AcceptNewClient(host) == i + 1);
+        CHECK(AcceptClient(host) == i + 1);
     }
     CHECK(send(silent[0], "C", 1, MSG_NOSIGNAL) == 1);
     testNow += NSP_HANDSHAKE_TIMEOUT_MS - 1;
@@ -204,9 +222,11 @@ static void Discovery(void)
     testNow = UINT32_MAX - 2000;
     const char advertisement[] = "JOIN MY CMR GAME";
     CHECK(sendto(advertiser, advertisement, sizeof(advertisement), 0, (struct sockaddr*)&address, sizeof(address)) > 0);
+    WaitReadable(search->listenSocket);
     CHECK(NSpSearch_Tick(search) == 0 && NSpSearch_GetNumGamesFound(search) == 1);
     testNow += 4000; // crosses the 32-bit clock wrap
     CHECK(sendto(advertiser, advertisement, sizeof(advertisement), 0, (struct sockaddr*)&address, sizeof(address)) > 0);
+    WaitReadable(search->listenSocket);
     CHECK(NSpSearch_Tick(search) == 0 && NSpSearch_GetNumGamesFound(search) == 1);
     testNow += NSP_LOBBY_EXPIRY_MS - 1;
     CHECK(NSpSearch_GetNumGamesFound(search) == 1);
@@ -226,6 +246,7 @@ static void Discovery(void)
     CHECK(NSpSearch_GetNumGamesFound(search) == 1);
     NSpGame* client = NSpSearch_JoinGame(search, 0);
     CHECK(client);
+    WaitReadable(listener);
     sockfd_t accepted = accept(listener, NULL, NULL);
     CHECK(IsSocketValid(accepted));
     CloseSocket(&accepted);
