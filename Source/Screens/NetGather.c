@@ -302,6 +302,16 @@ static int DoNetGatherControls(void)
 
 	switch (gNetSequenceState)
 	{
+		case kNetSequence_OfflineEverybodyLeft:
+			// Abort an active wait when its last peer leaves or misses readiness.
+			// A later post-game error screen still waits for acknowledgement.
+			if (gNetGameInProgress)
+			{
+				EndNetworkGame();
+				return -1;
+			}
+			break;
+
 		case kNetSequence_HostLobbyOpen:
 			if (GetNewNeedStateAnyP(kNeed_UIConfirm)
 				&& NSpGame_GetNumActivePlayers(gNetGame) >= 2)
