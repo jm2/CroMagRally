@@ -197,10 +197,11 @@ if(ANDROID OR CMAKE_SYSTEM_NAME STREQUAL "iOS" OR CMAKE_SYSTEM_NAME STREQUAL "tv
 		set(TVOS ON CACHE BOOL "" FORCE)
 		add_compile_definitions(__TVOS__)
 	endif()
-	if(APPLE AND BUILD_TESTING)
+	if(APPLE)
 		# Link the complete lookup table, including aliases ordinary game calls may
 		# never pull from the archive. Built for device and simulator configurations.
-		set(GL4ES_BUILD_LINK_TEST ON CACHE BOOL "" FORCE)
+		# Follow BUILD_TESTING on reconfigure as well as on the first configure.
+		set(GL4ES_BUILD_LINK_TEST "${BUILD_TESTING}" CACHE BOOL "" FORCE)
 	endif()
 	
 	# Build gl4es as a static lib
