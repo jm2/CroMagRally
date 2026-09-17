@@ -1,3 +1,5 @@
+cmake_policy(SET CMP0009 NEW) # standalone cmake -P does not inherit project policies
+
 if(NOT IS_DIRECTORY "${ASSETS_DIR}/Data")
     message(FATAL_ERROR "ASSETS_DIR must contain the staged Data directory")
 endif()
@@ -5,13 +7,16 @@ endif()
 # Check each directory before expanding its names as CMake lists. A semicolon in
 # a filename otherwise becomes a list separator before it can be validated.
 function(validate_asset_names directory)
+    if(IS_SYMLINK "${directory}")
+        message(FATAL_ERROR "Asset directories cannot be symlinks")
+    endif()
     file(GLOB unsupported "${directory}/*[;\r\n]*")
     if(NOT "${unsupported}" STREQUAL "")
         message(FATAL_ERROR "Asset paths cannot contain semicolons or line breaks")
     endif()
     file(GLOB children "${directory}/*")
     foreach(child IN LISTS children)
-        if(IS_DIRECTORY "${child}" AND NOT IS_SYMLINK "${child}")
+        if(IS_DIRECTORY "${child}")
             validate_asset_names("${child}")
         endif()
     endforeach()
