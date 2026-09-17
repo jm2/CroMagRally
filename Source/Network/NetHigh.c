@@ -1042,7 +1042,9 @@ Boolean SetupNetworkHosting(void)
 	SetNetworkDiscoveryMode(true);
 	SetNetworkPowerMode(true);
 	gNetSequenceState = kNetSequence_HostOffline;
-	gTargetFPS = GAME_CLAMP(OGL_GetMonitorRefreshRate(), NET_MIN_FPS, MAX_GAME_FPS);
+	gTargetFPS = NetNormalizeRefreshRate(OGL_GetMonitorRefreshRate());
+	if (gTargetFPS == 0)
+		gTargetFPS = 60;								// host config requires a usable clock rate
 	sClientConnectionHint[0] = (Net_GetConnectionHint() == 1) ? 1 : 0;	// CMR7: host is always player 0; per-client D_init seed
 	printf("Hosting Game. Local Refresh Rate: %dHz, WiFi: %d\n", gTargetFPS, sClientConnectionHint[0]);
 
@@ -2229,7 +2231,7 @@ NetPlayerCharTypeMessage	outMess;
 	outMess.vehicleType		= gPlayerInfo[gMyNetworkPlayerNum].vehicleType;
 	outMess.sex				= gPlayerInfo[gMyNetworkPlayerNum].sex;
 	outMess.skin			= gPlayerInfo[gMyNetworkPlayerNum].skin;
-	outMess.refreshRate		= GAME_CLAMP(OGL_GetMonitorRefreshRate(), NET_MIN_FPS, MAX_GAME_FPS);
+	outMess.refreshRate		= NetNormalizeRefreshRate(OGL_GetMonitorRefreshRate());
 	outMess.connectionType	= Net_GetConnectionHint();
 
 			/* SEND IT */
