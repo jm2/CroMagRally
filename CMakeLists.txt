@@ -397,6 +397,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "tvOS")
+	target_compile_definitions(${GAME_TARGET} PRIVATE CMR_USE_TVOS_STORAGE=1)
 	target_link_libraries(${GAME_TARGET} PRIVATE
 		"-framework Foundation"
 		"-framework UIKit"
@@ -608,6 +609,21 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 	endif()
 	add_test(NAME validation COMMAND CroMagRallyValidationTests)
 	find_package(Python3 REQUIRED COMPONENTS Interpreter)
+	add_executable(CroMagRallyMigrationTests Tests/UserDataMigrationTests.cpp Source/System/UserDataFiles.c)
+	target_include_directories(CroMagRallyMigrationTests PRIVATE
+		${GAME_GENERATED_INCLUDE_DIR} ${GAME_SRCDIR}/Headers ${GAME_SRCDIR}/System)
+	target_compile_definitions(CroMagRallyMigrationTests PRIVATE
+		CMR_USE_TVOS_STORAGE=1 CMR_TEST_PREFS_FOLDER="${GAME_TARGET}")
+	target_link_libraries(CroMagRallyMigrationTests PRIVATE Pomme SDL3::SDL3)
+	if(MSVC)
+		target_compile_definitions(CroMagRallyMigrationTests PRIVATE WIN32_LEAN_AND_MEAN NOGDI NOUSER)
+	endif()
+	if(SANITIZE)
+		target_compile_options(CroMagRallyMigrationTests PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+		target_link_options(CroMagRallyMigrationTests PRIVATE -fsanitize=address,undefined)
+	endif()
+	add_test(NAME tvos_legacy_migration COMMAND ${Python3_EXECUTABLE}
+		${CMAKE_SOURCE_DIR}/Tests/RunWithScratch.py $<TARGET_FILE:CroMagRallyMigrationTests>)
 	add_test(
 		NAME version_metadata
 		COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/Tests/VersionMetadataTests.py ${CMAKE_SOURCE_DIR})
@@ -615,6 +631,10 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 		NAME localization_data
 		COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/Tests/LocalizationDataTests.py ${CMAKE_SOURCE_DIR})
 	if(WIN32)
+		add_custom_command(TARGET CroMagRallyMigrationTests POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E copy_if_different
+				$<TARGET_RUNTIME_DLLS:CroMagRallyMigrationTests> $<TARGET_FILE_DIR:CroMagRallyMigrationTests>
+			COMMAND_EXPAND_LISTS)
 		# Keep the runtime-DLL staging hook beside the executable it belongs to so
 		# target existence and directory scope are unambiguous at configure time.
 		add_custom_command(TARGET CroMagRallyValidationTests POST_BUILD
