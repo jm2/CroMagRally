@@ -10,6 +10,7 @@
 /****************************/
 
 #include "game.h"
+#include <limits.h>
 
 /*******************/
 /*   PROTOTYPES    */
@@ -1844,7 +1845,7 @@ static Boolean DoTrig_Gong(ObjNode *theNode, ObjNode *whoNode, Byte sideBits)
 
 				/* DOUBLE STUFF */
 
-		gPlayerInfo[p].powQuantity *= 2;							// double weapons
+		gPlayerInfo[p].powQuantity = GAME_MIN(SHRT_MAX, (int) gPlayerInfo[p].powQuantity * 2);
 		gPlayerInfo[p].stickyTiresTimer *= 2.0f;			// double stick tires timer
 		gPlayerInfo[p].superSuspensionTimer *= 2.0f;			// double suspension timer
 
@@ -2062,4 +2063,3 @@ short	p;
 
 	return(true);
 }
-

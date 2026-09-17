@@ -845,7 +845,7 @@ ObjNode		*who = (ObjNode *)theNode->WhoThrew;
 
 	if (gCoord.y <= GetTerrainY(gCoord.x, gCoord.z))
 	{
-		MakeBombExplosion((ObjNode *)theNode->WhoThrew, gCoord.x, gCoord.z, &gDelta);
+		MakeBombExplosion(theNode, gCoord.x, gCoord.z, &gDelta);
 		DeleteObject(theNode);
 		return;
 	}
@@ -860,7 +860,7 @@ ObjNode		*who = (ObjNode *)theNode->WhoThrew;
 
 		if (CalcDistance3D(gCoord.x, gCoord.y, gCoord.z, gPlayerInfo[p].coord.x,  gPlayerInfo[p].coord.y, gPlayerInfo[p].coord.z) < 220.0f)
 		{
-			MakeBombExplosion((ObjNode *)theNode->WhoThrew, gCoord.x, gCoord.z, &gDelta);
+			MakeBombExplosion(theNode, gCoord.x, gCoord.z, &gDelta);
 			DeleteObject(theNode);
 			return;
 		}
@@ -1891,7 +1891,6 @@ Boolean DoTrig_LandMine(ObjNode *theNode, ObjNode *whoNode, Byte sideBits)
 
 	return(false);
 }
-
 
 
 
