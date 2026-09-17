@@ -4,6 +4,9 @@
 
 #pragma once
 
+#define MAX_FENCES 60
+#define MAX_NUBS_IN_FENCE 80
+
 typedef struct
 {
 	float	top,bottom,left,right;
