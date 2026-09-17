@@ -24,12 +24,13 @@ class FakeGitHub:
         self.draft = existing
         self.public = False
         self.uploaded = []
+        self.assets = []
 
     def call(self, *args, optional=False):
         self.calls.append(args)
         command = args[1]
         if command == "view":
-            return json.dumps({"isDraft": True, "body": "Existing notes"}) if self.draft else None
+            return json.dumps({"isDraft": True, "body": "Existing notes", "assets": self.assets}) if self.draft else None
         if command == "create":
             assert "--draft" in args and "--verify-tag" in args
             self.draft = True
@@ -120,6 +121,19 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             release.publish(self.upload, "v3.1.1", self.needs, github)
         self.assertEqual(github.calls, [])
+
+    def test_obsolete_draft_asset_rejected_before_mutation_and_retryable(self):
+        github = FakeGitHub(existing=True)
+        valid_asset = next(self.upload.iterdir()).name
+        github.assets = [{"name": valid_asset}, {"name": "obsolete-build.zip"}]
+        with self.assertRaisesRegex(RuntimeError, "Remove these assets from the draft and retry"):
+            release.publish(self.upload, "v3.1.1", self.needs, github)
+        self.assertEqual([call[1] for call in github.calls], ["view"])
+        self.assertTrue(github.draft)
+        self.assertFalse(github.public)
+        github.assets.pop()
+        release.publish(self.upload, "v3.1.1", self.needs, github)
+        self.assertTrue(github.public)
 
     def test_workflow_gate_covers_every_build(self):
         workflow = (ROOT / ".github/workflows/ReleaseBuilds.yml").read_text()

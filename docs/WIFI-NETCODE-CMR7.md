@@ -12,6 +12,10 @@ play-test verification under the redesign).
 > implementation process, not the current state of the shipping code. See the current
 > source and `CHANGELOG.md` for implemented behavior.
 >
+> Current builds use the **CMR8** protocol cookie: readiness messages must initialize
+> their FPS and padding fields. Older peers are rejected during the handshake,
+> before entering vehicle selection or level loading.
+>
 > **The protocol-specification numbers below are NOT authoritative for the wire format.**
 > `Source/Headers/network.h` is the single source of truth, and it differs from this plan in
 > several places the design pre-sized differently, e.g. the drop timeout is

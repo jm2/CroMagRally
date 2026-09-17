@@ -86,6 +86,27 @@ static void Session(void)
     gNetPort = ntohs(address.sin_port);
     CHECK(NSpGame_GetActivePlayersIDMask(host) == 1);
 
+    // CMR7 readiness fields were uninitialized: refuse that peer at the handshake
+    // instead of accepting it and then disconnecting during level preparation.
+    int legacy = socket(AF_INET, SOCK_STREAM, 0);
+    CHECK(connect(legacy, (struct sockaddr*)&address, sizeof(address)) == 0);
+    CHECK(NSpGame_AcceptNewClient(host) == 1);
+    NSpJoinRequestMessage legacyJoin = {0};
+    NSpClearMessageHeader(&legacyJoin.header);
+    legacyJoin.header.version = 'CMR7';
+    legacyJoin.header.what = kNSpJoinRequest;
+    legacyJoin.header.to = kNSpHostID;
+    legacyJoin.header.messageLen = sizeof(legacyJoin);
+    CHECK(send(legacy, &legacyJoin, sizeof(legacyJoin), MSG_NOSIGNAL) == sizeof(legacyJoin));
+    for (int i = 0; i < 1000 && host->players[1].state != kNSpPlayerState_Offline; i++)
+    {
+        CHECK(!NSpMessage_Get(host));
+        SDL_Delay(1);
+    }
+    CHECK(host->players[1].state == kNSpPlayerState_Offline);
+    CHECK(NSpGame_GetActivePlayersIDMask(host) == 1);
+    CloseSocket(&legacy);
+
     // Fill every slot without completing a handshake, including a partial header.
     int silent[MAX_CLIENTS - 1];
     for (int i = 0; i < MAX_CLIENTS - 1; i++)
