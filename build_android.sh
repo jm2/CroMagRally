@@ -154,13 +154,8 @@ build_abi() {
     
     echo "=== Building for $abi in $build_dir ==="
 
-    # A CMake build tree cannot safely switch Android toolchains in place. Drop only
-    # generated state when an older NDK populated this ABI's cache.
-    if [ -f "$build_dir/CMakeCache.txt" ] \
-        && ! grep -Fq "CMAKE_ANDROID_NDK:PATH=$ANDROID_NDK_HOME" "$build_dir/CMakeCache.txt"; then
-        echo "Removing stale CMake cache in $build_dir (different Android NDK)."
-        rm -rf -- "$build_dir"
-    fi
+    cmake "-DBUILD_DIR=$ROOT_DIR/$build_dir" "-DNDK_DIR=$ANDROID_NDK_HOME" \
+        -DMODE=CHECK -P "$ROOT_DIR/packaging/AndroidNDKCache.cmake"
 
     # Configure
     echo "Configuring $build_dir..."
@@ -173,6 +168,8 @@ build_abi() {
         "-DSDL_STATIC=OFF" \
         "-DCMAKE_BUILD_TYPE=Release"
 
+    cmake "-DBUILD_DIR=$ROOT_DIR/$build_dir" "-DNDK_DIR=$ANDROID_NDK_HOME" \
+        -DMODE=RECORD -P "$ROOT_DIR/packaging/AndroidNDKCache.cmake"
     cmake --build "$build_dir" --config Release
     
     echo "--- Copying libraries to $jni_libs_dir ---"
@@ -231,11 +228,8 @@ cp -R "Data/." "$ASSETS_DIR/Data/"
 cp "LICENSE.md" "$ASSETS_DIR/LICENSE.md"
 cp "THIRD-PARTY-LICENSES.md" "$ASSETS_DIR/THIRD-PARTY-LICENSES.md"
 
-echo "=== Generating staged Data/files.txt ==="
-(
-    cd "$ASSETS_DIR"
-    LC_ALL=C find Data -type f ! -name files.txt | LC_ALL=C sort > Data/files.txt
-)
+echo "=== Generating deterministic Android asset manifest ==="
+cmake "-DASSETS_DIR=$ROOT_DIR/$ASSETS_DIR" -P "$ROOT_DIR/packaging/GenerateAssetManifest.cmake"
 
 echo "=== Running Gradle task: $GRADLE_TASK ==="
 (

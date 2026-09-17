@@ -117,38 +117,6 @@ function Test-AndroidNdkPath {
     return $Revision -eq $AndroidNdkVersion
 }
 
-function Get-NormalizedPath {
-    param ([string]$Path)
-
-    if ([string]::IsNullOrWhiteSpace($Path)) {
-        return ""
-    }
-
-    return [System.IO.Path]::GetFullPath($Path).TrimEnd(
-        [char[]]@(
-            [System.IO.Path]::DirectorySeparatorChar,
-            [System.IO.Path]::AltDirectorySeparatorChar
-        ))
-}
-
-function Test-SamePath {
-    param (
-        [string]$Left,
-        [string]$Right
-    )
-
-    $Comparison = if ($HostIsWindows) {
-        [System.StringComparison]::OrdinalIgnoreCase
-    }
-    else {
-        [System.StringComparison]::Ordinal
-    }
-    return [string]::Equals(
-        (Get-NormalizedPath $Left),
-        (Get-NormalizedPath $Right),
-        $Comparison)
-}
-
 if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) {
     throw "Ninja is not found in PATH. Install Ninja (for example, 'winget install ninja') or add it to PATH."
 }
@@ -297,25 +265,12 @@ function Build-Abi {
 
     $JniLibsDir = Join-Path $AndroidDir "app/src/main/jniLibs/$AbiName"
     $Toolchain = Join-Path $DetectedAndroidNdk "build/cmake/android.toolchain.cmake"
-    $CachePath = Join-Path $BuildDir "CMakeCache.txt"
 
     Write-Host "=== Building for $AbiName in $BuildDir ==="
 
-    # A CMake build tree cannot safely switch Android toolchains in place. Remove
-    # only generated state if this ABI cache belongs to a different NDK.
-    if (Test-Path -LiteralPath $CachePath -PathType Leaf) {
-        $CachedNdk = $null
-        foreach ($Line in Get-Content -LiteralPath $CachePath) {
-            if ($Line -match '^CMAKE_ANDROID_NDK:[^=]+=(.*)$') {
-                $CachedNdk = $Matches[1]
-                break
-            }
-        }
-        if (-not $CachedNdk -or -not (Test-SamePath $CachedNdk $DetectedAndroidNdk)) {
-            Write-Host "Removing stale CMake cache in $BuildDir (different or unknown Android NDK)."
-            Remove-Item -LiteralPath $BuildDir -Recurse -Force
-        }
-    }
+    & cmake "-DBUILD_DIR=$BuildDir" "-DNDK_DIR=$DetectedAndroidNdk" `
+        -DMODE=CHECK -P (Join-Path $RootDir "packaging/AndroidNDKCache.cmake")
+    if ($LASTEXITCODE -ne 0) { throw "NDK cache validation failed for $AbiName." }
 
     $ToolchainForCMake = if ($HostIsWindows) {
         $Toolchain -replace '\\', '/'
@@ -336,6 +291,10 @@ function Build-Abi {
     if ($LASTEXITCODE -ne 0) {
         throw "CMake configuration failed for $AbiName."
     }
+
+    & cmake "-DBUILD_DIR=$BuildDir" "-DNDK_DIR=$DetectedAndroidNdk" `
+        -DMODE=RECORD -P (Join-Path $RootDir "packaging/AndroidNDKCache.cmake")
+    if ($LASTEXITCODE -ne 0) { throw "Could not record NDK identity for $AbiName." }
 
     & cmake --build $BuildDir --config Release
     if ($LASTEXITCODE -ne 0) {
@@ -384,18 +343,8 @@ Remove-Item -LiteralPath $AssetsDir -Recurse -Force -ErrorAction SilentlyContinu
 New-Item -ItemType Directory -Force -Path $AssetsDir | Out-Null
 Copy-Item -LiteralPath (Join-Path $RootDir "Data") -Destination $AssetsDir -Recurse -Force
 
-$StagedDataDir = Join-Path $AssetsDir "Data"
-$AssetsBaseLength = $AssetsDir.Length + 1
-$Files = @(Get-ChildItem -LiteralPath $StagedDataDir -Recurse -File |
-    Where-Object { $_.Name -ne "files.txt" } |
-    ForEach-Object {
-        $_.FullName.Substring($AssetsBaseLength).Replace("\", "/")
-    } |
-    Sort-Object)
-[System.IO.File]::WriteAllText(
-    (Join-Path $StagedDataDir "files.txt"),
-    (($Files -join "`n") + "`n"),
-    [System.Text.UTF8Encoding]::new($false))
+& cmake "-DASSETS_DIR=$AssetsDir" -P (Join-Path $RootDir "packaging/GenerateAssetManifest.cmake")
+if ($LASTEXITCODE -ne 0) { throw "Android asset manifest generation failed." }
 
 foreach ($LicenseName in @("LICENSE.md", "THIRD-PARTY-LICENSES.md")) {
     $LicensePath = Join-Path $RootDir $LicenseName
