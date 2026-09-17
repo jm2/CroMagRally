@@ -165,6 +165,7 @@ static void TestSyncMaskValidation(void)
 static void TestNetworkFPSValidation(void)
 {
 	const int rates[] = {-1, 0, 1, 8, 9, 60, 1000, 1001};
+	const int advertisedRates[] = {0, 0, 0, 0, 9, 60, 1000, 1000};
 	NetConfigMessage config = {0};
 	config.gameMode = GAME_MODE_MULTIPLAYERRACE;
 	config.numPlayers = 2;
@@ -182,6 +183,9 @@ static void TestNetworkFPSValidation(void)
 		assert(NetValidatePlayerCharPayload(&character, 1, 2) == (supported || rate == 0));
 		assert(NetValidateSyncPayload(kNetInbound_Client, &sync) == supported);
 		assert(NetValidateSyncPayload(kNetInbound_Host, &sync) == (rate == 0));
+		assert(NetNormalizeRefreshRate(rate) == advertisedRates[i]);
+		character.refreshRate = NetNormalizeRefreshRate(rate);
+		assert(NetValidatePlayerCharPayload(&character, 1, 2));
 	}
 
 	sync.targetFPS = 60;
