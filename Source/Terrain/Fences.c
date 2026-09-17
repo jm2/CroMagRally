@@ -23,8 +23,6 @@ static void MakeFenceGeometry(void);
 /*    CONSTANTS             */
 /****************************/
 
-#define MAX_FENCES			60
-#define	MAX_NUBS_IN_FENCE	80
 
 
 #define	FENCE_SINK_FACTOR	200.0f
@@ -271,8 +269,8 @@ OGLPoint3D				*nubs;
 		nubs 				= fence->nubList;					// point to nub list
 		numNubs 			= fence->numNubs;					// get # nubs in fence
 
-		if (numNubs == 1)
-			DoFatalAlert("PrimeFences: numNubs == 1");
+		if (numNubs < 2)
+			DoFatalAlert("PrimeFences: numNubs < 2");
 
 		if (numNubs > MAX_NUBS_IN_FENCE)
 			DoFatalAlert("PrimeFences: numNubs > MAX_NUBS_IN_FENCE");
@@ -944,6 +942,5 @@ float			intersectX,intersectZ;
 
 	return(false);
 }
-
 
 

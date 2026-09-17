@@ -40,7 +40,7 @@ SuperTileItemIndexType	**gSuperTileItemIndexGrid = nil;
 /*     TABLES         */
 /**********************/
 
-#define	MAX_ITEM_NUM	66					// for error checking!
+#define MAX_ITEM_NUM MAX_TERRAIN_ITEM_TYPE
 
 static Boolean (*gTerrainItemAddRoutines[MAX_ITEM_NUM+1])(TerrainItemEntryType *itemPtr, long x, long z) =
 {
@@ -303,8 +303,8 @@ Boolean			flag;
 		type = itemPtr[i].type;									// get item #
 		if (type > MAX_ITEM_NUM)								// error check!
 		{
-			DoAlert("Illegal Map Item Type!");
-			ShowSystemErr(type);
+			DoFatalAlert("Illegal Map Item Type: %d", type);
+			return;
 		}
 
 		flag = gTerrainItemAddRoutines[type](&itemPtr[i],itemPtr[i].x, itemPtr[i].y); // call item's ADD routine
