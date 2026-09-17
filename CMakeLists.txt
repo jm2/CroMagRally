@@ -582,6 +582,7 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 	add_executable(CroMagRallyValidationTests
 		Tests/ValidationTests.c
 		Source/Network/NetValidation.c
+		Source/Skeleton/SkeletonValidation.c
 		Source/System/InputState.c
 		Source/System/DeterministicMath.c
 		Source/System/UserDataValidation.c
