@@ -1,6 +1,47 @@
 # Post-v3.1.1 review tasks
 
-Fresh-review backlog for HEAD `7d881127` / tag `v3.1.1`.
+Fresh-review backlog originally recorded at `7d881127` / tag `v3.1.1`.
+
+## Assessment and implementation order (2026-09-17)
+
+Reviewed against `master` at `e10e692d`. The repository has no GitHub issues
+(open or closed) and no open PRs as of this assessment. PR #13's client terrain
+residency fix is already merged and does not replace any task below.
+
+The reported defects remain actionable. Keep the list, with these refinements:
+
+- Combine each fix with its regression tests in the same PR. The two offscreen
+  smoke entries describe one production-game test suite, built with sanitizers.
+- CLI startup currently exposes race/practice/host paths, not battle-mode
+  selection. Test the supported combinations and rejection of battle track IDs;
+  do not add a new CLI mode merely to satisfy the smoke-test wording.
+- Keep refresh rate `0` as an unknown-monitor sentinel in character messages.
+  Configuration and final host sync must carry an actual supported FPS. Validate
+  client readiness messages according to their distinct wire semantics too.
+- Measure handshake deadlines from acceptance, so trickled bytes cannot renew
+  a silent peer's reservation. Readiness deadlines must preserve ready peers,
+  sparse player IDs, and deterministic departure handling.
+- Asset validation must reject missing/short required resources before use, as
+  well as out-of-range values. Race checkpoint validation must also cover a
+  header that promises checkpoints but has no checkpoint resource.
+- Android content identity must be deterministic across both build wrappers and
+  change when asset bytes change without a version bump. Test failed extraction
+  and retry as well as the same-version update.
+- Build production releases from a pushed version tag. Upload and verify the
+  complete artifact set while the release is a draft; publication is the last
+  step. Manual smoke builds must remain separate from publication.
+- Validate Android wrapper caching on both shell and PowerShell paths. Add
+  simulator and Android release/x86_64 CI coverage; evaluate expensive package
+  jobs separately from the already-covered common Linux packaging path.
+- The gl4es fix belongs in the forked dependency, with a published commit and an
+  updated gitlink here; its Apple test must force the lookup archive member into
+  the link, not just compile declarations.
+
+Implementation steps: documentation reconciliation; startup and gameplay/input;
+network message invariants; resource validation; network lifetime/readiness and
+discovery; Android extraction/build caching; release publication; remaining CI
+and Apple dependency coverage. Each step requires a PR, passing CI, and a clean
+bot review before merge. Checkboxes describe landed work, not planned work.
 
 ## Priority: correctness and availability
 
@@ -57,6 +98,5 @@ Fresh-review backlog for HEAD `7d881127` / tag `v3.1.1`.
 
 ## Priority: documentation
 
-- [ ] Update `docs/REVIEW.md` to remove the now-false claim that tvOS persistence still uses purgeable cache storage.
-- [ ] Reconcile `docs/SUBMODULE-AUDIT.md` wording so its verdict acknowledges the documented Pomme runtime changes as well as portability changes.
-
+- [x] Update `docs/REVIEW.md` to remove the now-false claim that tvOS persistence still uses purgeable cache storage.
+- [x] Reconcile `docs/SUBMODULE-AUDIT.md` wording so its verdict acknowledges the documented Pomme runtime changes as well as portability changes.

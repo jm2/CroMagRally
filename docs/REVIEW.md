@@ -170,7 +170,7 @@ Acceptance profile: mixed LAN with one congested-2.4GHz peer — wired client fr
 - Game Center entitlement declared with zero GameKit code, and the entitlements file isn't wired into the build at all.
 
 **tvOS**
-- **Prefs, scoreboard, and tournament progression land in purgeable Caches** (SDL_GetPrefPath → NSCachesDirectory on tvOS): the OS can silently wipe high scores any time. Needs NSUserDefaults/iCloud KVS (500KB persistent budget) for saves. (Misc.c:401-417, File.c:552-669)
+- **Fixed: tvOS persistent saves.** Prefs, scoreboard, and tournament progression now use the `NSUserDefaults` bridge in `Source/System/TVOSStorage.m` through `LoadUserDataFile`/`SaveUserDataFile`. The loader migrates legacy files from Caches when no persistent copy exists. Caches remains only the legacy migration source; it is no longer the save destination.
 - Siri-Remote slot logic is name-string fragile (`strstr(name,"Remote")`) and `CompactGamepadSlots` partially undoes the demotion — works in single-player by accident.
 
 **Touch/input (cross-platform)**
@@ -224,7 +224,7 @@ Nearly all of the P0/P1 findings in this review — including the full CMR7 rede
 0–5) that §5 and §9 describe as future work — have **already shipped** on this branch; treat
 those sections as the original plan of record, not an open backlog. The companion WiFi doc is
 likewise historical, not a live to-do list. Known items that are genuinely still open are
-tracked separately (not in these two documents); one exception this review missed is that the
-**tvOS purgeable-storage P0 (§6) was not fixed** — saves still route through the OS-purgeable
-Caches directory. The raw multi-agent analysis (per-finding verdicts, hunt reports, judge
+tracked in [task.md](task.md), including the post-v3.1.1 follow-ups. The tvOS
+purgeable-storage P0 (§6) was fixed in PR #12 with persistent storage and legacy-save
+migration. The raw multi-agent analysis (per-finding verdicts, hunt reports, judge
 panel, raw JSON) is kept out of the repo under a local `cromag-review/` working directory.
