@@ -6,7 +6,8 @@ file(SHA256 "${NDK_DIR}/source.properties" revision_digest)
 if(WIN32)
     string(TOLOWER "${toolchain}" toolchain)
 endif()
-set(identity "${toolchain}\n${revision_digest}\n")
+# Both repository wrappers configure with Ninja, including when switching shells.
+set(identity "${toolchain}\n${revision_digest}\nNinja\n")
 set(stamp "${BUILD_DIR}/cmr-ndk.stamp")
 
 if(MODE STREQUAL "RECORD")

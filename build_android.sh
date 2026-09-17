@@ -159,7 +159,7 @@ build_abi() {
 
     # Configure
     echo "Configuring $build_dir..."
-    cmake -S "$ROOT_DIR" -B "$build_dir" \
+    cmake -S "$ROOT_DIR" -B "$build_dir" -G Ninja \
         "-DCMAKE_TOOLCHAIN_FILE=$toolchain_file" \
         "-DANDROID_ABI=$abi" \
         "-DANDROID_PLATFORM=android-24" \

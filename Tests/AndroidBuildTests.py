@@ -45,7 +45,8 @@ def manifest_test(scratch):
 def wrapper_test(scratch, shell, script):
     repo = scratch / script
     repo.mkdir()
-    shutil.copy2(ROOT / script, repo / script)
+    for wrapper in ("build_android.sh", "build_android.ps1"):
+        shutil.copy2(ROOT / wrapper, repo / wrapper)
     shutil.copy2(ROOT / "version.properties", repo / "version.properties")
     shutil.copytree(ROOT / "packaging", repo / "packaging")
     write(repo / "extern/SDL3/CMakeLists.txt", "# fixture")
@@ -65,8 +66,12 @@ if '-P' in args:
 if '-B' in args:
     build = pathlib.Path(args[args.index('-B') + 1])
     build.mkdir(parents=True, exist_ok=True)
+    generator = args[args.index('-G') + 1] if '-G' in args else 'Unix Makefiles'
+    cache = build / 'CMakeCache.txt'
+    if cache.exists() and ('CMAKE_GENERATOR:INTERNAL=' + generator + '\\n') not in cache.read_text():
+        sys.exit('Generator does not match the previous configuration')
     # Real Android toolchains need not set CMAKE_ANDROID_NDK.
-    (build / 'CMakeCache.txt').write_text('CMAKE_BUILD_TYPE:STRING=Release\\n')
+    cache.write_text('CMAKE_BUILD_TYPE:STRING=Release\\nCMAKE_GENERATOR:INTERNAL=' + generator + '\\n')
 elif '--build' in args:
     build = pathlib.Path(args[args.index('--build') + 1])
     (build / 'extern/SDL3').mkdir(parents=True, exist_ok=True)
@@ -86,6 +91,11 @@ else:
     write(sentinel, "keep")
     run(command, env=env)
     assert sentinel.exists(), f"{script} discarded a matching build tree on its second run"
+    if shutil.which("pwsh"):
+        alternate = (["pwsh", "-NoProfile", "-File", repo / "build_android.ps1"]
+                     if script.endswith(".sh") else ["bash", repo / "build_android.sh"])
+        run(alternate, env=env)
+        assert sentinel.exists(), "switching wrappers discarded the compatible incremental tree"
     # A different toolchain path, even at the same revision, must force a clean tree.
     moved = sdk / "alternate-ndk"
     ndk.rename(moved)
