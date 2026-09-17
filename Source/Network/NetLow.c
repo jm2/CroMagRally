@@ -932,6 +932,13 @@ static NSpMessageHeader* NSpMessage_GetAsHost(NSpGame* game)
 			if (brokenPipe)
 		{
 			GAME_ASSERT(!message);
+			if (player->state == kNSpPlayerState_AwaitingHandshake)
+			{
+				// No join was announced, so neither the host nor its peers need a leave.
+				CloseSocket(&player->sockfd);
+				NSpPlayer_Clear(player);
+				continue;
+			}
 
 			// Pass a fake NSpPlayerLeftMessage to application code so it can handle the client's departure
 			NSpPlayerLeftMessage* leftMessage = AllocMessage(NSpPlayerLeft, kNSpHostID, kNSpHostID);
@@ -2293,8 +2300,11 @@ int NSpMessage_Send(NSpGameReference gameRef, NSpMessageHeader* header, int flag
 // synced-RNG draw count, which a direct NSpPlayer_Kick from a send path would break.
 static void NSpPlayer_DeferLeaveNotify(NSpPlayer* peer)
 {
-	peer->needsLeaveNotify = true;
 	CloseSocket(&peer->sockfd);		// no further send()/recv() on this dead peer; flag drives cleanup
+	if (peer->state == kNSpPlayerState_AwaitingHandshake)
+		NSpPlayer_Clear(peer);		// failed approval never introduced this peer to the session
+	else
+		peer->needsLeaveNotify = true;
 }
 
 int NSpPlayer_Kick(NSpGameReference gameRef, NSpPlayerID kickedPlayerID)
