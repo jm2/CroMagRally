@@ -25,12 +25,15 @@ class FakeGitHub:
         self.public = False
         self.uploaded = []
         self.assets = []
+        self.body = "Existing notes"
 
     def call(self, *args, optional=False):
         self.calls.append(args)
         command = args[1]
         if command == "view":
-            return json.dumps({"isDraft": True, "body": "Existing notes", "assets": self.assets}) if self.draft else None
+            return json.dumps({"isDraft": True, "body": self.body, "assets": self.assets}) if self.draft else None
+        if "--notes-file" in args:
+            self.body = Path(args[args.index("--notes-file") + 1]).read_text()
         if command == "create":
             assert "--draft" in args and "--verify-tag" in args
             self.draft = True
@@ -145,6 +148,27 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn("RELEASE_NEEDS: ${{ toJSON(needs) }}", publication)
         self.assertIn("run: python3 packaging/Release.py publish", publication)
         self.assertNotIn("contents: write", workflow.split("  publish-release:", 1)[0])
+
+    def test_signing_disclosure_changes_on_draft_retry(self):
+        uploads = {}
+        for signed in (False, True):
+            artifacts = self.root / f"signing-artifacts-{signed}"
+            artifacts.mkdir()
+            for name in release.expected_assets("3.1.1", signed, True):
+                (artifacts / name).write_text(name)
+            uploads[signed] = self.root / f"signing-upload-{signed}"
+            release.prepare(artifacts, uploads[signed], "3.1.1", signed, True)
+        for previous, current in ((False, True), (True, False)):
+            github = FakeGitHub(failure="upload", existing=True)
+            needs = copy.deepcopy(self.needs)
+            needs["build-macos"]["outputs"]["signed"] = str(previous).lower()
+            with self.assertRaises(RuntimeError):
+                release.publish(uploads[previous], "v3.1.1", needs, github)
+            github.failure = None
+            needs["build-macos"]["outputs"]["signed"] = str(current).lower()
+            release.publish(uploads[current], "v3.1.1", needs, github)
+            self.assertEqual(github.body, release.signing_notice(current) + "Existing notes")
+            self.assertTrue(github.public)
 
 
 unittest.main()
