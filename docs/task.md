@@ -45,7 +45,7 @@ bot review before merge. Checkboxes describe landed work, not planned work.
 
 ## Priority: correctness and availability
 
-- [ ] Migrate legacy tvOS saves from Caches into persistent storage when no `NSUserDefaults` copy exists; test first launch, migration, corrupt data, and a failed persistent write without losing the legacy file.
+- [x] Migrate legacy tvOS saves from Caches into persistent storage when no `NSUserDefaults` copy exists; test first launch, migration, corrupt data, and a failed persistent write without losing the legacy file.
 - [ ] Restrict `--track` race/practice/host startup paths to `NUM_RACE_TRACKS`.
 - [ ] Reject race-mode playfields with zero checkpoints before player/checkpoint initialization.
 - [ ] Add an offscreen sanitizer smoke test covering every CLI-selectable track/mode combination, including the current `--track 10` regression.

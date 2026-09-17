@@ -170,7 +170,7 @@ Acceptance profile: mixed LAN with one congested-2.4GHz peer — wired client fr
 - Game Center entitlement declared with zero GameKit code, and the entitlements file isn't wired into the build at all.
 
 **tvOS**
-- **Fixed: tvOS persistent saves.** Prefs, scoreboard, and tournament progression now use the `NSUserDefaults` bridge in `Source/System/TVOSStorage.m` through `LoadUserDataFile`/`SaveUserDataFile`. The loader returns defaults when no persistent copy exists; it does not migrate legacy files from Caches. Caches is no longer the save destination.
+- **Fixed: tvOS persistent saves.** Prefs, scoreboard, and tournament progression now use the `NSUserDefaults` bridge in `Source/System/TVOSStorage.m` through `LoadUserDataFile`/`SaveUserDataFile`. When no persistent copy exists, the loader validates and migrates a legacy Caches file. It retains the file as a recovery copy because defaults writes persist asynchronously; failed writes can retry without losing the legacy save. Caches is no longer the save destination.
 - Siri-Remote slot logic is name-string fragile (`strstr(name,"Remote")`) and `CompactGamepadSlots` partially undoes the demotion — works in single-player by accident.
 
 **Touch/input (cross-platform)**
