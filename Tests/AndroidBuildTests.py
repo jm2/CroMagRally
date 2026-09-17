@@ -50,6 +50,22 @@ def manifest_test(scratch):
         invalid.unlink()
         if invalid.parent != assets / "Data":
             invalid.parent.rmdir()
+    if os.name != "nt":  # Windows symlink creation requires an optional OS privilege.
+        outside = scratch / "outside"
+        write(outside / "semi;colon.bin", "outside the staged tree")
+        link = assets / "Data/linked"
+        link.symlink_to(outside, target_is_directory=True)
+        result = subprocess.run([str(a) for a in command], text=True, capture_output=True)
+        assert result.returncode != 0 and "directories cannot be symlinks" in result.stderr
+        assert marker.read_bytes() == before
+        link.unlink()
+        (assets / "Data").rename(assets / "RealData")
+        (assets / "Data").symlink_to(assets / "RealData", target_is_directory=True)
+        result = subprocess.run([str(a) for a in command], text=True, capture_output=True)
+        assert result.returncode != 0 and "directories cannot be symlinks" in result.stderr
+        assert marker.read_bytes() == before
+        (assets / "Data").unlink()
+        (assets / "RealData").rename(assets / "Data")
 
 
 def wrapper_test(scratch, shell, script):
