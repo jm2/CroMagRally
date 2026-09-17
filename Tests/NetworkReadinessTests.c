@@ -3,9 +3,12 @@
 #define main TransportTestMain
 #include "NetworkLifecycleTests.c"
 #undef main
+static Boolean TestGatherScreen(void);
+#define DoNetGatherScreen TestGatherScreen
 #define SDL_GetTicks TestTicks
 #include "../Source/Network/NetHigh.c"
 #undef SDL_GetTicks
+#undef DoNetGatherScreen
 #include "../Source/Screens/NetGather.c"
 
 PlayerInfoType gPlayerInfo[MAX_PLAYERS];
@@ -15,6 +18,13 @@ Boolean gSimulationPaused;
 int gGameMode;
 static int taggedChoices;
 static Boolean backPressed;
+static int expectedGatherState, gatherScreenCalls;
+static Boolean TestGatherScreen(void)
+{
+    CHECK(gNetSequenceState == expectedGatherState);
+    gatherScreenCalls++;
+    return true;
+}
 void ChooseTaggedPlayer(void) { taggedChoices++; }
 Boolean GetNewNeedStateAnyP(int needID) { return needID == kNeed_UIBack && backPressed; }
 void SetNetworkPowerMode(Boolean enabled) { (void)enabled; }
@@ -102,6 +112,26 @@ static void LastPeerTimeout(void)
     NSpGame_Dispose(second, 0);
 }
 
+static void SelectorResumesAfterTeardown(void)
+{
+    NSpGame *first, *second;
+    NSpGame* host = BeginSession(&first, &second);
+    CHECK(host);
+    EndNetworkGame(); // production teardown performed by a failed vehicle broadcast
+    gNetSequenceState = kNetSequence_ClientOfflineBecauseKicked;
+    expectedGatherState = gNetSequenceState;
+    gatherScreenCalls = 0;
+    CHECK(GetVehicleSelectionFromNetPlayers());
+    CHECK(gatherScreenCalls == 1 && gNetSequenceState == expectedGatherState);
+    CHECK(!gNetGame && !gNetGameInProgress && gPlayerSyncMask == 0);
+    gNetSequenceState = kNetSequence_Offline;
+    gatherScreenCalls = 0;
+    CHECK(GetVehicleSelectionFromNetPlayers());
+    CHECK(gatherScreenCalls == 0 && gNetSequenceState == kNetSequence_Offline);
+    NSpGame_Dispose(first, 0);
+    NSpGame_Dispose(second, 0);
+}
+
 static void DelayedReady(void)
 {
     NSpGame *first, *second;
@@ -157,6 +187,7 @@ int main(void)
     Readiness(LEVEL_READY_TIMEOUT_MS, kNetSequence_HostWaitForPlayersToPrepareLevel, kNetSequence_GameLoop);
     DelayedReady();
     LastPeerTimeout();
+    SelectorResumesAfterTeardown();
     PausedLeaveAndReset();
     puts("Readiness and paused-leave tests passed");
     return 0;

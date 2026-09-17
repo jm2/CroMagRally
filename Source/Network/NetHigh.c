@@ -2298,6 +2298,15 @@ NetPlayerCharTypeMessage	outMess;
 // broken match.
 Boolean GetVehicleSelectionFromNetPlayers(void)
 {
+	// A selector may discover that it was kicked only when broadcasting its
+	// choice. Preserve that teardown instead of treating an empty game as ready.
+	if (!gNetGameInProgress || !gNetGame || gNetSequenceState >= kNetSequence_Error)
+	{
+		EndNetworkGame();
+		if (gNetSequenceState >= kNetSequence_Error)
+			DoNetGatherScreen();							// pre-game aborts skip the post-game error screen
+		return true;
+	}
 	ClearPlayerSyncMask();
 	MarkPlayerSynced(NSpPlayer_GetMyID(gNetGame));		// we have our own local info already
 
