@@ -19,6 +19,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  gradle-wrapper-check:
+    name: Gradle wrapper validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Validate the wrapper we execute. SDL's sample Android project is not part
+      # of our build; leave submodules uninitialized in this validation checkout.
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+
   full-compile-check:
     name: ${{ matrix.platform.name }}
     runs-on: ${{ matrix.platform.os }}
@@ -92,16 +102,15 @@ jobs:
         if: matrix.platform.name == 'Linux/GCC'
         run: python3 Tests/StartupSmokeTests.py build-sanitize/CroMagRally
 
-  # Compile the exact unsigned ARM64 device targets used by the release workflow. Running
-  # the developer scripts catches SDK, bundle, SDL static-link and mobile CMake regressions;
-  # packaging/signing stays in ReleaseBuilds.yml.
+  # Exercise both release device builds and the developer scripts' simulator defaults.
   apple-mobile-check:
-    name: Apple mobile (${{ matrix.target.name }})
+    name: Apple mobile (${{ matrix.target.name }}, ${{ matrix.destination }})
     runs-on: macos-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
+        destination: [device, simulator]
         target:
           - { name: iOS, script: build_ios.sh }
           - { name: tvOS, script: build_tvos.sh }
@@ -113,10 +122,10 @@ jobs:
         with:
           xcode-version: latest-stable
 
-      - name: Compile unsigned ${{ matrix.target.name }} device app
+      - name: Compile unsigned ${{ matrix.target.name }} ${{ matrix.destination }} app
         env:
           CODE_SIGNING_ALLOWED: "NO"
-        run: ./${{ matrix.target.script }} device
+        run: ./${{ matrix.target.script }} ${{ matrix.destination }}
 
   # Arch/Flatpak and Windows ARM64 remain release gates: each needs its own full build
   # environment and would duplicate the expensive SDL/game compile. Linux ARM64 covers
@@ -124,17 +133,25 @@ jobs:
 
   # The desktop matrix above can't catch breakage in the Android NDK build or the mobile
   # branches of the shared CMakeLists, which otherwise only surface at release-tag time.
-  # Build one ABI and assemble the debug APK so JNI staging, SDL Java glue, resources,
-  # manifest merging, and Gradle packaging are all exercised on every PR.
+  # Build device/debug and emulator/release APKs so both packaging variants are checked.
   android-native-check:
-    name: Android APK (arm64-v8a)
+    needs: gradle-wrapper-check
+    name: Android APK (${{ matrix.target.abi }}, ${{ matrix.target.variant }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - { abi: arm64-v8a, variant: Debug }
+          - { abi: x86_64, variant: Release }
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with: {submodules: 'recursive'}   # extern/Pomme + extern/SDL3 + extern/gl4es
 
       - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+        with:
+          packages: platform-tools
 
       - uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5
         with:
@@ -146,12 +163,12 @@ jobs:
           sdkmanager --install "platforms;android-35" "build-tools;37.0.0" "ndk;29.0.14206865"
           echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/29.0.14206865" >> "$GITHUB_ENV"
 
-      - name: Build Android debug APK
+      - name: Build Android ${{ matrix.target.variant }} APK
         env:
-          ABIS: arm64-v8a
-          GRADLE_TASK: assembleDebug
+          ABIS: ${{ matrix.target.abi }}
+          GRADLE_TASK: assemble${{ matrix.target.variant }}
         run: ./build_android.sh
 
       - name: Lint Android package
-        run: ./gradlew lintDebug
+        run: ./gradlew lint${{ matrix.target.variant }}
         working-directory: AndroidBuild
