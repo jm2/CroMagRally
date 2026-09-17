@@ -1030,6 +1030,11 @@ void LoadPlayfield(FSSpec *specPtr)
 
 	ReadDataFromPlayfieldFile(specPtr);
 
+	if ((gGameMode == GAME_MODE_PRACTICE
+		|| gGameMode == GAME_MODE_TOURNAMENT
+		|| gGameMode == GAME_MODE_MULTIPLAYERRACE) && gNumCheckpoints == 0)
+		DoFatalAlert("LoadPlayfield: race track requires checkpoints");
+
 
 
 

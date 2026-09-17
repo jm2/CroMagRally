@@ -997,6 +997,7 @@ static void StepGameSimulation(void)
 static void PlayArea(void)
 {
 	Boolean schedulePause = false;
+	int smokeFramesRemaining = gCommandLine.smokeTestFrames;
 
 
 	/* IF DOING NET GAME THEN WAIT FOR SYNC */
@@ -1165,6 +1166,11 @@ static void PlayArea(void)
 
 		OGL_DrawScene(DrawTerrain);
 
+		if (smokeFramesRemaining > 0 && --smokeFramesRemaining == 0)
+		{
+			SDL_Log("SMOKE: practice track %d rendered %d frames", gTrackNum + 1, gCommandLine.smokeTestFrames);
+			break;
+		}
 
 		//
 		// 5. FPS CAP (LCD SYNC - NETWORK GAMES ONLY)
@@ -2025,6 +2031,9 @@ void GameMain(void)
 		ShowPostGameNetErrorScreen();
 		gCommandLine.bootToTrack = 0;
 	}
+
+	if (gCommandLine.smokeTestFrames)
+		CleanQuit();
 
 	DoWarmUpScreen();
 	PreloadGameArt();

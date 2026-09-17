@@ -1097,9 +1097,7 @@ Boolean SetupNetworkHosting(void)
 			/* SOMETHING WENT WRONG, SO BE GRACEFUL */
 
 failure:
-	NSpGame_Dispose(gNetGame, 0);
-	SetNetworkPowerMode(false);
-	SetNetworkDiscoveryMode(false);
+	EndNetworkGame();
 
 	return true;
 }

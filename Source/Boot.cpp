@@ -117,7 +117,10 @@ static void ParseCommandLine(int argc, char **argv) {
 
     if (argument == "--track") {
       gCommandLine.bootToTrack =
-          ParseIntegerArgument("--track", argc, argv, &i, 1, NUM_TRACKS);
+          ParseIntegerArgument("--track", argc, argv, &i, 1, NUM_RACE_TRACKS);
+    } else if (argument == "--smoke-test-frames") {
+      gCommandLine.smokeTestFrames =
+          ParseIntegerArgument("--smoke-test-frames", argc, argv, &i, 1, 600);
     } else if (argument == "--car") {
       gCommandLine.car = ParseIntegerArgument("--car", argc, argv, &i, 1,
                                               NUM_LAND_CAR_TYPES);
@@ -155,6 +158,10 @@ static void ParseCommandLine(int argc, char **argv) {
 
   if (gCommandLine.netHost && gCommandLine.netJoin) {
     throw std::invalid_argument("--host and --join are mutually exclusive");
+  }
+  if (gCommandLine.smokeTestFrames &&
+      (!gCommandLine.bootToTrack || gCommandLine.netJoin)) {
+    throw std::invalid_argument("--smoke-test-frames requires --track and cannot use --join");
   }
 }
 

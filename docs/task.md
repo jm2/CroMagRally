@@ -46,9 +46,10 @@ bot review before merge. Unchecked entries are open backlog items; checked entri
 ## Priority: correctness and availability
 
 - [ ] Migrate legacy tvOS saves from Caches into persistent storage when no `NSUserDefaults` copy exists; test first launch, migration, corrupt data, and a failed persistent write without losing the legacy file.
-- [ ] Restrict `--track` race/practice/host startup paths to `NUM_RACE_TRACKS`.
-- [ ] Reject race-mode playfields with zero checkpoints before player/checkpoint initialization.
-- [ ] Add an offscreen sanitizer smoke test covering every CLI-selectable track/mode combination, including the current `--track 10` regression.
+- [x] Clear the network session after cancelling host setup; the new host smoke caught a stale `gNetGame` use-after-free during shutdown.
+- [x] Restrict `--track` race/practice/host startup paths to `NUM_RACE_TRACKS`.
+- [x] Reject race-mode playfields with zero checkpoints before player/checkpoint initialization.
+- [x] Add an offscreen sanitizer smoke test covering every CLI-selectable track/mode combination, including the current `--track 10` regression. Practice runs simulate/render each track; host runs exercise the lobby. Peer/gameplay barriers remain part of the network tests below.
 - [x] Define one shared minimum network FPS and use it consistently for config, character refresh-rate negotiation, host-control validation, and final sync.
 - [x] Reject or ignore positive client refresh rates below the supported network minimum; add boundary tests for 0, 1, 8, 9, 1000, and 1001.
 - [x] Add semantic validation for `NetSyncMessage`, including `targetFPS`, reserved padding, and the same FPS invariant used by the earlier configuration messages.
@@ -86,8 +87,8 @@ bot review before merge. Unchecked entries are open backlog items; checked entri
 
 ## Priority: build, CI, release UX, and supply chain
 
-- [ ] Build the full `CroMagRally` target in sanitizer CI, not only selected test executables.
-- [ ] Add a bounded offscreen/headless sanitizer boot smoke to exercise production startup, resource loading, and gameplay initialization.
+- [x] Build the full `CroMagRally` target in sanitizer CI, not only selected test executables.
+- [x] Add a bounded offscreen/headless sanitizer boot smoke to exercise production startup, resource loading, and gameplay initialization.
 - [ ] Fix Android wrapper NDK-cache detection to compare the normalized toolchain path/revision or a wrapper-owned NDK stamp instead of requiring a missing `CMAKE_ANDROID_NDK` cache key.
 - [ ] Add a two-run Android wrapper test proving a matching NDK preserves the incremental CMake build tree.
 - [ ] Label ad-hoc-signed, unnotarized macOS release artifacts as unsigned and disclose that status prominently in release notes.
