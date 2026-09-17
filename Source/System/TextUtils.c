@@ -1,5 +1,6 @@
 #include "game.h"
 #include <stdio.h>
+#include <stdarg.h>
 
 void AdvanceTextCursor(int snprintfReturnCode, char** cursor, size_t* remainingSize)
 {
@@ -41,4 +42,17 @@ int VFormatTextWithPlaceholder(const char* text, char* buf0, size_t bufSize, con
 	rc = snprintf(buf, bufSize, "%s", placeholder + 1);
 	AdvanceTextCursor(rc, &buf, &bufSize);
 	return (int) (buf - buf0);
+}
+
+size_t snprintfcat(char* buf, size_t bufSize, char const* fmt, ...)
+{
+	size_t len = SDL_strnlen(buf, bufSize);
+	int result;
+	va_list args;
+
+	va_start(args, fmt);
+	result = SDL_vsnprintf(buf + len, bufSize - len, fmt, args);
+	va_end(args);
+
+	return result;
 }

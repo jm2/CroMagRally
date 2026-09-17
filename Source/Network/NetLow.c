@@ -98,6 +98,7 @@ typedef struct NSpPlayer
 	SendRing					sendRing;		// host-side outbound queue for this peer socket (auto-reset by NSpPlayer_Clear's memset)
 	bool						needsLeaveNotify;	// host: a send to this peer failed; NSpMessage_GetAsHost owes the host's own NetHigh a synthetic kNSpPlayerLeft before the slot is reused
 	uint32_t					lastHeard;		// CMR7 Stage 4: host per-client last-received-bytes time (ms, SDL_GetTicks); drives the badge/drop policy
+	uint32_t					acceptedAt;		// absolute handshake deadline; partial traffic cannot extend it
 } NSpPlayer;
 
 typedef struct NSpGame
@@ -127,6 +128,7 @@ typedef struct NSpGame
 typedef struct
 {
 	struct sockaddr_in			hostAddr;
+	uint32_t					lastAdvertised;
 } LobbyInfo;
 
 typedef struct NSpSearch
@@ -511,6 +513,22 @@ fail:
 
 #pragma mark - Host lobby
 
+static void NSpGame_ExpireHandshakes(NSpGame* game)
+{
+	uint32_t now = (uint32_t) SDL_GetTicks();
+	for (int i = 0; i < MAX_CLIENTS; i++)
+	{
+		NSpPlayer* player = &game->players[i];
+		if (player->state == kNSpPlayerState_AwaitingHandshake
+			&& now - player->acceptedAt >= NSP_HANDSHAKE_TIMEOUT_MS)
+		{
+			// This peer was never announced, so there is no player-left event to send.
+			CloseSocket(&player->sockfd);
+			NSpPlayer_Clear(player);
+		}
+	}
+}
+
 NSpPlayerID NSpGame_AcceptNewClient(NSpGameReference gameRef)
 {
 	int newClientSlot = -1;
@@ -518,6 +536,7 @@ NSpPlayerID NSpGame_AcceptNewClient(NSpGameReference gameRef)
 	NSpGame* game = NSpGame_Unbox(gameRef);
 
 	GAME_ASSERT(game->isHosting);
+	NSpGame_ExpireHandshakes(game);
 
 	sockfd_t newSocket = INVALID_SOCKET;
 
@@ -557,6 +576,7 @@ NSpPlayerID NSpGame_AcceptNewClient(NSpGameReference gameRef)
 		newPlayer->state		= kNSpPlayerState_AwaitingHandshake;
 		newPlayer->sockfd		= newSocket;
 		newPlayer->lastHeard	= (uint32_t) SDL_GetTicks();	// CMR7 Stage 4: seed liveness so a fresh slot isn't instantly "stale"
+		newPlayer->acceptedAt = newPlayer->lastHeard;
 		snprintf(newPlayer->name, sizeof(newPlayer->name), "PLAYER %d", newPlayer->id);
 
 		SendRing_Reset(&newPlayer->sendRing);	// start a reused slot with an empty ring (defensive; NSpPlayer_Clear already zeroed it on the prior kick)
@@ -854,6 +874,7 @@ bye:
 
 static NSpMessageHeader* NSpMessage_GetAsHost(NSpGame* game)
 {
+	NSpGame_ExpireHandshakes(game);
 	NSpMessageHeader* message = NULL;
 	bool brokenPipe = false;
 
@@ -1312,7 +1333,22 @@ fail:
 	return NULL;
 }
 
-static bool NSpSearch_IsHostKnown(NSpSearchReference searchRef, const struct sockaddr_in* remoteAddr)
+static void NSpSearch_RemoveLobby(NSpSearch* search, int index)
+{
+	memmove(&search->gamesFound[index], &search->gamesFound[index + 1],
+		(size_t)(search->numGamesFound - index - 1) * sizeof(LobbyInfo));
+	search->numGamesFound--;
+}
+
+static void NSpSearch_ExpireLobbies(NSpSearch* search)
+{
+	uint32_t now = (uint32_t) SDL_GetTicks();
+	for (int i = search->numGamesFound - 1; i >= 0; i--)
+		if (now - search->gamesFound[i].lastAdvertised >= NSP_LOBBY_EXPIRY_MS)
+			NSpSearch_RemoveLobby(search, i);
+}
+
+static bool NSpSearch_RefreshKnownHost(NSpSearchReference searchRef, const struct sockaddr_in* remoteAddr)
 {
 	NSpSearch* search = NSpSearch_Unbox(searchRef);
 
@@ -1326,6 +1362,7 @@ static bool NSpSearch_IsHostKnown(NSpSearchReference searchRef, const struct soc
 		if (search->gamesFound[i].hostAddr.sin_addr.s_addr == remoteAddr->sin_addr.s_addr
 			&& search->gamesFound[i].hostAddr.sin_port == remoteAddr->sin_port)
 		{
+			search->gamesFound[i].lastAdvertised = (uint32_t) SDL_GetTicks();
 			return true;
 		}
 	}
@@ -1346,6 +1383,7 @@ int NSpSearch_Tick(NSpSearchReference searchRef)
 	{
 		return kNSpRC_InvalidSocket;
 	}
+	NSpSearch_ExpireLobbies(search);
 
 	char message[kNSpMaxMessageLength];
 	struct sockaddr_in remoteAddr;
@@ -1384,8 +1422,7 @@ int NSpSearch_Tick(NSpSearchReference searchRef)
 			return kNSpRC_OK;		// not one of our advertisements — ignore it
 		}
 
-		if (search->numGamesFound < MAX_LOBBIES &&
-			!NSpSearch_IsHostKnown(search, &remoteAddr))
+		if (!NSpSearch_RefreshKnownHost(search, &remoteAddr) && search->numGamesFound < MAX_LOBBIES)
 		{
 			char hostname[128];
 			snprintf(hostname, sizeof(hostname), "[EMPTY]");
@@ -1393,6 +1430,7 @@ int NSpSearch_Tick(NSpSearchReference searchRef)
 			printf("%s: Found a game! %s:%d\n", __func__, hostname, remoteAddr.sin_port);
 
 			search->gamesFound[search->numGamesFound].hostAddr = remoteAddr;
+			search->gamesFound[search->numGamesFound].lastAdvertised = (uint32_t) SDL_GetTicks();
 
 			search->numGamesFound++;
 
@@ -1412,6 +1450,7 @@ int NSpSearch_GetNumGamesFound(NSpSearchReference searchRef)
 		return 0;
 	}
 
+	NSpSearch_ExpireLobbies(search);
 	return search->numGamesFound;
 }
 
@@ -1424,9 +1463,13 @@ NSpGameReference NSpSearch_JoinGame(NSpSearchReference searchRef, int lobbyNum)
 		return NULL;
 	}
 
-	GAME_ASSERT(lobbyNum >= 0);
-	GAME_ASSERT(lobbyNum < search->numGamesFound);
-	return JoinLobby(&search->gamesFound[lobbyNum]);
+	NSpSearch_ExpireLobbies(search);
+	if (lobbyNum < 0 || lobbyNum >= search->numGamesFound)
+		return NULL;
+	NSpGameReference game = JoinLobby(&search->gamesFound[lobbyNum]);
+	if (!game)
+		NSpSearch_RemoveLobby(search, lobbyNum);
+	return game;
 }
 
 const char* NSpSearch_GetHostAddress(NSpSearchReference searchRef, int lobbyNum)

@@ -53,10 +53,10 @@ bot review before merge. Unchecked entries are open backlog items; checked entri
 - [x] Define one shared minimum network FPS and use it consistently for config, character refresh-rate negotiation, host-control validation, and final sync.
 - [x] Reject or ignore positive client refresh rates below the supported network minimum; add boundary tests for 0, 1, 8, 9, 1000, and 1001.
 - [x] Add semantic validation for `NetSyncMessage`, including `targetFPS`, reserved padding, and the same FPS invariant used by the earlier configuration messages.
-- [ ] Expire and recycle `AwaitingHandshake` TCP slots after a bounded lobby handshake deadline.
+- [x] Expire and recycle `AwaitingHandshake` TCP slots after a bounded lobby handshake deadline.
 - [ ] Add a bounded vehicle-selection readiness deadline and let the host remove only nonready peers instead of waiting indefinitely or cancelling the entire session.
 - [ ] Replace the level-ready barrier's session-wide fatal timeout with per-peer readiness tracking and removal of only stalled peers.
-- [ ] Add loopback/state-machine tests for silent handshakes, sparse lobby churn, stalled character selection, delayed level readiness, send-ring overflow, simultaneous leaves, leave while paused, and two games in one process.
+- [ ] Add loopback/state-machine tests for silent handshakes, sparse lobby churn, stalled character selection, delayed level readiness, send-ring overflow, simultaneous leaves, leave while paused, and two games in one process. Transport loopback coverage is complete; readiness and paused-leave coverage remains.
 - [x] Rework release production flow so builds run from a pushed version tag or draft release and the public GitHub Release is published only after every required artifact and checksum succeeds.
 - [x] Add a release-workflow failure test proving that a failed matrix job cannot leave a public empty or incomplete release.
 - [x] Generate a deterministic Android asset-manifest/content hash and use it to invalidate extracted assets instead of relying only on `GAME_VERSION` and one sentinel file.
@@ -82,7 +82,7 @@ bot review before merge. Unchecked entries are open backlog items; checked entri
 ## Priority: network polish
 
 - [ ] Clear a player's degraded-connection badge when that player is kicked or converted to a bot.
-- [ ] Timestamp lobby advertisements, expire stale discovery entries, and try another live entry when joining the first result fails.
+- [x] Timestamp lobby advertisements, expire stale discovery entries, and try another live entry when joining the first result fails.
 - [x] Initialize `HostSendGameConfigInfo`'s return status defensively even when no client send occurs.
 
 ## Priority: build, CI, release UX, and supply chain
