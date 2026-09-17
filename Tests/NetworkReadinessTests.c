@@ -6,13 +6,18 @@
 #define SDL_GetTicks TestTicks
 #include "../Source/Network/NetHigh.c"
 #undef SDL_GetTicks
+#include "../Source/Screens/NetGather.c"
 
 PlayerInfoType gPlayerInfo[MAX_PLAYERS];
 short gNumTotalPlayers, gNumRealPlayers;
 Boolean gGameOver;
+Boolean gSimulationPaused;
 int gGameMode;
 static int taggedChoices;
 void ChooseTaggedPlayer(void) { taggedChoices++; }
+Boolean GetNewNeedStateAnyP(int needID) { (void)needID; return false; }
+void SetNetworkPowerMode(Boolean enabled) { (void)enabled; }
+void SetNetworkDiscoveryMode(Boolean enabled) { (void)enabled; }
 
 static NSpGame* BeginSession(NSpGame** first, NSpGame** second)
 {
@@ -70,6 +75,27 @@ static void Readiness(uint32_t timeout, int waiting, int ready)
     EndSession(host, first, second);
 }
 
+static void LastPeerTimeout(void)
+{
+    NSpGame *first, *second;
+    NSpGame* host = BeginSession(&first, &second);
+    NSpPlayer_Kick(host, 2);
+    ApplyBecomeBot(1);
+    CHECK(gNumGatheredPlayers == 2);
+    ClearPlayerSyncMask();
+    MarkPlayerSynced(0);
+    gNetSequenceState = kNetSequence_WaitingForPlayerVehicles;
+    testNow += VEHICLE_READY_TIMEOUT_MS;
+    HostAdvanceReadinessBarrier(VEHICLE_READY_TIMEOUT_MS,
+        kNetSequence_WaitingForPlayerVehicles, kNetSequence_GotAllPlayerVehicles);
+    CHECK(gNetSequenceState == kNetSequence_OfflineEverybodyLeft && gGameOver);
+    CHECK(DoNetGatherControls() == -1);
+    CHECK(!gNetGameInProgress && !gNetGame && !gIsNetworkHost);
+    CHECK(DoNetGatherControls() == 0); // Preserve the subsequent error acknowledgement.
+    NSpGame_Dispose(first, 0);
+    NSpGame_Dispose(second, 0);
+}
+
 static void DelayedReady(void)
 {
     NSpGame *first, *second;
@@ -124,6 +150,7 @@ int main(void)
     Readiness(VEHICLE_READY_TIMEOUT_MS, kNetSequence_WaitingForPlayerVehicles, kNetSequence_GotAllPlayerVehicles);
     Readiness(LEVEL_READY_TIMEOUT_MS, kNetSequence_HostWaitForPlayersToPrepareLevel, kNetSequence_GameLoop);
     DelayedReady();
+    LastPeerTimeout();
     PausedLeaveAndReset();
     puts("Readiness and paused-leave tests passed");
     return 0;
