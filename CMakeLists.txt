@@ -620,6 +620,8 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 	add_test(NAME android_assets_and_wrappers COMMAND ${Python3_EXECUTABLE}
 		${CMAKE_SOURCE_DIR}/Tests/AndroidBuildTests.py ${CMAKE_SOURCE_DIR}
 		$<TARGET_FILE:CroMagRallyAssetExtractionTests> ${CMAKE_COMMAND})
+	add_test(NAME release_workflow COMMAND ${Python3_EXECUTABLE}
+		${CMAKE_SOURCE_DIR}/Tests/ReleaseWorkflowTests.py ${CMAKE_SOURCE_DIR})
 	add_test(
 		NAME version_metadata
 		COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/Tests/VersionMetadataTests.py ${CMAKE_SOURCE_DIR})
