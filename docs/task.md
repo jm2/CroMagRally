@@ -95,8 +95,8 @@ bot review before merge. Unchecked entries are open backlog items; checked entri
 - [x] Add Gradle wrapper validation in CI while retaining the pinned distribution checksum.
 - [x] Validate `build_ios.sh` and `build_tvos.sh` arguments explicitly and reject values other than `device` or `simulator`.
 - [x] Add CI coverage for the iOS/tvOS simulator paths used by the scripts' defaults; add Android x86_64/release PR coverage. Arch/Flatpak and Windows ARM64 remain release gates because they require separate build environments; DEB/RPM already cover the common Linux install path on PRs.
-- [ ] Replace the gl4es Apple declaration-only aliases for `gl4es_glEnableClientStatei` and `gl4es_glDisableClientStatei` with real forwarding definitions.
-- [ ] Add an Apple gl4es link test that references `gl4es_GetProcAddress` and both client-state symbols so future shared/lookup configurations cannot regress silently.
+- [x] Replace the gl4es Apple declaration-only aliases for `gl4es_glEnableClientStatei` and `gl4es_glDisableClientStatei` with real forwarding definitions.
+- [x] Add an Apple gl4es link test that references `gl4es_GetProcAddress` and both client-state symbols so future shared/lookup configurations cannot regress silently.
 
 ## Priority: documentation
 
