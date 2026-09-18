@@ -72,11 +72,11 @@ bot review before merge. Unchecked entries are open backlog items; checked entri
 
 ## Priority: gameplay and input correctness
 
-- [ ] Mask keyboard need states with `KEYSTATE_ACTIVE_BIT` in analog input lookup so `KEYSTATE_UP` and `KEYSTATE_IGNOREHELD` do not produce full-scale input.
-- [ ] Add input-state tests covering press, hold, release, invalidation, keyboard fallback, and mixed keyboard/gamepad analog behavior.
-- [ ] Stop checkpoint processing for players whose race is already complete and make `PlayerCompletedRace` idempotent so race times/UI cannot be recorded twice during cooldown.
-- [ ] Saturate or cap gong weapon-quantity doubling so signed `powQuantity` cannot overflow.
-- [ ] Pass the bird-bomb projectile, not its thrower, to `MakeBombExplosion` so thrower attribution and announcer behavior are preserved.
+- [x] Mask keyboard need states with `KEYSTATE_ACTIVE_BIT` in analog input lookup so `KEYSTATE_UP` and `KEYSTATE_IGNOREHELD` do not produce full-scale input.
+- [x] Add input-state tests covering press, hold, release, invalidation, keyboard fallback, and mixed keyboard/gamepad analog behavior.
+- [x] Stop checkpoint processing for players whose race is already complete and make `PlayerCompletedRace` idempotent so race times/UI cannot be recorded twice during cooldown.
+- [x] Saturate or cap gong weapon-quantity doubling so signed `powQuantity` cannot overflow.
+- [x] Pass the bird-bomb projectile, not its thrower, to `MakeBombExplosion` so thrower attribution and announcer behavior are preserved.
 
 ## Priority: network polish
 
