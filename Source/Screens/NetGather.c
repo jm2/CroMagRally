@@ -302,6 +302,13 @@ static int DoNetGatherControls(void)
 
 	switch (gNetSequenceState)
 	{
+		case kNetSequence_OfflineEverybodyLeft:
+			// Tear down the timed-out session, then show the error until the player
+			// acknowledges it here: pre-game aborts skip the post-game error screen.
+			if (gNetGameInProgress)
+				EndNetworkGame();
+			break;
+
 		case kNetSequence_HostLobbyOpen:
 			if (GetNewNeedStateAnyP(kNeed_UIConfirm)
 				&& NSpGame_GetNumActivePlayers(gNetGame) >= 2)
