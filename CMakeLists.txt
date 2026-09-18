@@ -586,6 +586,30 @@ endif()
 #------------------------------------------------------------------------------
 
 if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT CMAKE_SYSTEM_NAME STREQUAL "tvOS")
+	# CPU-only gameplay tests use the same portability and sanitizer setup.
+	function(cmr_add_gameplay_test target test_name)
+		add_executable(${target} ${ARGN})
+		target_include_directories(${target} PRIVATE ${GAME_GENERATED_INCLUDE_DIR} ${GAME_SRCDIR}/Headers)
+		target_link_libraries(${target} PRIVATE Pomme SDL3::SDL3)
+		if(UNIX)
+			target_link_libraries(${target} PRIVATE m)
+		endif()
+		if(MSVC)
+			target_compile_definitions(${target} PRIVATE WIN32_LEAN_AND_MEAN NOGDI NOUSER)
+		endif()
+		if(SANITIZE)
+			target_compile_options(${target} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+			target_link_options(${target} PRIVATE -fsanitize=address,undefined)
+		endif()
+		if(WIN32)
+			add_custom_command(TARGET ${target} POST_BUILD
+				COMMAND ${CMAKE_COMMAND} -E copy_if_different
+					$<TARGET_RUNTIME_DLLS:${target}> $<TARGET_FILE_DIR:${target}>
+				COMMAND_EXPAND_LISTS)
+		endif()
+		add_test(NAME ${test_name} COMMAND ${target})
+	endfunction()
+	cmr_add_gameplay_test(CroMagRallyPathTests paths Tests/PathTests.c Source/Terrain/Paths.c)
 	add_executable(CroMagRallyValidationTests
 		Tests/ValidationTests.c
 		Source/Network/NetValidation.c

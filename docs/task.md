@@ -119,14 +119,16 @@ Use separate subsystem PRs, as approved on 2026-09-18. Network completion is
 tracked in [PR #35](https://github.com/jm2/CroMagRally/pull/35). The loader fixes
 pass all 12 sanitizer CTest suites, all 39 shipped BG3D models, nested/sibling
 group tests, bounded decoder tests, and 30 production startup smoke cases.
+The AI path regression suite passes under ASan/UBSan, covering exact and nearby
+origins, duplicate/terminal points, cancellation, and empty paths.
 Checked entries below have an implementation and local regression coverage;
 their PRs must still pass CI and bot review before merge.
 
 - [x] [#26](https://github.com/jm2/CroMagRally/issues/26) — Advance network race-end cooldown according to synchronized simulation progress; keep completion consistent across client hold/catch-up renders and freeze during pause.
 - [x] [#27](https://github.com/jm2/CroMagRally/issues/27) — Give terrain LZSS decoding a destination-capacity contract, check before emitting bytes, and reject incomplete input before texture use.
 - [x] [#28](https://github.com/jm2/CroMagRally/issues/28) — Validate BG3D material/geometry counts, references, required arrays, read completion, and texture byte sizes before allocation, indexing, or upload.
-- [ ] [#29](https://github.com/jm2/CroMagRally/issues/29) — Handle exact and near-coincident AI path origins without returning NaN directions.
-- [ ] [#30](https://github.com/jm2/CroMagRally/issues/30) — Preserve the preceding valid direction at the final AI path point instead of storing a zero vector.
+- [x] [#29](https://github.com/jm2/CroMagRally/issues/29) — Handle exact and near-coincident AI path origins without returning NaN directions.
+- [x] [#30](https://github.com/jm2/CroMagRally/issues/30) — Preserve the preceding valid direction at the final AI path point instead of storing a zero vector.
 - [ ] [#31](https://github.com/jm2/CroMagRally/issues/31) — Include all active local listeners in sound attenuation and use each listener's position/orientation for stereo mixing.
 - [ ] [#32](https://github.com/jm2/CroMagRally/issues/32) — Save the active session difficulty in race records instead of the local preference.
 - [ ] [#33](https://github.com/jm2/CroMagRally/issues/33) — Declare the external SDL3 runtime dependency for system-SDL Debian packages and verify both bundled and external-SDL package layouts.
