@@ -14,6 +14,9 @@ static Boolean TestGatherScreen(void);
 
 Boolean gSimulationPaused;
 float gFramesPerSecondFrac, gStartingLightTimer;
+long gNumCheckpoints = 1;
+short gWorstHumanPlace;
+static ObjNode playerModels[MAX_PLAYERS];
 static int taggedChoices;
 static Boolean backPressed;
 static int expectedGatherState, gatherScreenCalls;
@@ -38,6 +41,22 @@ void ShowWinLose(short playerNum, Byte mode, short winner)
     winLoseWinner[playerNum] = winner;
 }
 Boolean GetNewNeedStateAnyP(int needID) { return needID == kNeed_UIBack && backPressed; }
+
+// Keep real level player initialization; isolate terrain/model/physics setup.
+int GetNumAgesCompleted(void) { return 0; }
+uint16_t RandomRange(unsigned short min, unsigned short max) { CHECK(min <= max); return min; }
+float GetTerrainY(float x, float z) { (void)x; (void)z; return 0; }
+ObjNode* InitPlayer_Car(int playerNum, OGLPoint3D* where, float rotY)
+{
+    (void)where; (void)rotY;
+    return gPlayerInfo[playerNum].objNode = &playerModels[playerNum];
+}
+ObjNode* InitPlayer_Submarine(int playerNum, OGLPoint3D* where, float rotY)
+{
+    return InitPlayer_Car(playerNum, where, rotY);
+}
+void SetPhysicsForVehicleType(short playerNum) { (void)playerNum; }
+void SetDefaultCameraModeForAllPlayers(void) {}
 
 static NSpGame* BeginSession(NSpGame** first, NSpGame** second)
 {
@@ -240,6 +259,71 @@ static void BattleDepartureWinner(int mode)
     EndSession(host, first, second);
 }
 
+static void VerifyVehicleTimeoutAfterInit(int mode)
+{
+    InitPlayersAtStartOfLevel();
+    bool eliminationMode = mode == GAME_MODE_TAG1 || mode == GAME_MODE_SURVIVAL;
+    CHECK(gPlayerInfo[2].isComputer);
+    CHECK(gPlayerInfo[2].isEliminated == (mode != GAME_MODE_MULTIPLAYERRACE));
+    CHECK(!gPlayerInfo[0].isEliminated && !gPlayerInfo[1].isEliminated);
+    CHECK(gNumPlayersEliminated == (eliminationMode ? 1 : 0));
+    if (mode == GAME_MODE_TAG1 || mode == GAME_MODE_TAG2)
+    {
+        ChooseTaggedPlayerWithIndex(2);
+        CHECK(gWhoIsIt != 2); // the departed peer cannot be tagged after level init
+    }
+    if (mode == GAME_MODE_TAG1)
+    {
+        ChooseTaggedPlayerWithIndex(1);
+        gPlayerInfo[1].tagTimer = 0;
+        UpdateGameModeSpecifics();
+    }
+    else if (mode == GAME_MODE_SURVIVAL)
+    {
+        PlayerLoseHealth(1, 1);
+        UpdateGameModeSpecifics();
+    }
+    if (eliminationMode)
+    {
+        CHECK(gTrackCompleted && !gPlayerInfo[0].isEliminated);
+        for (int i = 0; i < gNumTotalPlayers; i++)
+            CHECK(winLoseWinner[i] == 0 && winLoseMode[i] == (i == 0 ? 1 : 2));
+    }
+}
+
+static void BattleVehicleTimeout(int mode)
+{
+    NSpGame *first, *second;
+    NSpGame* host = BeginSession(&first, &second);
+    gGameMode = mode;
+    PlayerInfoType before[MAX_PLAYERS];
+    memcpy(before, gPlayerInfo, sizeof(before));
+    ClearPlayerSyncMask();
+    MarkPlayerSynced(0);
+    MarkPlayerSynced(2);
+    gNetSequenceState = kNetSequence_WaitingForPlayerVehicles;
+    testNow += VEHICLE_READY_TIMEOUT_MS;
+    HostAdvanceReadinessBarrier(VEHICLE_READY_TIMEOUT_MS,
+        kNetSequence_WaitingForPlayerVehicles, kNetSequence_GotAllPlayerVehicles);
+    CHECK(gNetSequenceState == kNetSequence_GotAllPlayerVehicles && !gGameOver);
+    VerifyVehicleTimeoutAfterInit(mode);
+
+    NSpMessageHeader* leave = WaitMessage(second);
+    CHECK(leave->what == kNSpPlayerLeft);
+    memcpy(gPlayerInfo, before, sizeof(before));
+    gNumPlayersEliminated = 0;
+    gNumGatheredPlayers = 3;
+    gTrackCompleted = false;
+    gIsNetworkHost = false;
+    gIsNetworkClient = true;
+    gNetGame = second;
+    gNetSequenceState = kNetSequence_WaitingForPlayerVehicles;
+    CHECK(!HandleOtherNetMessage(leave));
+    NSpMessage_Release(second, leave);
+    VerifyVehicleTimeoutAfterInit(mode);
+    EndSession(host, first, second);
+}
+
 static void SurvivalWithoutSurvivors(void)
 {
     NSpGame *first, *second;
@@ -318,6 +402,11 @@ int main(void)
     SurvivalReadinessRemoval(true);
     BattleDepartureWinner(GAME_MODE_SURVIVAL);
     BattleDepartureWinner(GAME_MODE_TAG1);
+    BattleVehicleTimeout(GAME_MODE_SURVIVAL);
+    BattleVehicleTimeout(GAME_MODE_TAG1);
+    BattleVehicleTimeout(GAME_MODE_TAG2);
+    BattleVehicleTimeout(GAME_MODE_CAPTUREFLAG);
+    BattleVehicleTimeout(GAME_MODE_MULTIPLAYERRACE);
     SurvivalWithoutSurvivors();
     TagWinnerDeparture();
     PausedLeaveAndReset();

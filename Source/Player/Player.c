@@ -168,6 +168,9 @@ int		i,j,type;
 Boolean	taken[NUM_LAND_CAR_TYPES];
 
 	gWorstHumanPlace = 0;
+	gNumPlayersEliminated = 0;
+	const Boolean battleMode = gGameMode == GAME_MODE_TAG1 || gGameMode == GAME_MODE_TAG2
+		|| gGameMode == GAME_MODE_SURVIVAL || gGameMode == GAME_MODE_CAPTUREFLAG;
 
 
 		/* FIRST MARK WHICH CAR TYPES THE HUMANS HAVE */
@@ -299,7 +302,12 @@ Boolean	taken[NUM_LAND_CAR_TYPES];
 		gPlayerInfo[i].tagTimer				= TAG_TIME_LIMIT;
 		gPlayerInfo[i].tagOccilation		= 0;
 		gPlayerInfo[i].isIt					= false;
-		gPlayerInfo[i].isEliminated			= false;
+		// Battle modes have no CPU entrants. A network bot here is a peer who
+		// left during vehicle selection; level initialization must not revive it.
+		gPlayerInfo[i].isEliminated = gNetGameInProgress && battleMode && gPlayerInfo[i].isComputer;
+		if (gPlayerInfo[i].isEliminated
+			&& (gGameMode == GAME_MODE_TAG1 || gGameMode == GAME_MODE_SURVIVAL))
+			gNumPlayersEliminated++;
 		gPlayerInfo[i].health				= 1.0;
 		gPlayerInfo[i].impactResetTimer		= 0;
 
@@ -782,7 +790,6 @@ ObjNode *obj;
 		obj = obj->ChainNode;
 	}
 }
-
 
 
 

@@ -614,7 +614,6 @@ static Boolean PlayGame_Tag(void)
 
 		/* PICK RANDOM PLAYER TO BE "IT" */
 
-	gNumPlayersEliminated = 0;
 	ChooseTaggedPlayer();											// MUST do this AFTER InitArea() since that's where the random seed gets reset
 	gWhoWasIt = gWhoIsIt;
 
@@ -664,7 +663,6 @@ static Boolean PlayGame_Survival(void)
 
 	ShowLoadingPicture();									// show intro screen
 	InitArea();
-	gNumPlayersEliminated = 0;
 
 
 		/***********/
