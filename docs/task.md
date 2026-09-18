@@ -135,3 +135,5 @@ their PRs must still pass CI and bot review before merge.
 - [ ] [#32](https://github.com/jm2/CroMagRally/issues/32) — Save the active session difficulty in race records instead of the local preference.
 - [ ] [#33](https://github.com/jm2/CroMagRally/issues/33) — Declare the external SDL3 runtime dependency for system-SDL Debian packages and verify both bundled and external-SDL package layouts.
 - [x] [#34](https://github.com/jm2/CroMagRally/issues/34) — Correct BG3D group-stack popping and verify nested and sibling group handling; this defect is latent with the current asset set.
+
+- [x] [#41](https://github.com/jm2/CroMagRally/issues/41) — Repair spatial-audio test portability: avoid the Windows `near` macro and allow one volume unit of NEON normalization/quantization tolerance for centered channels; retain strict listener-selection and directional checks. Full CI and a fresh bot review remain required before merge.
