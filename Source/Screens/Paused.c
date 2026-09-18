@@ -141,6 +141,17 @@ void OnToggleSplitscreenMode(const MenuItem* mi)
 
 static void UpdatePausedMenuCallback(void)
 {
+	// The menu can keep fading after its final simulated frame. Do not consume
+	// more host packets (and their RNG seeds) once the race is complete.
+	if (IsGameSimulationComplete())
+	{
+		gSimulationPaused = true;
+		MoveObjects();
+		KeepTerrainAliveForRender();
+		KillMenu(gGameOver ? 'bail' : 'resu');
+		return;
+	}
+
 			/* CMR7 CLIENT-INITIATED PAUSE: STAY IN LOCKSTEP UNTIL THE HOST CONFIRMS THE PAUSE */
 	//
 	// The host never waits (free-running Net_Pump + Host_ConsumeClientInputs). If a pausing
@@ -155,76 +166,27 @@ static void UpdatePausedMenuCallback(void)
 
 	if (gNetGameInProgress && gIsNetworkClient)
 	{
-		Boolean terrainUpdatedThisFrame = false;
-
 		Net_Pump();										// drain host packets into the ring + flush send rings (non-blocking)
 		NetCheck_ConnectionTimeouts();					// CMR7 Stage 4: host-link badge/drop policy (errors out the menu below if the host is gone)
 
-		int guard = 0;
-		for (int k = 0; k < gClientCatchUpMax; )		// bounded catch-up (K_max), mirroring the main loop
-		{
-			HostConsumeResult r = Client_ConsumeHostPacketFromRing();
-			if (r == kHostConsume_Applied)
-			{
-				// The handler just overwrote every player's pauseState with the host's broadcast
-				// view, so IsNetGamePaused() here reflects ONLY whether the host has begun the net
-				// pause. Apply frame-aligned events AFTER the seed check (in the handler) and BEFORE
-				// MoveEverything, exactly as StepGameSimulation does. NB: we deliberately do NOT call
-				// SetupNetPauseScreen here — the pause menu is already on screen.
-				ApplyPendingFrameEvents();
-
-				if (IsNetGamePaused())
-				{
-					gSimulationPaused = true;
-					MoveObjects();						// frozen step — the host is running MoveObjects too
-					DoPlayerTerrainUpdate();
-					terrainUpdatedThisFrame = true;
-				}
-				else
-				{
-					gSimulationPaused = false;
-					MoveEverything();					// stay in lockstep: same RNG draw count as the host
-					UpdateGameModeSpecifics();
-					DoPlayerTerrainUpdate();
-					terrainUpdatedThisFrame = true;
-					gSimulationFrame++;
-				}
-				k++;
-			}
-			else if (r == kHostConsume_Dup)
-			{
-				if (++guard > 2*gClientCatchUpMax)		// defense vs a pathological dup storm
-					break;
-			}
-			else
-			{
-				break;									// ring empty -> hold (no sim step this menu frame)
-			}
-
-			// Consuming can tear the net game down (host left -> EndNetworkGame clears gIsNetworkClient).
-			if (!gIsNetworkClient || !gNetGameInProgress)
-				break;
-		}
+		AdvanceClientSimulation(false);
 
 		// Re-assert our pause intent (the menu is open) and keep the wall-clock uplink alive even
 		// across a downlink stall. Seeding schedulePause=true forces pauseState=1 each emitted packet
 		// so the host latches & broadcasts the net pause.
-		if (gIsNetworkClient && gNetGameInProgress)
+		if (gIsNetworkClient && gNetGameInProgress && !IsGameSimulationComplete())
 		{
 			Boolean schedulePause = true;
 			SampleAndSendLocalInput(&schedulePause);
 			Net_Pump();								// flush the just-enqueued input packets
 		}
 
-		// StartMenu draws the terrain after this callback. On an empty host ring,
-		// retain the previous active set without running terrain-item streaming.
-		if (!terrainUpdatedThisFrame)
-			KeepTerrainAliveForRender();
-
 		// CMR7 Stage 4: a dead net game (host gone / everybody left) must break the menu so PlayArea
 		// can tear it down, instead of spinning the pause loop forever.
 		if (gNetSequenceState >= kNetSequence_Error || gGameOver)
 			KillMenu('bail');
+		else if (IsGameSimulationComplete())
+			KillMenu('resu');		// normal race completion, not a retirement
 		return;
 	}
 

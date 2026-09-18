@@ -102,3 +102,28 @@ bot review before merge. Unchecked entries are open backlog items; checked entri
 
 - [x] Update `docs/REVIEW.md` to remove the now-false claim that tvOS persistence still uses purgeable cache storage.
 - [x] Reconcile `docs/SUBMODULE-AUDIT.md` wording so its verdict acknowledges the documented Pomme runtime changes as well as portability changes.
+
+## Holistic review follow-up (2026-09-18)
+
+Reviewed `72eb0b1d46b4c93340a3d43744b9ae401a1e0f63` after the preceding
+backlog was completed. See [the review analysis](REVIEW-2026-09-18.md) for
+evidence, validation results, and limitations. These entries are confirmed
+defects; non-defect proposals remain outside this task list pending approval.
+Pair each correction with the focused regression coverage described in its issue.
+
+Implementation decisions: retain the unpublished CMR8 networking level. Race-end
+cooldown freezes during pause, as approved on 2026-09-18. The #26 implementation
+shares simulation completion between gameplay and the client pause menu; the
+local sanitizer build, 11 CTest suites, and 30 startup smoke cases pass.
+Checked entries below have an implementation and local regression coverage;
+their PRs must still pass CI and bot review before merge.
+
+- [x] [#26](https://github.com/jm2/CroMagRally/issues/26) — Advance network race-end cooldown according to synchronized simulation progress; keep completion consistent across client hold/catch-up renders and freeze during pause.
+- [ ] [#27](https://github.com/jm2/CroMagRally/issues/27) — Give terrain LZSS decoding a destination-capacity contract, check before emitting bytes, and reject incomplete input before texture use.
+- [ ] [#28](https://github.com/jm2/CroMagRally/issues/28) — Validate BG3D material/geometry counts, references, required arrays, read completion, and texture byte sizes before allocation, indexing, or upload.
+- [ ] [#29](https://github.com/jm2/CroMagRally/issues/29) — Handle exact and near-coincident AI path origins without returning NaN directions.
+- [ ] [#30](https://github.com/jm2/CroMagRally/issues/30) — Preserve the preceding valid direction at the final AI path point instead of storing a zero vector.
+- [ ] [#31](https://github.com/jm2/CroMagRally/issues/31) — Include all active local listeners in sound attenuation and use each listener's position/orientation for stereo mixing.
+- [ ] [#32](https://github.com/jm2/CroMagRally/issues/32) — Save the active session difficulty in race records instead of the local preference.
+- [ ] [#33](https://github.com/jm2/CroMagRally/issues/33) — Declare the external SDL3 runtime dependency for system-SDL Debian packages and verify both bundled and external-SDL package layouts.
+- [ ] [#34](https://github.com/jm2/CroMagRally/issues/34) — Correct BG3D group-stack popping and verify nested and sibling group handling; this defect is latent with the current asset set.
