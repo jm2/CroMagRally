@@ -45,7 +45,7 @@ bot review before merge. Unchecked entries are open backlog items; checked entri
 
 ## Priority: correctness and availability
 
-- [ ] Migrate legacy tvOS saves from Caches into persistent storage when no `NSUserDefaults` copy exists; test first launch, migration, corrupt data, and a failed persistent write without losing the legacy file.
+- [x] Migrate legacy tvOS saves from Caches into persistent storage when no `NSUserDefaults` copy exists; test first launch, migration, corrupt data, and a failed persistent write without losing the legacy file.
 - [x] Clear the network session after cancelling host setup; the new host smoke caught a stale `gNetGame` use-after-free during shutdown.
 - [x] Restrict `--track` race/practice/host startup paths to `NUM_RACE_TRACKS`.
 - [x] Reject race-mode playfields with zero checkpoints before player/checkpoint initialization.

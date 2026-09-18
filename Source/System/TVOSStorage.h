@@ -6,7 +6,7 @@
 // is purgeable: the OS can reclaim it at any time, silently wiping the player's prefs, scoreboard,
 // and tournament progress. Apps are expected to persist small amounts of state (up to ~1 MB) in
 // NSUserDefaults instead. This bridge stores the same [magic][payload] blobs the desktop file path
-// writes, keyed by their filename, so File.c's save/load chokepoints can redirect to it on tvOS.
+// writes, keyed by their filename, so UserDataFiles.c's save/load chokepoints can redirect to it on tvOS.
 //
 // Implemented in TVOSStorage.m (compiled only for the tvOS target).
 
