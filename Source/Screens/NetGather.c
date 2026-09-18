@@ -197,6 +197,7 @@ Boolean DoNetGatherScreen(void)
 	ReadKeyboard();
 
 	int outcome = 0;
+	int smokeFramesRemaining = gCommandLine.smokeTestFrames;
 
 	while (outcome == 0)
 	{
@@ -219,6 +220,13 @@ Boolean DoNetGatherScreen(void)
 
 		MoveObjects();
 		OGL_DrawScene(DrawObjects);
+
+		if (smokeFramesRemaining > 0 && gNetSequenceState == kNetSequence_HostLobbyOpen
+			&& --smokeFramesRemaining == 0)
+		{
+			SDL_Log("SMOKE: host lobby track %d rendered %d frames", gTrackNum + 1, gCommandLine.smokeTestFrames);
+			outcome = -1;
+		}
 	}
 
 			/* SHOW 'OK!' */
