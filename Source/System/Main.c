@@ -43,8 +43,6 @@ static Boolean PlayGame_Survival(void);
 static Boolean PlayGame_CaptureTheFlag(void);
 void UpdateGameModeSpecifics(void);
 
-static void StepGameSimulation(void);			// CMR7 Stage 3: one sim step (host/SP run once; client runs 0..K_max)
-
 static void TallyTokens(void);
 
 
@@ -957,41 +955,6 @@ static void CheckCheats(void)
 
 /**************** PLAY AREA ************************/
 
-/********************* STEP GAME SIMULATION **********************/
-//
-// One simulation step. CMR7 Stage 3 factors this out of the PlayArea inner loop so the
-// free-running client can run it 0..gClientCatchUpMax times per render frame (host and
-// single-player still run it exactly once). Behaviour is identical to the old inline block.
-//
-
-static void StepGameSimulation(void)
-{
-	// CMR7 Stage 4 (G3): apply frame-aligned events (become-bot) for the frame just sent/consumed —
-	// AFTER the per-frame seed exchange (HostSend / the client handler, both already done) and BEFORE
-	// MoveEverything, so any conditional RNG draw lands at the identical stream position on every peer.
-	ApplyPendingFrameEvents();
-
-	if (IsNetGamePaused())
-	{
-		gSimulationPaused = true;
-		SetupNetPauseScreen();
-		MoveObjects();
-		DoPlayerTerrainUpdate();
-	}
-	else
-	{
-		gSimulationPaused = false;
-		RemoveNetPauseScreen();
-
-		MoveEverything();
-		UpdateGameModeSpecifics();
-		DoPlayerTerrainUpdate();
-
-		gSimulationFrame++;
-	}
-}
-
-
 static void PlayArea(void)
 {
 	Boolean schedulePause = false;
@@ -1083,7 +1046,7 @@ static void PlayArea(void)
 			GetLocalKeyState();								// build a control state bitfield
 			schedulePause = GetNewNeedStateAnyP(kNeed_UIPause);
 
-			StepGameSimulation();
+			StepGameSimulation(true);
 			terrainUpdatedThisFrame = true;
 		}
 		else if (gIsNetworkClient)
@@ -1096,8 +1059,10 @@ static void PlayArea(void)
 				HostConsumeResult r = Client_ConsumeHostPacketFromRing();
 				if (r == kHostConsume_Applied)
 				{
-					StepGameSimulation();					// one sim step per applied host packet
+					Boolean complete = StepGameSimulation(true);	// one sim step per applied host packet
 					terrainUpdatedThisFrame = true;
+					if (complete)
+						break;
 					k++;
 				}
 				else if (r == kHostConsume_Dup)
@@ -1121,7 +1086,7 @@ static void PlayArea(void)
 			Host_ConsumeClientInputs();
 			HostSend_ControlInfoToClients();
 
-			StepGameSimulation();
+			StepGameSimulation(true);
 			terrainUpdatedThisFrame = true;
 		}
 
@@ -1129,6 +1094,9 @@ static void PlayArea(void)
 		//
 		// 3. READ LOCAL INPUT (For NEXT frame) / SEND CLIENT INPUT
 		//
+		if (IsGameSimulationComplete())
+			break;
+
 		if (gNetGameInProgress)
 		{
 			schedulePause = false;
@@ -1236,15 +1204,8 @@ static void PlayArea(void)
 
 				/* SEE IF TRACK IS COMPLETED */
 
-		if (gGameOver)													// if we need immediate abort, then bail now
+		if (IsGameSimulationComplete())
 			break;
-
-		if (gTrackCompleted)
-		{
-			gTrackCompletedCoolDownTimer -= gFramesPerSecondFrac;		// game is done, but wait for cool-down timer before bailing
-			if (gTrackCompletedCoolDownTimer <= 0.0f)
-				break;
-		}
 
 		if (terrainUpdatedThisFrame)
 			gDisableHiccupTimer = false;								// reenable after the first terrain update

@@ -616,6 +616,23 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 		target_link_libraries(CroMagRallyValidationTests PRIVATE m)
 	endif()
 	add_test(NAME validation COMMAND CroMagRallyValidationTests)
+	add_executable(CroMagRallyGameSimulationTests Tests/GameSimulationTests.c Source/System/GameSimulation.c)
+	target_include_directories(CroMagRallyGameSimulationTests PRIVATE ${GAME_GENERATED_INCLUDE_DIR} ${GAME_SRCDIR}/Headers)
+	target_link_libraries(CroMagRallyGameSimulationTests PRIVATE Pomme SDL3::SDL3)
+	if(MSVC)
+		target_compile_definitions(CroMagRallyGameSimulationTests PRIVATE WIN32_LEAN_AND_MEAN NOGDI NOUSER)
+	endif()
+	if(SANITIZE)
+		target_compile_options(CroMagRallyGameSimulationTests PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+		target_link_options(CroMagRallyGameSimulationTests PRIVATE -fsanitize=address,undefined)
+	endif()
+	add_test(NAME game_simulation COMMAND CroMagRallyGameSimulationTests)
+	if(WIN32)
+		add_custom_command(TARGET CroMagRallyGameSimulationTests POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E copy_if_different
+				$<TARGET_RUNTIME_DLLS:CroMagRallyGameSimulationTests> $<TARGET_FILE_DIR:CroMagRallyGameSimulationTests>
+			COMMAND_EXPAND_LISTS)
+	endif()
 	if(UNIX)
 		add_executable(CroMagRallyNetworkLifecycleTests Tests/NetworkLifecycleTests.c
 			Source/Network/NetValidation.c Source/System/TextUtils.c)
