@@ -9,13 +9,8 @@
 /*    EXTERNALS             */
 /****************************/
 
-#include "globals.h"
-#include "misc.h"
-#include "bg3d.h"
-#include "metaobjects.h"
-#include "window.h"
-#include "skeletonobj.h"
-#include "mobjtypes.h"
+#include "game.h"
+#include <limits.h>
 
 
 /****************************/
@@ -38,6 +33,10 @@ static void ReadUVArray(short refNum);
 static void ReadVertexColorArray(short refNum);
 static void ReadTriangleArray(short refNum);
 static void PreLoadTextureMaterials(void);
+static void FinishGeometry(void);
+static void ReadBG3DBytes(short refNum, void* destination, long size);
+static void* AllocBG3DArray(long count, size_t elementSize);
+static MOVertexArrayData* CurrentGeometry(void);
 
 
 /****************************/
@@ -61,6 +60,8 @@ static MOMaterialObject		*gBG3D_CurrentMaterialObj;			// note: this variable con
 static MOVertexArrayObject	*gBG3D_CurrentGeometryObj;
 
 static BG3DFileContainer	*gBG3D_CurrentContainer;
+static long gBG3D_BytesRemaining;
+static Boolean gBG3D_IsSkeleton;
 
 
 BG3DFileContainer		*gBG3DContainerList[MAX_BG3D_GROUPS];
@@ -96,6 +97,10 @@ MetaObjectHeader	*header;
 MOGroupObject		*group;
 MOGroupData			*data;
 
+	if (groupNum < 0 || groupNum >= MAX_BG3D_GROUPS || gBG3DContainerList[groupNum])
+		DoFatalAlert("ImportBG3D: invalid or occupied model group");
+	gBG3D_IsSkeleton = groupNum >= MODEL_GROUP_SKELETONBASE;
+
 			/* INIT SOME VARIABLES */
 
 //	gBG3D_CurrentDrawContext	= setupInfo;
@@ -111,6 +116,8 @@ MOGroupData			*data;
 
 	if (FSpOpenDF(spec, fsRdPerm, &refNum) != noErr)
 		DoFatalAlert("ImportBG3D: FSpOpenDF failed");
+	if (GetEOF(refNum, &gBG3D_BytesRemaining) != noErr || gBG3D_BytesRemaining < 0)
+		DoFatalAlert("ImportBG3D: invalid file size");
 
 	ReadBG3DHeader(refNum);
 	ParseBG3DFile(refNum);
@@ -166,6 +173,50 @@ MOGroupData			*data;
 
 /********************** READ BG3D HEADER **************************/
 
+static void ReadBG3DBytes(short refNum, void* destination, long size)
+{
+	if (size < 0 || size > gBG3D_BytesRemaining)
+		DoFatalAlert("BG3D: incomplete data");
+	long count = size;
+	if (FSRead(refNum, &count, destination) != noErr || count != size)
+		DoFatalAlert("BG3D: short read");
+	gBG3D_BytesRemaining -= size;
+}
+
+static void* AllocBG3DArray(long count, size_t elementSize)
+{
+	if (count <= 0 || elementSize == 0 || (uint64_t) count > INT_MAX / elementSize)
+		DoFatalAlert("BG3D: invalid array size");
+	long bytes = count * elementSize;
+	if (bytes > gBG3D_BytesRemaining)
+		DoFatalAlert("BG3D: incomplete array");
+	return AllocPtr(bytes);
+}
+
+static MOVertexArrayData* CurrentGeometry(void)
+{
+	if (!gBG3D_CurrentGeometryObj)
+		DoFatalAlert("BG3D: array without geometry");
+	return &gBG3D_CurrentGeometryObj->objectData;
+}
+
+static void FinishGeometry(void)
+{
+	if (!gBG3D_CurrentGeometryObj)
+		return;
+	MOVertexArrayData* data = CurrentGeometry();
+	if (!data->points || !data->triangles || (gBG3D_IsSkeleton && !data->normals))
+		DoFatalAlert("BG3D: missing required geometry array");
+	gBG3D_CurrentGeometryObj = nil;
+}
+
+static void ValidateFiniteFloats(const float* values, int count)
+{
+	for (int i = 0; i < count; i++)
+		if (!isfinite(values[i]))
+			DoFatalAlert("BG3D: nonfinite geometry value");
+}
+
 static void ReadBG3DHeader(short refNum)
 {
 BG3DHeaderType	headerData;
@@ -174,8 +225,7 @@ long			count;
 
 	count = sizeof(BG3DHeaderType);
 
-	if (FSRead(refNum, &count, (Ptr) &headerData) != noErr)
-		DoFatalAlert("ReadBG3DHeader: FSRead failed");
+	ReadBG3DBytes(refNum, &headerData, count);
 
 			/* VERIFY FILE */
 
@@ -203,9 +253,10 @@ MetaObjectPtr 	newObj;
 			/* READ A TAG */
 
 		count = sizeof(tag);
-		if (FSRead(refNum, &count, (Ptr) &tag) != noErr)
-			DoFatalAlert("ParseBG3DFile: FSRead failed");
+		ReadBG3DBytes(refNum, &tag, count);
 		tag = UnpackU32BE(&tag);
+		if (tag < BG3D_TAGTYPE_VERTEXARRAY || tag == BG3D_TAGTYPE_ENDFILE)
+			FinishGeometry();
 
 
 			/* HANDLE THE TAG */
@@ -262,6 +313,8 @@ MetaObjectPtr 	newObj;
 					break;
 
 			case	BG3D_TAGTYPE_ENDFILE:
+					if (gBG3D_GroupStackIndex != 0)
+						DoFatalAlert("ParseBG3DFile: unclosed group");
 					done = true;
 					break;
 
@@ -280,14 +333,15 @@ MetaObjectPtr 	newObj;
 static void ReadMaterialFlags(short refNum)
 {
 long				count,i;
-MOMaterialData		data;
+MOMaterialData		data = {0};
 uint32_t			flags;
 
 			/* READ FLAGS */
 
 	count = sizeof(flags);
-	if (FSRead(refNum, &count, (Ptr) &flags) != noErr)
-		DoFatalAlert("ReadMaterialFlags: FSRead failed");
+	if (gBG3D_CurrentContainer->numMaterials >= MAX_BG3D_MATERIALS)
+		DoFatalAlert("ReadMaterialFlags: too many materials");
+	ReadBG3DBytes(refNum, &flags, count);
 	flags = UnpackU32BE(&flags);
 
 
@@ -330,9 +384,11 @@ MOMaterialData	*data;
 			/* READ COLOR VALUE */
 
 	count = sizeof(GLfloat) * 4;
-	if (FSRead(refNum, &count, (Ptr) color) != noErr)
-		DoFatalAlert("ReadMaterialDiffuseColor: FSRead failed");
+	ReadBG3DBytes(refNum, color, count);
 	UnpackStructs(">4f", sizeof(color), 1, color);
+	for (int component = 0; component < 4; component++)
+		if (!isfinite(color[component]))
+			DoFatalAlert("ReadMaterialDiffuseColor: invalid color");
 
 
 		/* ASSIGN COLOR TO CURRENT MATERIAL */
@@ -372,8 +428,10 @@ MOMaterialData	*data;
 			/***********************/
 
 	count = sizeof(BG3DTextureHeader);
-	FSRead(refNum, &count, (Ptr) &textureHeader);		// read header
+	ReadBG3DBytes(refNum, &textureHeader, count);
 	UnpackStructs(">LLiiL4L", sizeof(textureHeader), 1, &textureHeader);
+	if (!BG3D_ValidateTextureHeader(&textureHeader))
+		DoFatalAlert("ReadMaterialTextureMap: invalid texture header");
 
 			/* COPY BASIC INFO */
 
@@ -401,11 +459,11 @@ MOMaterialData	*data;
 
 	count = textureHeader.bufferSize;			// get size of buffer to load
 
-	texturePixels = AllocPtr(count);			// alloc memory for buffer
+	texturePixels = AllocBG3DArray(count, 1);
 	if (texturePixels == nil)
 		DoFatalAlert("ReadMaterialTextureMap: AllocPtr failed");
 
-	FSRead(refNum, &count, (Ptr) texturePixels);		// read pixel data
+	ReadBG3DBytes(refNum, texturePixels, count);
 
 
 		/* ASSIGN PIXELS TO CURRENT MATERIAL */
@@ -471,7 +529,7 @@ static void EndGroup(void)
 	if (gBG3D_GroupStackIndex < 0)									// must be something on group stack
 		DoFatalAlert("EndGroup: stack is empty!");
 
-	gBG3D_CurrentGroup = gBG3D_GroupStack[gBG3D_GroupStackIndex++]; // get previous group off of stack
+	gBG3D_CurrentGroup = gBG3D_GroupStack[gBG3D_GroupStackIndex]; // pop the parent
 }
 
 #pragma mark -
@@ -487,8 +545,10 @@ MetaObjectPtr		newObj;
 			/* READ GEOMETRY HEADER */
 
 	count = sizeof(BG3DGeometryHeader);
-	FSRead(refNum, &count, (Ptr) &geoHeader);		// read header
+	ReadBG3DBytes(refNum, &geoHeader, count);
 	UnpackStructs(">Li4LLLL4L", sizeof(geoHeader), 1, &geoHeader);
+	if (!BG3D_ValidateGeometryHeader(&geoHeader, gBG3D_CurrentContainer->numMaterials))
+		DoFatalAlert("ReadNewGeometry: invalid geometry header");
 
 
 		/******************************/
@@ -518,7 +578,7 @@ MetaObjectPtr		newObj;
 
 static MetaObjectPtr ReadVertexElementsGeometry(BG3DGeometryHeader *header)
 {
-MOVertexArrayData vertexArrayData;
+MOVertexArrayData vertexArrayData = {0};
 int		i;
 
 			/* SETUP DATA */
@@ -563,19 +623,20 @@ int					numPoints;
 MOVertexArrayData	*data;
 OGLPoint3D			*pointList;
 
-	data = &gBG3D_CurrentGeometryObj->objectData;					// point to geometry data
+	data = CurrentGeometry();					// point to geometry data
 	if (data->points)												// see if points already assigned
 		DoFatalAlert("ReadVertexArray: points already assigned!");
 
 	numPoints = data->numPoints;									// get # points to expect to read
 
 	count = sizeof(OGLPoint3D) * numPoints;							// calc size of data to read
-	pointList = AllocPtr(count);									// alloc buffer to hold points
+	pointList = AllocBG3DArray(numPoints, sizeof(OGLPoint3D));									// alloc buffer to hold points
 	if (pointList == nil)
 		DoFatalAlert("ReadVertexArray: AllocPtr failed!");
 
-	FSRead(refNum, &count, (Ptr) pointList);								// read the data
+	ReadBG3DBytes(refNum, pointList, count);								// read the data
 	UnpackStructs(">fff", sizeof(OGLPoint3D), numPoints, pointList);
+	ValidateFiniteFloats((const float*) pointList, 3 * numPoints);
 
 	data->points = pointList;										// assign point array to geometry header
 }
@@ -590,16 +651,20 @@ int					numPoints;
 MOVertexArrayData	*data;
 OGLVector3D			*normalList;
 
-	data = &gBG3D_CurrentGeometryObj->objectData;					// point to geometry data
+	data = CurrentGeometry();					// point to geometry data
 	numPoints = data->numPoints;									// get # normals to expect to read
 
+	if (data->normals)
+		DoFatalAlert("BG3D: duplicate normals array");
+
 	count = sizeof(OGLVector3D) * numPoints;						// calc size of data to read
-	normalList = AllocPtr(count);									// alloc buffer to hold normals
+	normalList = AllocBG3DArray(numPoints, sizeof(OGLVector3D));									// alloc buffer to hold normals
 	if (normalList == nil)
 		DoFatalAlert("ReadNormalArray: AllocPtr failed!");
 
-	FSRead(refNum, &count, (Ptr) normalList);								// read the data
+	ReadBG3DBytes(refNum, normalList, count);								// read the data
 	UnpackStructs(">fff", sizeof(OGLVector3D), numPoints, normalList);
+	ValidateFiniteFloats((const float*) normalList, 3 * numPoints);
 
 	data->normals = normalList;										// assign normal array to geometry header
 }
@@ -614,16 +679,20 @@ int					numPoints;
 MOVertexArrayData	*data;
 OGLTextureCoord		*uvList;
 
-	data = &gBG3D_CurrentGeometryObj->objectData;					// point to geometry data
+	data = CurrentGeometry();					// point to geometry data
 	numPoints = data->numPoints;									// get # uv's to expect to read
 
+	if (data->uvs)
+		DoFatalAlert("BG3D: duplicate uvs array");
+
 	count = sizeof(OGLTextureCoord) * numPoints;					// calc size of data to read
-	uvList = AllocPtr(count);										// alloc buffer to hold uv's
+	uvList = AllocBG3DArray(numPoints, sizeof(OGLTextureCoord));										// alloc buffer to hold uv's
 	if (uvList == nil)
 		DoFatalAlert("ReadUVArray: AllocPtr failed!");
 
-	FSRead(refNum, &count, (Ptr) uvList);									// read the data
+	ReadBG3DBytes(refNum, uvList, count);									// read the data
 	UnpackStructs(">ff", sizeof(OGLTextureCoord), numPoints, uvList);
+	ValidateFiniteFloats((const float*) uvList, 2 * numPoints);
 
 	data->uvs = uvList;												// assign uv array to geometry header
 }
@@ -639,15 +708,18 @@ MOVertexArrayData	*data;
 OGLColorRGBA_Byte	*colorList;
 OGLColorRGBA		*colorsF;
 
-	data = &gBG3D_CurrentGeometryObj->objectData;					// point to geometry data
+	data = CurrentGeometry();					// point to geometry data
 	numPoints = data->numPoints;									// get # colors to expect to read
 
+	if (data->colorsByte)
+		DoFatalAlert("BG3D: duplicate colorsByte array");
+
 	count = sizeof(OGLColorRGBA_Byte) * numPoints;					// calc size of data to read
-	colorList = AllocPtr(count);									// alloc buffer to hold data
+	colorList = AllocBG3DArray(numPoints, sizeof(OGLColorRGBA_Byte));									// alloc buffer to hold data
 	if (colorList == nil)
 		DoFatalAlert("ReadVertexColorArray: AllocPtr failed!");
 
-	FSRead(refNum, &count, (Ptr) colorList);								// read the data
+	ReadBG3DBytes(refNum, colorList, count);								// read the data
 	// No need to byteswap this
 
 	data->colorsByte = colorList;									// assign color array to geometry header
@@ -684,16 +756,23 @@ int					numTriangles;
 MOVertexArrayData	*data;
 MOTriangleIndecies	*triList;
 
-	data = &gBG3D_CurrentGeometryObj->objectData;					// point to geometry data
+	data = CurrentGeometry();					// point to geometry data
 	numTriangles = data->numTriangles;								// get # triangles expect to read
 
+	if (data->triangles)
+		DoFatalAlert("BG3D: duplicate triangles array");
+
 	count = sizeof(MOTriangleIndecies) * numTriangles;				// calc size of data to read
-	triList = AllocPtr(count);										// alloc buffer to hold data
+	triList = AllocBG3DArray(numTriangles, sizeof(MOTriangleIndecies));										// alloc buffer to hold data
 	if (triList == nil)
 		DoFatalAlert("ReadTriangleArray: AllocPtr failed!");
 
-	FSRead(refNum, &count, (Ptr) triList);								// read the data
+	ReadBG3DBytes(refNum, triList, count);								// read the data
 	UnpackStructs(">LLL", sizeof(MOTriangleIndecies), numTriangles, triList);
+	for (int triangle = 0; triangle < numTriangles; triangle++)
+		for (int corner = 0; corner < 3; corner++)
+			if (triList[triangle].vertexIndices[corner] >= (GLuint) data->numPoints)
+				DoFatalAlert("BG3D: invalid triangle vertex index");
 
 	data->triangles = triList;										// assign triangle array to geometry header
 }
@@ -757,6 +836,8 @@ void				*pixels;
 	{
 		mat = gBG3D_CurrentContainer->materials[i];
 		matData = &mat->objectData;
+		if ((matData->flags & BG3D_MATERIALFLAG_TEXTURED) && matData->numMipmaps == 0)
+			DoFatalAlert("BG3D: textured material has no pixels");
 
 		if (matData->numMipmaps > 0)							// see if has textures
 		{
@@ -770,6 +851,7 @@ void				*pixels;
 
 				/* LOAD INTO OPENGL */
 
+			glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 			matData->textureName[0] = OGL_TextureMap_Load(
 				pixels,
 				w,
@@ -871,9 +953,6 @@ int					n,i;
 		mat->objectData.flags |= flags;					// set flags
 	}
 }
-
-
-
 
 
 

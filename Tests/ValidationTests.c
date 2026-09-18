@@ -1,6 +1,7 @@
 #include "game.h"
 #include "net_validation.h"
 #include "inputstate.h"
+#include "lzss.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,6 +16,65 @@
 SuperTileStatus **gSuperTileStatusGrid;
 long gNumSuperTilesDeep;
 long gNumSuperTilesWide;
+
+static void TestLZSSCapacity(void)
+{
+	// Ordinary literal and dictionary-encoded strings, with exact and larger
+	// output buffers. Rejected operations must preserve the surrounding bytes.
+	const unsigned char literals[] = {7, 'a', 'b', 'c'};
+	const unsigned char repeat[] = {7, 'a', 'b', 'c', 0xee, 0xf3};
+	unsigned char buffer[16];
+	memset(buffer, 0xa5, sizeof(buffer));
+	assert(LZSS_DecodeBuffer(literals, sizeof(literals), buffer + 1, 3) == 3);
+	assert(memcmp(buffer + 1, "abc", 3) == 0 && buffer[0] == 0xa5 && buffer[4] == 0xa5);
+	assert(LZSS_DecodeBuffer(repeat, sizeof(repeat), buffer + 1, 9) == 9);
+	assert(memcmp(buffer + 1, "abcabcabc", 9) == 0 && buffer[10] == 0xa5);
+	for (size_t capacity = 0; capacity < 9; capacity++)
+	{
+		memset(buffer, 0xa5, sizeof(buffer));
+		assert(LZSS_DecodeBuffer(repeat, sizeof(repeat), buffer + 1, capacity) == -1);
+		assert(buffer[0] == 0xa5 && buffer[capacity + 1] == 0xa5);
+	}
+	assert(LZSS_DecodeBuffer(repeat, sizeof(repeat) - 1, buffer, sizeof(buffer)) == -1);
+	assert(LZSS_DecodeBuffer(literals, 1, buffer, sizeof(buffer)) == -1);
+	assert(LZSS_DecodeBuffer(NULL, 0, NULL, 0) == 0);
+	assert(LZSS_DecodeBuffer(NULL, 1, buffer, sizeof(buffer)) == -1);
+}
+
+static void TestBG3DMetadata(void)
+{
+	BG3DGeometryHeader geometry = {.numMaterials = 1, .numPoints = 3, .numTriangles = 1};
+	assert(BG3D_ValidateGeometryHeader(&geometry, 1));
+	geometry.numMaterials = MAX_MATERIAL_LAYERS + 1;
+	assert(!BG3D_ValidateGeometryHeader(&geometry, 1));
+	geometry.numMaterials = -1;
+	assert(!BG3D_ValidateGeometryHeader(&geometry, 1));
+	geometry.numMaterials = 1;
+	geometry.layerMaterialNum[0] = 1;
+	assert(!BG3D_ValidateGeometryHeader(&geometry, 1));
+	geometry.layerMaterialNum[0] = 0;
+	geometry.numPoints = UINT32_MAX;
+	assert(!BG3D_ValidateGeometryHeader(&geometry, 1));
+	geometry.numPoints = 3;
+	geometry.numTriangles = UINT32_MAX;
+	assert(!BG3D_ValidateGeometryHeader(&geometry, 1));
+
+	BG3DTextureHeader texture = {.width = 3, .height = 2, .srcPixelFormat = GL_RGB,
+		.dstPixelFormat = GL_RGB5_A1, .bufferSize = 18};
+	assert(BG3D_ValidateTextureHeader(&texture));
+	texture.bufferSize--;
+	assert(!BG3D_ValidateTextureHeader(&texture));
+	texture.bufferSize = 24;
+	texture.srcPixelFormat = GL_RGBA;
+	assert(BG3D_ValidateTextureHeader(&texture));
+	texture.width = UINT32_MAX;
+	assert(!BG3D_ValidateTextureHeader(&texture));
+	texture.width = 0;
+	assert(!BG3D_ValidateTextureHeader(&texture));
+	texture.width = 3;
+	texture.srcPixelFormat = -1;
+	assert(!BG3D_ValidateTextureHeader(&texture));
+}
 
 static void TestInputStates(void)
 {
@@ -654,6 +714,8 @@ static void TestBoneNormalCoverage(void)
 
 int main(void)
 {
+	TestLZSSCapacity();
+	TestBG3DMetadata();
 	TestBoneNormalCoverage();
 	TestInputStates();
 	TestTerrainRenderResidency();

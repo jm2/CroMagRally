@@ -109,3 +109,6 @@ void ImportBG3D(FSSpec *spec, int groupNum);
 void DisposeBG3DContainer(int groupNum);
 void DisposeAllBG3DContainers(void);
 void BG3D_SetContainerMaterialFlags(short group, short type, uint32_t flags);
+
+Boolean BG3D_ValidateGeometryHeader(const BG3DGeometryHeader* header, int materialCount);
+Boolean BG3D_ValidateTextureHeader(const BG3DTextureHeader* header);
