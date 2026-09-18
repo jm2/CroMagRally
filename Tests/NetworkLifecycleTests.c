@@ -5,7 +5,12 @@
 #include <stdarg.h>
 #include <stdlib.h>
 static uint32_t testNow = 100;
-static Uint64 TestTicks(void) { return testNow; }
+static bool testClockRuns;
+static Uint64 testClockStartedAt;
+static Uint64 TestTicks(void)
+{
+    return testNow + (testClockRuns ? SDL_GetTicks() - testClockStartedAt : 0);
+}
 #define SDL_GetTicks TestTicks
 #include "../Source/Network/NetLow.c"
 #undef SDL_GetTicks
@@ -242,7 +247,13 @@ static void Discovery(void)
     search->gamesFound[0].hostAddr.sin_addr.s_addr = htonl(0x7f000002); // no listener on this address
     search->gamesFound[1] = (LobbyInfo){.hostAddr = live, .lastAdvertised = testNow};
     search->numGamesFound = 2;
+    // Some hosts time out this unbound loopback address instead of refusing it.
+    // Let the real connection deadline advance while retaining the injected epoch.
+    testClockStartedAt = SDL_GetTicks();
+    testClockRuns = true;
     CHECK(!NSpSearch_JoinGame(search, 0));
+    testNow = (uint32_t)TestTicks();
+    testClockRuns = false;
     CHECK(NSpSearch_GetNumGamesFound(search) == 1);
     NSpGame* client = NSpSearch_JoinGame(search, 0);
     CHECK(client);
@@ -257,6 +268,7 @@ static void Discovery(void)
 
 int main(void)
 {
+    setvbuf(stdout, NULL, _IONBF, 0); // retain transport diagnostics if CTest times out
     gNetPort = 0;
     Session();
     Session(); // immediately rehost on the same port in the same process
