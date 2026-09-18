@@ -18,6 +18,8 @@ typedef int sockfd_t;
 
 #define MAX_CLIENTS MAX_LOCAL_PLAYERS
 #define kNSpPlayerNameLength 32
+#define NSP_HANDSHAKE_TIMEOUT_MS 10000u
+#define NSP_LOBBY_EXPIRY_MS 5000u
 #define kNSpMaxPayloadLength 512			// CMR7: bumped 256->512 to fit the wider host control msg (must change with the 4CC)
 #define kNSpMaxMessageLength (kNSpMaxPayloadLength + sizeof(NSpMessageHeader))
 
