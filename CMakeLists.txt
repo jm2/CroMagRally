@@ -689,6 +689,21 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 		add_test(NAME network_lifecycle COMMAND CroMagRallyNetworkLifecycleTests)
 		set_tests_properties(network_lifecycle PROPERTIES TIMEOUT 30)
 		if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+			cmr_add_gameplay_test(CroMagRallyRaceRecordTests race_records
+				Tests/RaceRecordTests.c Source/Screens/RaceTimes.c)
+			# Link the production persistence functions without the scoreboard UI.
+			target_compile_options(CroMagRallyRaceRecordTests PRIVATE -ffunction-sections -fdata-sections)
+			target_link_options(CroMagRallyRaceRecordTests PRIVATE -Wl,--gc-sections)
+			if(SANITIZE)
+				# ASan global registration otherwise retains the unused UI
+				# menu callbacks. Stack/heap and undefined-behavior checks stay on;
+				# the full game target still instruments all globals.
+				if(CMAKE_C_COMPILER_ID MATCHES "Clang")
+					target_compile_options(CroMagRallyRaceRecordTests PRIVATE -mllvm -asan-globals=0)
+				elseif(CMAKE_C_COMPILER_ID STREQUAL "GNU")
+					target_compile_options(CroMagRallyRaceRecordTests PRIVATE --param=asan-globals=0)
+				endif()
+			endif()
 			add_executable(CroMagRallyNetworkReadinessTests Tests/NetworkReadinessTests.c
 				Source/Network/NetValidation.c Source/System/TextUtils.c
 				Source/Player/Player.c Source/System/Main.c Source/System/DeterministicMath.c)
