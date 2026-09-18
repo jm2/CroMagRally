@@ -166,39 +166,10 @@ static void UpdatePausedMenuCallback(void)
 
 	if (gNetGameInProgress && gIsNetworkClient)
 	{
-		Boolean terrainUpdatedThisFrame = false;
-
 		Net_Pump();										// drain host packets into the ring + flush send rings (non-blocking)
 		NetCheck_ConnectionTimeouts();					// CMR7 Stage 4: host-link badge/drop policy (errors out the menu below if the host is gone)
 
-		int guard = 0;
-		for (int k = 0; k < gClientCatchUpMax; )		// bounded catch-up (K_max), mirroring the main loop
-		{
-			HostConsumeResult r = Client_ConsumeHostPacketFromRing();
-			if (r == kHostConsume_Applied)
-			{
-				// The packet's pause state is authoritative. Use the same completion
-				// clock as gameplay, without a net-pause banner over this menu.
-				Boolean complete = StepGameSimulation(false);
-				terrainUpdatedThisFrame = true;
-				if (complete)
-					break;
-				k++;
-			}
-			else if (r == kHostConsume_Dup)
-			{
-				if (++guard > 2*gClientCatchUpMax)		// defense vs a pathological dup storm
-					break;
-			}
-			else
-			{
-				break;									// ring empty -> hold (no sim step this menu frame)
-			}
-
-			// Consuming can tear the net game down (host left -> EndNetworkGame clears gIsNetworkClient).
-			if (!gIsNetworkClient || !gNetGameInProgress)
-				break;
-		}
+		AdvanceClientSimulation(false);
 
 		// Re-assert our pause intent (the menu is open) and keep the wall-clock uplink alive even
 		// across a downlink stall. Seeding schedulePause=true forces pauseState=1 each emitted packet
@@ -209,11 +180,6 @@ static void UpdatePausedMenuCallback(void)
 			SampleAndSendLocalInput(&schedulePause);
 			Net_Pump();								// flush the just-enqueued input packets
 		}
-
-		// StartMenu draws the terrain after this callback. On an empty host ring,
-		// retain the previous active set without running terrain-item streaming.
-		if (!terrainUpdatedThisFrame)
-			KeepTerrainAliveForRender();
 
 		// CMR7 Stage 4: a dead net game (host gone / everybody left) must break the menu so PlayArea
 		// can tear it down, instead of spinning the pause loop forever.

@@ -1053,29 +1053,8 @@ static void PlayArea(void)
 		{
 			Net_Pump();										// flush send rings + drain host packets into the ring
 
-			int guard = 0;
-			for (int k = 0; k < gClientCatchUpMax; )		// bounded catch-up (K_max)
-			{
-				HostConsumeResult r = Client_ConsumeHostPacketFromRing();
-				if (r == kHostConsume_Applied)
-				{
-					Boolean complete = StepGameSimulation(true);	// one sim step per applied host packet
-					terrainUpdatedThisFrame = true;
-					if (complete)
-						break;
-					k++;
-				}
-				else if (r == kHostConsume_Dup)
-				{
-					if (++guard > 2*gClientCatchUpMax)		// defense vs a pathological dup storm
-						break;
-					// duplicate: no sim step, do not burn a k-slot
-				}
-				else
-				{
-					break;									// kHostConsume_Empty -> hold simulation; retain terrain before rendering
-				}
-			}
+			terrainUpdatedThisFrame = AdvanceClientSimulation(true);
+
 		}
 		else
 		{

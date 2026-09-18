@@ -47,3 +47,39 @@ Boolean StepGameSimulation(Boolean showPauseScreen)
 	}
 	return IsGameSimulationComplete();
 }
+
+// Both client render paths consume through this boundary. In particular, the
+// completion packet is the last packet consumed, even if more are queued.
+Boolean AdvanceClientSimulation(Boolean showPauseScreen)
+{
+	Boolean terrainUpdated = false;
+	int duplicates = 0;
+	for (int steps = 0; steps < gClientCatchUpMax
+		&& gIsNetworkClient && gNetGameInProgress && !IsGameSimulationComplete();)
+	{
+		HostConsumeResult result = Client_ConsumeHostPacketFromRing();
+		if (result == kHostConsume_Applied)
+		{
+			Boolean complete = StepGameSimulation(showPauseScreen);
+			terrainUpdated = true;
+			if (complete)
+			{
+				// A departure may finish the game before the terrain update.
+				// The pause menu still renders while fading out.
+				KeepTerrainAliveForRender();
+				break;
+			}
+			steps++;
+		}
+		else if (result == kHostConsume_Dup)
+		{
+			if (++duplicates > 2 * gClientCatchUpMax)
+				break;
+		}
+		else
+			break;
+	}
+	if (!terrainUpdated)
+		KeepTerrainAliveForRender();
+	return terrainUpdated;
+}
