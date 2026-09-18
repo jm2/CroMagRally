@@ -591,6 +591,8 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 		Source/Network/NetValidation.c
 		Source/Skeleton/SkeletonValidation.c
 		Source/System/InputState.c
+		Source/System/LZSSDecode.c
+		Source/3D/BG3DValidation.c
 		Source/System/DeterministicMath.c
 		Source/System/UserDataValidation.c
 		Source/System/TextUtils.c
@@ -627,7 +629,24 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 		target_link_options(CroMagRallyGameSimulationTests PRIVATE -fsanitize=address,undefined)
 	endif()
 	add_test(NAME game_simulation COMMAND CroMagRallyGameSimulationTests)
+	add_executable(CroMagRallyAssetLoaderTests Tests/AssetLoaderTests.c
+		Source/3D/BG3DValidation.c Source/System/LZSSDecode.c)
+	target_include_directories(CroMagRallyAssetLoaderTests PRIVATE ${GAME_GENERATED_INCLUDE_DIR} ${GAME_SRCDIR}/Headers)
+	target_link_libraries(CroMagRallyAssetLoaderTests PRIVATE Pomme SDL3::SDL3)
+	if(MSVC)
+		target_compile_definitions(CroMagRallyAssetLoaderTests PRIVATE WIN32_LEAN_AND_MEAN NOGDI NOUSER)
+	endif()
+	if(SANITIZE)
+		target_compile_options(CroMagRallyAssetLoaderTests PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+		target_link_options(CroMagRallyAssetLoaderTests PRIVATE -fsanitize=address,undefined)
+	endif()
+	file(GLOB_RECURSE _cmr_model_fixtures CONFIGURE_DEPENDS "${GAME_DATADIR}/*.bg3d")
+	add_test(NAME asset_loaders COMMAND CroMagRallyAssetLoaderTests ${_cmr_model_fixtures})
 	if(WIN32)
+		add_custom_command(TARGET CroMagRallyAssetLoaderTests POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E copy_if_different
+				$<TARGET_RUNTIME_DLLS:CroMagRallyAssetLoaderTests> $<TARGET_FILE_DIR:CroMagRallyAssetLoaderTests>
+			COMMAND_EXPAND_LISTS)
 		add_custom_command(TARGET CroMagRallyGameSimulationTests POST_BUILD
 			COMMAND ${CMAKE_COMMAND} -E copy_if_different
 				$<TARGET_RUNTIME_DLLS:CroMagRallyGameSimulationTests> $<TARGET_FILE_DIR:CroMagRallyGameSimulationTests>

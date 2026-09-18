@@ -1489,7 +1489,7 @@ static void LoadTerrainSuperTileTextures(short fRefNum)
 		GAME_ASSERT_MESSAGE(compressedSize <= (UInt32)size*2, "compressed data won't fit into buffer!");
 
 		// read compressed data from file and decompress it into texture buffer
-		long decompressedSize = LZSS_Decode(fRefNum, pixels, compressedSize);
+		long decompressedSize = LZSS_Decode(fRefNum, pixels, compressedSize, size);
 		GAME_ASSERT(decompressedSize == size);
 
 //		FlipImageVertically(pixels, SUPERTILE_TEXMAP_SIZE * sizeof(UInt16), SUPERTILE_TEXMAP_SIZE);
@@ -1578,7 +1578,7 @@ static void LoadTerrainSuperTileTextures(short fRefNum)
 		GAME_ASSERT_MESSAGE(compressedSize <= (UInt32)tileBytes*2, "compressed data won't fit into buffer!");
 
 		// read compressed data from file and decompress it into texture buffer
-		long decompressedSize = LZSS_Decode(fRefNum, image, compressedSize);
+		long decompressedSize = LZSS_Decode(fRefNum, image, compressedSize, tileBytes);
 		GAME_ASSERT(decompressedSize == tileBytes);
 
 //		FlipImageVertically(image, tileRowBytes, tileSize);
