@@ -112,21 +112,29 @@ defects; non-defect proposals remain outside this task list pending approval.
 Pair each correction with the focused regression coverage described in its issue.
 
 Implementation decisions: retain the unpublished CMR8 networking level. Race-end
-cooldown freezes during pause, as approved on 2026-09-18. The #26 implementation
-shares simulation completion between gameplay and the client pause menu; the
-local sanitizer build, 11 CTest suites, and 30 startup smoke cases pass.
-Use separate subsystem PRs, as approved on 2026-09-18. Network completion is
-tracked in [PR #35](https://github.com/jm2/CroMagRally/pull/35). The loader fixes
-pass all 12 sanitizer CTest suites, all 39 shipped BG3D models, nested/sibling
-group tests, bounded decoder tests, and 30 production startup smoke cases.
-The AI path regression suite passes under ASan/UBSan, covering exact and nearby
-origins, duplicate/terminal points, cancellation, and empty paths.
-The spatial audio suite passes under ASan/UBSan for one through four listeners,
-opposite camera headings, distant listeners, and single-player attenuation.
-The production race-record save test passes with mismatched network/local
-difficulty and matching offline difficulty, retaining existing record metadata.
-Checked entries below have an implementation and local regression coverage;
-their PRs must still pass CI and bot review before merge.
+cooldown freezes during pause, and fixes use separate subsystem PRs, as approved
+on 2026-09-18. The user reaffirmed that passing CI remains a merge requirement.
+
+Local validation passes: all 15 CTest suites with Clang ASan/UBSan and Debian/GCC;
+the race-record test also passes with GCC sanitizers. Loader coverage includes
+all 39 shipped BG3D models, nested/sibling groups, bounded decoding, and 30
+production startup smoke cases. Both real DEB variants pass dependency/layout
+checks and installed-launcher smoke tests; the bundled variant loads its private
+SDL and the external variant declares the linked SDL runtime package/version.
+
+Merge in subsystem order: [network #35](https://github.com/jm2/CroMagRally/pull/35),
+[loaders #36](https://github.com/jm2/CroMagRally/pull/36),
+[AI paths #37](https://github.com/jm2/CroMagRally/pull/37),
+[audio #38](https://github.com/jm2/CroMagRally/pull/38),
+[race records #39](https://github.com/jm2/CroMagRally/pull/39), and
+[Debian packaging #40](https://github.com/jm2/CroMagRally/pull/40). Each PR is based on the preceding subsystem branch so review diffs
+remain focused; retarget successors to master as their predecessors merge.
+
+PRs #35–#37 have merged with passing CI and clean final-head bot reviews.
+PRs #38–#40 remain open: their initial CI exposed the test portability defect
+tracked in #41. Its repair is now included in all three branches, with CI and
+final-head bot reviews rerunning. Checked entries below mean implemented and
+locally tested; remaining merges still require passing CI and a clean review.
 
 - [x] [#26](https://github.com/jm2/CroMagRally/issues/26) — Advance network race-end cooldown according to synchronized simulation progress; keep completion consistent across client hold/catch-up renders and freeze during pause.
 - [x] [#27](https://github.com/jm2/CroMagRally/issues/27) — Give terrain LZSS decoding a destination-capacity contract, check before emitting bytes, and reject incomplete input before texture use.
@@ -135,7 +143,7 @@ their PRs must still pass CI and bot review before merge.
 - [x] [#30](https://github.com/jm2/CroMagRally/issues/30) — Preserve the preceding valid direction at the final AI path point instead of storing a zero vector.
 - [x] [#31](https://github.com/jm2/CroMagRally/issues/31) — Include all active local listeners in sound attenuation and use each listener's position/orientation for stereo mixing.
 - [x] [#32](https://github.com/jm2/CroMagRally/issues/32) — Save the active session difficulty in race records instead of the local preference.
-- [ ] [#33](https://github.com/jm2/CroMagRally/issues/33) — Declare the external SDL3 runtime dependency for system-SDL Debian packages and verify both bundled and external-SDL package layouts.
+- [x] [#33](https://github.com/jm2/CroMagRally/issues/33) — Declare the external SDL3 runtime dependency for system-SDL Debian packages and verify both bundled and external-SDL package layouts.
 - [x] [#34](https://github.com/jm2/CroMagRally/issues/34) — Correct BG3D group-stack popping and verify nested and sibling group handling; this defect is latent with the current asset set.
 
 - [x] [#41](https://github.com/jm2/CroMagRally/issues/41) — Repair spatial-audio test portability: avoid the Windows `near` macro and allow one volume unit of NEON normalization/quantization tolerance for centered channels; retain strict listener-selection and directional checks. Full CI and a fresh bot review remain required before merge.
