@@ -105,9 +105,9 @@ int             j,p;
 	 		/* CREATE VECTORS FROM POINTS AND ASSIGN TO SUPERTILE GRID */
 			/***********************************************************/
 
+		OGLVector2D v = {0, 0};
         for (p = 0; p < n; p++)
         {
-			OGLVector2D		v = {0, 0};
 			float			x,z;
 
         	x 	= pointList[p].x;									// get point coord
@@ -115,9 +115,11 @@ int             j,p;
 
         	if (p < (n-1))											// for last point, keep previous vector (since theres no next point to create a new vector)
         	{
-        		v.x	= pointList[p+1].x - x;							// calc vector
-        		v.y	= pointList[p+1].z - z;
-		        FastNormalizeVector2D(v.x, v.y, &v, true);			// normalize the vector
+				OGLVector2D next;
+				FastNormalizeVector2D(pointList[p+1].x - x, pointList[p+1].z - z, &next, true);
+				// Coincident points must not erase the last usable direction.
+				if (next.x != 0 || next.y != 0)
+					v = next;
 		 	}
 
 			col = x / TERRAIN_SUPERTILE_UNIT_SIZE;					// convert to supertile row,col
@@ -217,43 +219,22 @@ Boolean			gotVector = false;
 Byte			flags;
 Byte			*flagData;
 
+	outVec->x = outVec->y = 0;
+	if (!isfinite(x) || !isfinite(y) || !isfinite(z) || !gSuperTilePathGrid
+		|| gNumSuperTilesWide <= 0 || gNumSuperTilesDeep <= 0)
+		return false;
+
 	minX = x - PATH_SCAN_RANGE;
 	maxX = x + PATH_SCAN_RANGE;
 	minZ = z - PATH_SCAN_RANGE;
 	maxZ = z + PATH_SCAN_RANGE;
 
-	startCol 	= minX * TERRAIN_SUPERTILE_UNIT_SIZE_Frac;
-	endCol 		= maxX * TERRAIN_SUPERTILE_UNIT_SIZE_Frac;
-	startRow 	= minZ * TERRAIN_SUPERTILE_UNIT_SIZE_Frac;
-	endRow 		= maxZ * TERRAIN_SUPERTILE_UNIT_SIZE_Frac;
+	// Clamp in floating point before converting coordinates to grid indices.
+	startCol = GAME_CLAMP(minX * TERRAIN_SUPERTILE_UNIT_SIZE_Frac, 0, gNumSuperTilesWide-1);
+	endCol = GAME_CLAMP(maxX * TERRAIN_SUPERTILE_UNIT_SIZE_Frac, 0, gNumSuperTilesWide-1);
+	startRow = GAME_CLAMP(minZ * TERRAIN_SUPERTILE_UNIT_SIZE_Frac, 0, gNumSuperTilesDeep-1);
+	endRow = GAME_CLAMP(maxZ * TERRAIN_SUPERTILE_UNIT_SIZE_Frac, 0, gNumSuperTilesDeep-1);
 
-	if (startCol < 0)										// check bounds
-		startCol = 0;
-	else
-	if (startCol >= gNumSuperTilesWide)
-		startCol = gNumSuperTilesWide-1;
-
-	if (endCol < 0)
-		endCol = 0;
-	else
-	if (endCol >= gNumSuperTilesWide)
-		endCol = gNumSuperTilesWide-1;
-
-	if (startRow < 0)
-		startRow = 0;
-	else
-	if (startRow >= gNumSuperTilesDeep)
-		startRow = gNumSuperTilesDeep-1;
-
-	if (endRow < 0)
-		endRow = 0;
-	else
-	if (endRow >= gNumSuperTilesDeep)
-		endRow = gNumSuperTilesDeep-1;
-
-
-
-	outVec->x = outVec->y = 0;													// initialize the vector
 
 	for (row = startRow; row <= endRow; row++)
 	{
@@ -283,7 +264,9 @@ Byte			*flagData;
 						}
 
 						dist = CalcDistance(vecData[i].ox, vecData[i].oz, x, z);	// calc dist to this vec
-					    dist = 1.0f / dist; 										// calc inverse dist to vector origin
+						// Cap inverse-distance weight at coincident/nearby origins.
+						// This also permits duplicate origins to blend normally.
+						dist = 1.0f / GAME_MAX(dist, 0.01f);
 
 						outVec->x += vecData[i].vx * dist;							// add in this vector
 						outVec->y += vecData[i].vz * dist;
@@ -300,11 +283,16 @@ Byte			*flagData;
 	if (gotVector)
 	{
 		FastNormalizeVector2D(outVec->x, outVec->y, outVec, true);
+		if (!isfinite(outVec->x) || !isfinite(outVec->y)
+			|| (outVec->x == 0 && outVec->y == 0))
+		{
+			outVec->x = outVec->y = 0;
+			return false;
+		}
 	}
 
 	return(gotVector);
 }
-
 
 
 
