@@ -103,6 +103,8 @@ static void Readiness(uint32_t timeout, int waiting, int ready)
 {
     NSpGame *first, *second;
     NSpGame* host = BeginSession(&first, &second);
+    if (waiting == kNetSequence_HostWaitForPlayersToPrepareLevel)
+        InitPlayersAtStartOfLevel();
     ClearPlayerSyncMask();
     MarkPlayerSynced(0);
     MarkPlayerSynced(2);
@@ -117,6 +119,7 @@ static void Readiness(uint32_t timeout, int waiting, int ready)
     CHECK(NSpGame_GetActivePlayersIDMask(host) == 5);
     CHECK(gPlayerSyncMask == 5 && AreAllPlayersSynced());
     CHECK(gPlayerInfo[2].isComputer && !gPlayerInfo[1].isComputer && !gNetBadge[2]);
+    CHECK(!gPlayerInfo[2].isEliminated); // the replacement must retain car controls
     CHECK(gNumGatheredPlayers == 2);
     CHECK(gNumPlayersEliminated == 0); // race bots do not affect battle bookkeeping
     CHECK(ExpectLeave(second) == 1);
