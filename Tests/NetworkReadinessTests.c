@@ -253,6 +253,26 @@ static void SurvivalWithoutSurvivors(void)
     EndSession(host, first, second);
 }
 
+static void TagWinnerDeparture(void)
+{
+    NSpGame *first, *second;
+    NSpGame* host = BeginSession(&first, &second);
+    gGameMode = GAME_MODE_TAG1;
+    for (int i = 0; i < gNumTotalPlayers; i++) gPlayerInfo[i].tagTimer = 60;
+    ChooseTaggedPlayerWithIndex(0);
+    gPlayerInfo[0].tagTimer = 0;
+    UpdateGameModeSpecifics();
+    ChooseTaggedPlayerWithIndex(2);
+    ApplyBecomeBot(1);
+    UpdateGameModeSpecifics();
+    CHECK(gTrackCompleted && winLoseWinner[2] == 2 && gPlayerInfo[2].isIt);
+    int choicesBefore = taggedChoices;
+    ApplyBecomeBot(2); // the winner disconnects during the result cooldown
+    CHECK(gNumPlayersEliminated == 3 && !gPlayerInfo[2].isIt);
+    CHECK(taggedChoices == choicesBefore); // nobody remains to select
+    EndSession(host, first, second);
+}
+
 static void PausedLeaveAndReset(void)
 {
     NSpGame *first, *second;
@@ -299,6 +319,7 @@ int main(void)
     BattleDepartureWinner(GAME_MODE_SURVIVAL);
     BattleDepartureWinner(GAME_MODE_TAG1);
     SurvivalWithoutSurvivors();
+    TagWinnerDeparture();
     PausedLeaveAndReset();
     puts("Readiness and paused-leave tests passed");
     return 0;

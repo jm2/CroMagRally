@@ -490,7 +490,13 @@ static void ApplyBecomeBot(int i)
 		case	GAME_MODE_TAG1:
 		case	GAME_MODE_TAG2:
 				if (gPlayerInfo[i].isIt)
-					ChooseTaggedPlayer();						// synced RNG draw — stream-aligned by the frame-aligned apply
+				{
+					gPlayerInfo[i].isIt = false;
+					// Elimination Tag ends once only one player remains. A departing
+					// winner during cooldown must not try to select from zero survivors.
+					if (gGameMode != GAME_MODE_TAG1 || gNumPlayersEliminated < gNumTotalPlayers - 1)
+						ChooseTaggedPlayer();					// synced RNG draw — stream-aligned by the frame-aligned apply
+				}
 				break;
 	}
 }
