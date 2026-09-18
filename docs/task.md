@@ -125,8 +125,9 @@ SDL and the external variant declares the linked SDL runtime package/version.
 Merge in subsystem order: [network #35](https://github.com/jm2/CroMagRally/pull/35),
 [loaders #36](https://github.com/jm2/CroMagRally/pull/36),
 [AI paths #37](https://github.com/jm2/CroMagRally/pull/37),
-[audio #38](https://github.com/jm2/CroMagRally/pull/38), then race records and Debian
-packaging. Each PR is based on the preceding subsystem branch so review diffs
+[audio #38](https://github.com/jm2/CroMagRally/pull/38),
+[race records #39](https://github.com/jm2/CroMagRally/pull/39), and
+[Debian packaging #40](https://github.com/jm2/CroMagRally/pull/40). Each PR is based on the preceding subsystem branch so review diffs
 remain focused; retarget successors to master as their predecessors merge.
 
 Checked entries below mean implemented and locally tested, not merged. GitHub
