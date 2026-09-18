@@ -102,6 +102,10 @@ jobs:
         if: matrix.platform.name == 'Linux/GCC'
         run: python3 Tests/StartupSmokeTests.py build-sanitize/CroMagRally
 
+      - name: Reject malformed playfield and skeleton fixtures with sanitizers
+        if: matrix.platform.name == 'Linux/GCC'
+        run: python3 Tests/MalformedAssetTests.py build-sanitize/CroMagRally
+
   # Exercise both release device builds and the developer scripts' simulator defaults.
   apple-mobile-check:
     name: Apple mobile (${{ matrix.target.name }}, ${{ matrix.destination }})

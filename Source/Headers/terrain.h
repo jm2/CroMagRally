@@ -57,6 +57,9 @@ enum
 
 
 #define	MAX_TERRAIN_TILES		0x10000
+#define MAX_TERRAIN_ITEM_TYPE 66
+
+extern long gNumTileAttribs;
 
 #define	MAX_TERRAIN_WIDTH		400
 #define	MAX_TERRAIN_DEPTH		400

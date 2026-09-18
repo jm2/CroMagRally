@@ -74,6 +74,7 @@ static SuperTileMemoryType gSuperTileMemoryList[MAX_SUPERTILES];
 const float gOneOver_TERRAIN_POLYGON_SIZE = (1.0f / TERRAIN_POLYGON_SIZE);
 
 TileAttribType **gTileAttribList = nil;
+long gNumTileAttribs = 0;
 
 /* TILE SPLITTING TABLES */
 
@@ -233,6 +234,7 @@ void DisposeTerrain(void) {
     DisposeHandle((Handle)gTileAttribList);
     gTileAttribList = nil;
   }
+  gNumTileAttribs = 0;
 
   /* NUKE SPLINE DATA */
 

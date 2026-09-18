@@ -11,6 +11,8 @@
 /***************/
 
 #include "game.h"
+#include <limits.h>
+#include <math.h>
 #include "bones.h"
 #include "lzss.h"
 
@@ -95,6 +97,36 @@ MOMaterialObject* gCavemanSkins[2][NUM_CAVEMAN_SKINS];
 PrefsType gDiskShadowPrefs;
 
 static Boolean gPrefsNeedSave = false;
+
+// Validate by division before multiplying counts or handing them to the unpacker.
+// Pomme handles and the game's allocation API use signed 32-bit byte lengths.
+void ValidateResourceSize(Handle handle, int64_t count, size_t elementSize, const char* context)
+{
+	if (!handle || count < 0 || elementSize == 0
+		|| (uint64_t) count > INT32_MAX / elementSize
+		|| GetHandleSize(handle) < 0
+		|| (uint64_t) count > (size_t) GetHandleSize(handle) / elementSize)
+		DoFatalAlert("Invalid resource size/count for %s", context);
+}
+
+static void ValidatePlayfieldHeader(const PlayfieldHeaderType* header)
+{
+	if (header->mapWidth <= 0 || header->mapWidth > MAX_TERRAIN_WIDTH
+		|| header->mapHeight <= 0 || header->mapHeight > MAX_TERRAIN_DEPTH
+		|| header->mapWidth % SUPERTILE_SIZE != 0 || header->mapHeight % SUPERTILE_SIZE != 0
+		|| header->numItems < 0 || header->numItems > UINT16_MAX
+		|| header->numTilePages < 0 || header->numTilePages > MAX_TERRAIN_TILES
+		|| header->numTilesInList < 0 || header->numTilesInList > MAX_TERRAIN_TILES
+		|| header->numSplines < 0 || header->numSplines > UINT8_MAX + 1
+		|| header->numFences < 0 || header->numFences > MAX_FENCES
+		|| header->numUniqueSuperTiles < 0 || header->numUniqueSuperTiles > MAX_SUPERTILE_TEXTURES
+		|| header->numPaths < 0 || header->numPaths > INT16_MAX - 1000 + 1
+		|| header->numCheckpoints < 0 || header->numCheckpoints > MAX_CHECKPOINTS
+		|| !isfinite(header->tileSize) || header->tileSize <= 0
+		|| !isfinite(TERRAIN_POLYGON_SIZE / header->tileSize)
+		|| !isfinite(header->minY) || !isfinite(header->maxY) || header->minY > header->maxY)
+		DoFatalAlert("Invalid playfield header");
+}
 
 
 /****************** SET DEFAULT DIRECTORY ********************/
@@ -219,8 +251,12 @@ SkeletonFile_AnimHeader_Type	*animHeaderPtr;
 	version = headerPtr->version;
 	GAME_ASSERT(version == SKELETON_FILE_VERS_NUM);
 
-	numAnims = skeleton->NumAnims = headerPtr->numAnims;			// get # anims in skeleton
-	numJoints = skeleton->NumBones = headerPtr->numJoints;			// get # joints in skeleton
+	numAnims = headerPtr->numAnims;
+	numJoints = headerPtr->numJoints;
+	if (numAnims < 1 || numAnims > MAX_ANIMS || numJoints < 1 || numJoints > MAX_JOINTS)
+		DoFatalAlert("Invalid skeleton animation/joint count");
+	skeleton->NumAnims = numAnims;
+	skeleton->NumBones = numJoints;
 	ReleaseResource(hand);
 
 	GAME_ASSERT(numJoints <= MAX_JOINTS);							// check for overload
@@ -271,6 +307,10 @@ SkeletonFile_AnimHeader_Type	*animHeaderPtr;
 		HLock(hand);
 		UNPACK_STRUCTS_HANDLE(">i32b3fHH8L", File_BoneDefinitionType, 1, hand);
 		bonePtr = (File_BoneDefinitionType *)*hand;
+		// Attachment lists may repeat a shared point/normal (the shipped flag
+		// model does). Validate each referenced index below, not list cardinality.
+		if (bonePtr->parentBone < -1 || bonePtr->parentBone >= numJoints || bonePtr->parentBone == i)
+			DoFatalAlert("Invalid skeleton bone definition");
 
 			/* COPY BONE DATA INTO ARRAY */
 
@@ -286,7 +326,7 @@ SkeletonFile_AnimHeader_Type	*animHeaderPtr;
 		if (skeleton->Bones[i].pointList == nil)
 			DoFatalAlert("ReadDataFromSkeletonFile: AllocPtr/pointList failed!");
 
-		skeleton->Bones[i].normalList = (uint16_t *)AllocPtr(sizeof(uint16_t) * (int)skeleton->Bones[i].numNormalsAttachedToBone);
+		skeleton->Bones[i].normalList = (uint16_t *)AllocPtr(sizeof(uint16_t) * skeleton->numDecomposedNormals);
 		if (skeleton->Bones[i].normalList == nil)
 			DoFatalAlert("ReadDataFromSkeletonFile: AllocPtr/normalList failed!");
 
@@ -295,13 +335,19 @@ SkeletonFile_AnimHeader_Type	*animHeaderPtr;
 		hand = GetResource('BonP',1000+i);
 		if (hand == nil)
 			DoFatalAlert("Error reading BonP resource!");
+		ValidateResourceSize(hand, skeleton->Bones[i].numPointsAttachedToBone, sizeof(uint16_t), "BonP");
 		HLock(hand);
 		indexPtr = (uint16_t *)(*hand);
 
 			/* COPY POINT INDEX ARRAY INTO BONE STRUCT */
 
 		for (j=0; j < skeleton->Bones[i].numPointsAttachedToBone; j++)
-			skeleton->Bones[i].pointList[j] = UnpackU16BE(&indexPtr[j]);
+		{
+			uint16_t index = UnpackU16BE(&indexPtr[j]);
+			if (index >= skeleton->numDecomposedPoints)
+				DoFatalAlert("Invalid skeleton point index");
+			skeleton->Bones[i].pointList[j] = index;
+		}
 		ReleaseResource(hand);
 
 
@@ -310,15 +356,26 @@ SkeletonFile_AnimHeader_Type	*animHeaderPtr;
 		hand = GetResource('BonN',1000+i);
 		if (hand == nil)
 			DoFatalAlert("Error reading BonN resource!");
+		ValidateResourceSize(hand, skeleton->Bones[i].numNormalsAttachedToBone, sizeof(uint16_t), "BonN");
 		HLock(hand);
 		indexPtr = (uint16_t *)(*hand);
 
-			/* COPY NORMAL INDEX ARRAY INTO BONE STRUCT */
+			/* VALIDATE AUTHORING-TIME NORMAL INDICES */
 
 		for (j=0; j < skeleton->Bones[i].numNormalsAttachedToBone; j++)
-			skeleton->Bones[i].normalList[j] = UnpackU16BE(&indexPtr[j]);
+		{
+			uint16_t index = UnpackU16BE(&indexPtr[j]);
+			if (index >= MAX_DECOMPOSED_NORMALS)
+				DoFatalAlert("Invalid skeleton normal index");
+		}
 		ReleaseResource(hand);
 
+		// Rebuild from the current mesh so stale authoring slots are omitted and
+		// missing live normals are restored, including in shipped legacy models.
+		int numLiveNormals = BuildBoneNormalList(skeleton, &skeleton->Bones[i]);
+		if (numLiveNormals < 0)
+			DoFatalAlert("Invalid skeleton point normal reference");
+		skeleton->Bones[i].numNormalsAttachedToBone = numLiveNormals;
 	}
 
 
@@ -329,6 +386,18 @@ SkeletonFile_AnimHeader_Type	*animHeaderPtr;
 		// The "relative point offsets" are the only things
 		// which do not get rebuilt in the ModelDecompose function.
 		// We need to restore these manually.
+
+	// A parent cycle would recurse forever while priming or traversing joints.
+	for (i = 0; i < numJoints; i++)
+	{
+		int parent = i;
+		for (int depth = 0; parent != -1; depth++)
+		{
+			if (depth >= numJoints)
+				DoFatalAlert("Cyclic skeleton bone hierarchy");
+			parent = skeleton->Bones[parent].parentBone;
+		}
+	}
 
 	hand = GetResource('RelP', 1000);
 	if (hand == nil)
@@ -365,7 +434,9 @@ SkeletonFile_AnimHeader_Type	*animHeaderPtr;
 		UNPACK_STRUCTS_HANDLE(">b32bxh", SkeletonFile_AnimHeader_Type, 1, hand);
 		animHeaderPtr = (SkeletonFile_AnimHeader_Type *)*hand;
 
-		skeleton->NumAnimEvents[i] = animHeaderPtr->numAnimEvents;			// copy # anim events in anim
+		if (animHeaderPtr->numAnimEvents < 0 || animHeaderPtr->numAnimEvents > MAX_ANIM_EVENTS)
+			DoFatalAlert("Invalid skeleton animation event count");
+		skeleton->NumAnimEvents[i] = animHeaderPtr->numAnimEvents;
 		ReleaseResource(hand);
 
 			/* READ ANIM-EVENT DATA */
@@ -376,7 +447,11 @@ SkeletonFile_AnimHeader_Type	*animHeaderPtr;
 		UNPACK_STRUCTS_HANDLE(">hbb", AnimEventType, skeleton->NumAnimEvents[i], hand);
 		animEventPtr = (AnimEventType *)*hand;
 		for (j=0;  j < skeleton->NumAnimEvents[i]; j++)
+		{
+			if (animEventPtr->type > ANIMEVENT_TYPE_CLEARFLAG)
+				DoFatalAlert("Invalid skeleton animation event type");
 			skeleton->AnimEventsList[i][j] = *animEventPtr++;
+		}
 		ReleaseResource(hand);
 
 
@@ -385,8 +460,14 @@ SkeletonFile_AnimHeader_Type	*animHeaderPtr;
 		hand = GetResource('NumK',1000+i);									// read array of #'s for this anim
 		if (hand == nil)
 			DoFatalAlert("Error reading # keyframes/joint resource!");
+		ValidateResourceSize(hand, numJoints, sizeof(uint8_t), "NumK");
 		for (j=0; j < numJoints; j++)
-			skeleton->JointKeyframes[j].numKeyFrames[i] = (*hand)[j];
+		{
+			unsigned int count = (uint8_t) (*hand)[j];
+			if (count > MAX_KEYFRAMES)
+				DoFatalAlert("Invalid skeleton keyframe count");
+			skeleton->JointKeyframes[j].numKeyFrames[i] = count;
+		}
 		ReleaseResource(hand);
 	}
 
@@ -1078,12 +1159,13 @@ Ptr						tempBuffer16 = nil;
 	hand = GetResource('Hedr',1000);
 	if (hand == nil)
 	{
-		DoAlert("ReadDataFromPlayfieldFile: Error reading header resource!");
+		DoFatalAlert("ReadDataFromPlayfieldFile: Error reading header resource!");
 		return;
 	}
 
 	header = (PlayfieldHeaderType **)hand;
 	UNPACK_STRUCTS_HANDLE(">4b5i3f5i", PlayfieldHeaderType, 1, hand);
+	ValidatePlayfieldHeader(*header);
 	gNumTerrainItems		= (**header).numItems;
 	gTerrainTileWidth		= (**header).mapWidth;
 	gTerrainTileDepth		= (**header).mapHeight;
@@ -1126,7 +1208,7 @@ Ptr						tempBuffer16 = nil;
 
 	hand = GetResource('Atrb',1000);
 	if (hand == nil)
-		DoAlert("ReadDataFromPlayfieldFile: Error reading tile attrib resource!");
+		DoFatalAlert("ReadDataFromPlayfieldFile: Error reading tile attrib resource!");
 	else
 	{
 		DetachResource(hand);
@@ -1134,6 +1216,9 @@ Ptr						tempBuffer16 = nil;
 		gTileAttribList = (TileAttribType **)hand;
 
 		Size numAttribs = GetHandleSize(hand) / sizeof(TileAttribType);
+		if (numAttribs < 1 || numAttribs > MAX_TERRAIN_TILES || GetHandleSize(hand) % sizeof(TileAttribType) != 0)
+			DoFatalAlert("Invalid tile attribute resource size");
+		gNumTileAttribs = numAttribs;
 		UNPACK_STRUCTS_HANDLE(">Hbb", TileAttribType, numAttribs, hand);
 	}
 
@@ -1189,7 +1274,7 @@ Ptr						tempBuffer16 = nil;
 
 		hand = GetResource('Layr',1000);
 		if (hand == nil)
-			DoAlert("ReadDataFromPlayfieldFile: Error reading map layer rez");
+			DoFatalAlert("ReadDataFromPlayfieldFile: Error reading map layer rez");
 		else
 		{
 			if (gTileGrid)														// free old array
@@ -1203,6 +1288,8 @@ Ptr						tempBuffer16 = nil;
 				for (col = 0; col < gTerrainTileWidth; col++)
 				{
 					gTileGrid[row][col] = *src++;
+					if (gTileGrid[row][col] >= gNumTileAttribs)
+						DoFatalAlert("Invalid map layer tile ID");
 				}
 			}
 			ReleaseResource(hand);
@@ -1220,7 +1307,7 @@ Ptr						tempBuffer16 = nil;
 
 	hand = GetResource('YCrd',1000);
 	if (hand == nil)
-		DoAlert("ReadDataFromPlayfieldFile: Error reading height data resource!");
+		DoFatalAlert("ReadDataFromPlayfieldFile: Error reading height data resource!");
 	else
 	{
 		float* src = (float *)*hand;
@@ -1239,7 +1326,7 @@ Ptr						tempBuffer16 = nil;
 
 	hand = GetResource('Itms',1000);
 	if (hand == nil)
-		DoAlert("ReadDataFromPlayfieldFile: Error reading itemlist resource!");
+		DoFatalAlert("ReadDataFromPlayfieldFile: Error reading itemlist resource!");
 	else
 	{
 		DetachResource(hand);							// lets keep this data around
@@ -1253,6 +1340,8 @@ Ptr						tempBuffer16 = nil;
 
 	for (i = 0; i < gNumTerrainItems; i++)
 	{
+		if ((*gMasterItemList)[i].type > MAX_TERRAIN_ITEM_TYPE)
+			DoFatalAlert("Invalid terrain item type");
 		(*gMasterItemList)[i].x *= MAP2UNIT_VALUE;
 		(*gMasterItemList)[i].y *= MAP2UNIT_VALUE;
 	}
@@ -1282,6 +1371,9 @@ Ptr						tempBuffer16 = nil;
 		{
 			const File_SplineDefType*	srcSpline = &(*((File_SplineDefType **) hand))[i];
 			SplineDefType*				dstSpline = &(*gSplineList)[i];
+			if (srcSpline->numItems < 0 || srcSpline->numPoints < 0
+				|| srcSpline->numPoints > INT32_MAX / (int) sizeof(SplinePointType))
+				DoFatalAlert("Invalid spline counts");
 
 			dstSpline->numItems		= srcSpline->numItems;
 //			dstSpline->numNubs		= srcSpline->numNubs;
@@ -1293,6 +1385,8 @@ Ptr						tempBuffer16 = nil;
 	}
 	else
 	{
+		if (gNumSplines != 0)
+			DoFatalAlert("Missing spline list resource");
 		gNumSplines = 0;
 		gSplineList = nil;
 	}
@@ -1360,7 +1454,7 @@ Ptr						tempBuffer16 = nil;
 	{
 		FileFenceDefType *inData;
 
-		gFenceList = (FenceDefType *)AllocPtr(sizeof(FenceDefType) * gNumFences);	// alloc new ptr for fence data
+		gFenceList = (FenceDefType *)AllocPtrClear(sizeof(FenceDefType) * gNumFences);
 		if (gFenceList == nil)
 			DoFatalAlert("ReadDataFromPlayfieldFile: AllocPtr failed");
 
@@ -1369,6 +1463,8 @@ Ptr						tempBuffer16 = nil;
 
 		for (i = 0; i < gNumFences; i++)								// copy data from rez to new list
 		{
+			if (inData[i].numNubs < 2 || inData[i].numNubs > MAX_NUBS_IN_FENCE)
+				DoFatalAlert("Invalid fence nub count");
 			gFenceList[i].type 		= inData[i].type;
 			gFenceList[i].numNubs 	= inData[i].numNubs;
 			gFenceList[i].nubList 	= nil;
@@ -1378,6 +1474,8 @@ Ptr						tempBuffer16 = nil;
 	}
 	else
 	{
+		if (gNumFences != 0)
+			DoFatalAlert("Missing fence list resource");
 		gNumFences = 0;
 		gFenceList = nil;
 	}
@@ -1388,13 +1486,13 @@ Ptr						tempBuffer16 = nil;
 	for (i = 0; i < gNumFences; i++)
 	{
 		hand = GetResource('FnNb',1000+i);					// get rez
-		HLock(hand);
 		if (hand)
 		{
+			HLock(hand);
 			UNPACK_STRUCTS_HANDLE(">ii", FencePointType, gFenceList[i].numNubs, hand);
    			FencePointType *fileFencePoints = (FencePointType *)*hand;
 
-			gFenceList[i].nubList = (OGLPoint3D *)AllocPtr(sizeof(FenceDefType) * gFenceList[i].numNubs);	// alloc new ptr for nub array
+			gFenceList[i].nubList = (OGLPoint3D *)AllocPtr(sizeof(*gFenceList[i].nubList) * gFenceList[i].numNubs);
 			if (gFenceList[i].nubList == nil)
 				DoFatalAlert("ReadDataFromPlayfieldFile: AllocPtr failed");
 
@@ -1432,6 +1530,8 @@ Ptr						tempBuffer16 = nil;
 
 		for (i = 0; i < gNumPaths; i++)
 		{
+			if (filePath[i].numPoints < 0 || filePath[i].numPoints > INT32_MAX / (int) sizeof(PathPointType))
+				DoFatalAlert("Invalid path point count");
 			(*gPathList)[i].flags = filePath[i].flags;
 			(*gPathList)[i].parms[0] = filePath[i].parms[0];
 			(*gPathList)[i].parms[1] = filePath[i].parms[1];
@@ -1444,6 +1544,8 @@ Ptr						tempBuffer16 = nil;
 	}
 	else
 	{
+		if (gNumPaths != 0)
+			DoFatalAlert("Missing path list resource");
 		gNumPaths = 0;
 		gPathList = nil;
 	}
@@ -1506,8 +1608,7 @@ Ptr						tempBuffer16 = nil;
 		}
 		else
 		{
-			gNumCheckpoints = 0;
-			//gCheckpointList = nil;
+			DoFatalAlert("Missing checkpoint list resource");
 		}
 	}
 

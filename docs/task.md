@@ -64,12 +64,12 @@ bot review before merge. Unchecked entries are open backlog items; checked entri
 
 ## Priority: resource and data hardening
 
-- [ ] Add central playfield-header validation for signed counts, terrain dimensions, tile size, supported maxima, and multiplication/allocation overflow before using those values.
-- [ ] Persist the loaded tile-attribute count and validate every `Layr` tile ID before indexing `gTileAttribList`.
-- [ ] Make an illegal terrain-item type fail safely before indexing `gTerrainItemAddRoutines`; do not continue after the alert.
-- [ ] Require every fence to have at least two nubs, validate nub counts before allocation, check resource handles before locking them, and allocate nub storage using the correct element type.
-- [ ] Bound skeleton `numAnims` by `MAX_ANIMS`, animation-event counts by `MAX_ANIM_EVENTS`, and validate all bone/index/keyframe resource sizes and referenced indices before copying.
-- [ ] Add malformed playfield and skeleton fixtures covering oversized/negative counts, invalid tile and item IDs, zero-nub fences, excess animations/events, short resources, and overflow-sized allocations.
+- [x] Add central playfield-header validation for signed counts, terrain dimensions, tile size, supported maxima, and multiplication/allocation overflow before using those values.
+- [x] Persist the loaded tile-attribute count and validate every `Layr` tile ID before indexing `gTileAttribList`.
+- [x] Make an illegal terrain-item type fail safely before indexing `gTerrainItemAddRoutines`; do not continue after the alert.
+- [x] Require every fence to have at least two nubs, validate nub counts before allocation, check resource handles before locking them, and allocate nub storage using the correct element type.
+- [x] Bound skeleton `numAnims` by `MAX_ANIMS`, animation-event counts by `MAX_ANIM_EVENTS`, and validate all bone/index/keyframe resource sizes and referenced indices before copying.
+- [x] Add malformed playfield and skeleton fixtures covering oversized/negative counts, invalid tile and item IDs, zero-nub fences, excess animations/events, short resources, and overflow-sized allocations.
 
 ## Priority: gameplay and input correctness
 

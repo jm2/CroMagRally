@@ -161,18 +161,11 @@ char* CSVIterator(char** csvCursor, bool* eolOut);
 OSErr SaveScoreboardFile(void);
 OSErr LoadScoreboardFile(void);
 
+void ValidateResourceSize(Handle handle, int64_t count, size_t elementSize, const char* context);
+
 #define UNPACK_STRUCTS_HANDLE(format, type, n, handle)                         \
 do                                                                             \
 {                                                                              \
-	if ((n) * sizeof(type) > (size_t) GetHandleSize((Handle) (handle)))        \
-	{                                                                          \
-		DoFatalAlert(                                                          \
-			"UnpackStructs: Unexpected destination handle size\n"              \
-			"When unpacking %dx %s in %s:%d\n"                                 \
-			"Handle size: %d, Expected size: %d",                              \
-			n, #type, __func__, __LINE__,                                      \
-			(int)GetHandleSize((Handle) (handle)),                             \
-			(int)(n) * sizeof(type));                                          \
-	}                                                                          \
+	ValidateResourceSize((Handle) (handle), (n), sizeof(type), #type);          \
 	UnpackStructs((format), sizeof(type), (n), *(handle));                     \
 } while(0)
