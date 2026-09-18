@@ -936,9 +936,13 @@ if(CMR_INSTALL)
 	set(CPACK_DEBIAN_PACKAGE_SECTION "games")
 	set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
 	set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "${CPACK_PACKAGE_HOMEPAGE_URL}")
-	# CRITICAL: dpkg-shlibdeps would abort generation on the private, non-system libSDL3.so.0,
-	# so it's off and we declare runtime deps by hand.
+	# Private bundled SDL has no dpkg owner, so keep manual dependencies there.
+	# With external shared SDL, let dpkg-shlibdeps identify its runtime package
+	# and required version from the actual library linked into the executable.
 	set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS OFF)
+	if(NOT CMR_BUNDLE_SDL AND NOT SDL_STATIC)
+		set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+	endif()
 	set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6, libstdc++6, libgcc-s1, libgl1, libglx0, libopengl0")
 	# SDL dlopen()s these at runtime (not in DT_NEEDED), and only one of X11/Wayland is needed
 	# on any given host, so they are Recommends rather than hard Depends.
