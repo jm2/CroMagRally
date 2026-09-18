@@ -130,9 +130,11 @@ Merge in subsystem order: [network #35](https://github.com/jm2/CroMagRally/pull/
 [Debian packaging #40](https://github.com/jm2/CroMagRally/pull/40). Each PR is based on the preceding subsystem branch so review diffs
 remain focused; retarget successors to master as their predecessors merge.
 
-Checked entries below mean implemented and locally tested, not merged. GitHub
-Actions jobs remain queued as of 2026-09-18; merge is deferred until every required
-CI check passes and the final PR head has a clean bot review.
+PRs #35–#37 have merged with passing CI and clean final-head bot reviews.
+PRs #38–#40 remain open: their initial CI exposed the test portability defect
+tracked in #41. Its repair is now included in all three branches, with CI and
+final-head bot reviews rerunning. Checked entries below mean implemented and
+locally tested; remaining merges still require passing CI and a clean review.
 
 - [x] [#26](https://github.com/jm2/CroMagRally/issues/26) — Advance network race-end cooldown according to synchronized simulation progress; keep completion consistent across client hold/catch-up renders and freeze during pause.
 - [x] [#27](https://github.com/jm2/CroMagRally/issues/27) — Give terrain LZSS decoding a destination-capacity contract, check before emitting bytes, and reject incomplete input before texture use.
