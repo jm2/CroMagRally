@@ -121,6 +121,8 @@ pass all 12 sanitizer CTest suites, all 39 shipped BG3D models, nested/sibling
 group tests, bounded decoder tests, and 30 production startup smoke cases.
 The AI path regression suite passes under ASan/UBSan, covering exact and nearby
 origins, duplicate/terminal points, cancellation, and empty paths.
+The spatial audio suite passes under ASan/UBSan for one through four listeners,
+opposite camera headings, distant listeners, and single-player attenuation.
 Checked entries below have an implementation and local regression coverage;
 their PRs must still pass CI and bot review before merge.
 
@@ -129,7 +131,7 @@ their PRs must still pass CI and bot review before merge.
 - [x] [#28](https://github.com/jm2/CroMagRally/issues/28) — Validate BG3D material/geometry counts, references, required arrays, read completion, and texture byte sizes before allocation, indexing, or upload.
 - [x] [#29](https://github.com/jm2/CroMagRally/issues/29) — Handle exact and near-coincident AI path origins without returning NaN directions.
 - [x] [#30](https://github.com/jm2/CroMagRally/issues/30) — Preserve the preceding valid direction at the final AI path point instead of storing a zero vector.
-- [ ] [#31](https://github.com/jm2/CroMagRally/issues/31) — Include all active local listeners in sound attenuation and use each listener's position/orientation for stereo mixing.
+- [x] [#31](https://github.com/jm2/CroMagRally/issues/31) — Include all active local listeners in sound attenuation and use each listener's position/orientation for stereo mixing.
 - [ ] [#32](https://github.com/jm2/CroMagRally/issues/32) — Save the active session difficulty in race records instead of the local preference.
 - [ ] [#33](https://github.com/jm2/CroMagRally/issues/33) — Declare the external SDL3 runtime dependency for system-SDL Debian packages and verify both bundled and external-SDL package layouts.
 - [x] [#34](https://github.com/jm2/CroMagRally/issues/34) — Correct BG3D group-stack popping and verify nested and sibling group handling; this defect is latent with the current asset set.

@@ -54,7 +54,6 @@ typedef struct
 	uint32_t	leftVolume, rightVolume;
 }ChannelInfoType;
 
-#define	VOLUME_DISTANCE_FACTOR	.001f		// bigger == sound decays FASTER with dist, smaller = louder far away
 
 /**********************/
 /*     VARIABLES      */
@@ -680,116 +679,9 @@ gone:
 
 static void Calc3DEffectVolume(short effectNum, const OGLPoint3D *where, float volAdjust, uint32_t *leftVolOut, uint32_t *rightVolOut)
 {
-float	dist;
-float	refDist,volumeFactor;
-uint32_t	volume,left,right;
-uint32_t	maxLeft,maxRight;
-
-	dist 	= OGLPoint3D_Distance(where, &gEarCoords[0]);		// calc dist to sound for pane 0
-	if (gNumSplitScreenPanes > 1)								// see if other pane is closer (thus louder)
-	{
-		float	dist2 = OGLPoint3D_Distance(where, &gEarCoords[1]);
-
-		if (dist2 < dist)
-			dist = dist2;
-	}
-
-			/* DO VOLUME CALCS */
-
-	refDist = kEffectsTable[effectNum].refDistance;			// get ref dist
-
-	dist -= refDist;
-	if (dist <= 0.0f)
-		volumeFactor = 1.0f;
-	else
-	{
-		volumeFactor = 1.0f / (dist * VOLUME_DISTANCE_FACTOR);
-		if (volumeFactor > 1.0f)
-			volumeFactor = 1.0f;
-	}
-
-	volume = (float)FULL_CHANNEL_VOLUME * volumeFactor * volAdjust;
-
-
-	if (volume < 6)							// if really quiet, then just turn it off
-	{
-		*leftVolOut = *rightVolOut = 0;
-		return;
-	}
-
-			/************************/
-			/* DO STEREO SEPARATION */
-			/************************/
-
-	else
-	{
-		float		volF = (float)volume;
-		OGLVector2D	earToSound,lookVec;
-		int			i;
-		float		dot,cross;
-
-		maxLeft = maxRight = 0;
-
-		for (i = 0; i < gNumSplitScreenPanes; i++)										// calc for each camera and use max of left & right
-		{
-
-				/* CALC VECTOR TO SOUND */
-
-			earToSound.x = where->x - gEarCoords[0].x;
-			earToSound.y = where->z - gEarCoords[0].z;
-			FastNormalizeVector2D(earToSound.x, earToSound.y, &earToSound, true);
-
-
-				/* CALC EYE LOOK VECTOR */
-
-			FastNormalizeVector2D(gEyeVector[0].x, gEyeVector[0].z, &lookVec, true);
-
-
-				/* DOT PRODUCT  TELLS US HOW MUCH STEREO SHIFT */
-
-			dot = 1.0f - fabs(OGLVector2D_Dot(&earToSound,  &lookVec));
-			if (dot < 0.0f)
-				dot = 0.0f;
-			else
-			if (dot > 1.0f)
-				dot = 1.0f;
-
-
-				/* CROSS PRODUCT TELLS US WHICH SIDE */
-
-			cross = OGLVector2D_Cross(&earToSound,  &lookVec);
-
-
-					/* DO LEFT/RIGHT CALC */
-
-			if (cross > 0.0f)
-			{
-				left 	= volF + (volF * dot);
-				right 	= volF - (volF * dot);
-			}
-			else
-			{
-				right 	= volF + (volF * dot);
-				left 	= volF - (volF * dot);
-			}
-
-
-					/* KEEP MAX */
-
-			if (left > maxLeft)
-				maxLeft = left;
-			if (right > maxRight)
-				maxRight = right;
-
-		}
-
-
-	}
-
-	*leftVolOut = maxLeft;
-	*rightVolOut = maxRight;
+	CalcSpatialAudioVolume(where, kEffectsTable[effectNum].refDistance, volAdjust,
+		gEarCoords, gEyeVector, gNumSplitScreenPanes, leftVolOut, rightVolOut);
 }
-
 
 
 #pragma mark -
