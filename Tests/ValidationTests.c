@@ -162,6 +162,41 @@ static void TestSyncMaskValidation(void)
 	assert(NetRetainActiveSyncBits(hostAndClient1 | departedClient2, hostAndClient1) == hostAndClient1);
 }
 
+static void TestNetworkFPSValidation(void)
+{
+	const int rates[] = {-1, 0, 1, 8, 9, 60, 1000, 1001};
+	const int advertisedRates[] = {0, 0, 0, 0, 9, 60, 1000, 1000};
+	NetConfigMessage config = {0};
+	config.gameMode = GAME_MODE_MULTIPLAYERRACE;
+	config.numPlayers = 2;
+	NetPlayerCharTypeMessage character = ValidCharMessage();
+	NetSyncMessage sync = {0};
+
+	for (size_t i = 0; i < sizeof(rates) / sizeof(rates[0]); i++)
+	{
+		int rate = rates[i];
+		Boolean supported = rate >= NET_MIN_FPS && rate <= MAX_GAME_FPS;
+		config.targetFPS = rate;
+		character.refreshRate = rate;
+		sync.targetFPS = rate;
+		assert(NetValidateConfigPayload(&config) == supported);
+		assert(NetValidatePlayerCharPayload(&character, 1, 2) == (supported || rate == 0));
+		assert(NetValidateSyncPayload(kNetInbound_Client, &sync) == supported);
+		assert(NetValidateSyncPayload(kNetInbound_Host, &sync) == (rate == 0));
+		assert(NetNormalizeRefreshRate(rate) == advertisedRates[i]);
+		character.refreshRate = NetNormalizeRefreshRate(rate);
+		assert(NetValidatePlayerCharPayload(&character, 1, 2));
+	}
+
+	sync.targetFPS = 60;
+	sync.pad = 1;
+	assert(!NetValidateSyncPayload(kNetInbound_Client, &sync));
+	sync.targetFPS = 0;
+	assert(!NetValidateSyncPayload(kNetInbound_Host, &sync));
+	assert(!NetValidateSyncPayload(kNetInbound_Host, NULL));
+	assert(!NetValidateSyncPayload(kNetInbound_Client, NULL));
+}
+
 static NetClientControlInfoMessageType ValidControlMessage(void)
 {
 	NetClientControlInfoMessageType message = {0};
@@ -208,6 +243,15 @@ static void TestHostControlValidation(void)
 	assert(!NetValidateHostControlPayload(NULL, 4));
 	assert(!NetValidateHostControlPayload(&message, 0));
 	assert(!NetValidateHostControlPayload(&message, MAX_LOCAL_PLAYERS + 1));
+
+	const float rates[] = {0, 1, 8, 9, 1000, 1001};
+	for (size_t i = 0; i < sizeof(rates) / sizeof(rates[0]); i++)
+	{
+		message.fps = rates[i];
+		message.fpsFrac = rates[i] > 0 ? 1.0f / rates[i] : 0;
+		assert(NetValidateHostControlPayload(&message, 4)
+			== (rates[i] >= NET_MIN_FPS && rates[i] <= MAX_GAME_FPS));
+	}
 
 	message.fps = 9.0f;
 	message.fpsFrac = 1.0f / 9.0f;
@@ -553,6 +597,7 @@ int main(void)
 	TestEnvelopeValidation();
 	TestCharacterValidation();
 	TestConfigValidation();
+	TestNetworkFPSValidation();
 	TestSyncMaskValidation();
 	TestControlValidation();
 	TestHostControlValidation();

@@ -2,6 +2,13 @@
 #include "net_validation.h"
 #include <math.h>
 
+int NetNormalizeRefreshRate(int refreshRate)
+{
+	if (refreshRate < NET_MIN_FPS)
+		return 0;
+	return refreshRate > MAX_GAME_FPS ? MAX_GAME_FPS : refreshRate;
+}
+
 uint32_t NetExpectedMessageLength(int32_t what)
 {
 	switch (what)
@@ -98,7 +105,20 @@ Boolean NetValidateConfigPayload(const NetConfigMessage* message)
 		&& message->playerNum >= 0
 		&& message->playerNum < message->numPlayers
 		&& message->difficulty < NUM_DIFFICULTIES
+		&& message->targetFPS >= NET_MIN_FPS
 		&& message->targetFPS <= MAX_GAME_FPS;
+}
+
+Boolean NetValidateSyncPayload(NetInboundRole role, const NetSyncMessage* message)
+{
+	if (!message || message->pad != 0)
+		return false;
+
+	// Client readiness does not propose a cap; only the host finalizes it.
+	if (role == kNetInbound_Host)
+		return message->targetFPS == 0;
+
+	return message->targetFPS >= NET_MIN_FPS && message->targetFPS <= MAX_GAME_FPS;
 }
 
 uint32_t NetRetainActiveSyncBits(uint32_t syncedMask, uint32_t activeMask)
@@ -122,8 +142,8 @@ Boolean NetValidatePlayerCharPayload(const NetPlayerCharTypeMessage* message, in
 		&& message->sex <= 1
 		&& message->skin >= 0
 		&& message->skin < NUM_CAVEMAN_SKINS
-		&& message->refreshRate >= 0
-		&& message->refreshRate <= 1000
+		&& (message->refreshRate == 0
+			|| (message->refreshRate >= NET_MIN_FPS && message->refreshRate <= MAX_GAME_FPS))
 		&& (message->connectionType == 0 || message->connectionType == 1);
 }
 
@@ -147,7 +167,7 @@ Boolean NetValidateHostControlPayload(const NetHostControlInfoMessageType* messa
 {
 	const uint32_t validControlBits = (1u << NUM_CONTROL_BITS) - 1u;
 	const uint8_t validInputFlags = INPUT_FLAG_SUBSTITUTED | INPUT_FLAG_COALESCED;
-	const float minHostFPS = 9.0f;
+	const float minHostFPS = NET_MIN_FPS;
 	const float maxHostFPS = MAX_GAME_FPS;
 	const float maxAbsSyncCoord = 1000000.0f;
 	const float maxAbsSyncRotation = 1000000.0f;
