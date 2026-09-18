@@ -56,7 +56,7 @@ bot review before merge. Unchecked entries are open backlog items; checked entri
 - [x] Expire and recycle `AwaitingHandshake` TCP slots after a bounded lobby handshake deadline.
 - [x] Add a bounded vehicle-selection readiness deadline and let the host remove only nonready peers instead of waiting indefinitely or cancelling the entire session.
 - [x] Replace the level-ready barrier's session-wide fatal timeout with per-peer readiness tracking and removal of only stalled peers.
-- [x] Add loopback/state-machine tests for silent handshakes, sparse lobby churn, stalled character selection, delayed level readiness, send-ring overflow, simultaneous leaves, leave while paused, and two games in one process.
+- [x] Add loopback/state-machine tests for silent handshakes, sparse lobby churn, stalled character selection, delayed level readiness, send-ring overflow, simultaneous leaves, leave while paused, battle victory after departures, and two games in one process.
 - [x] Rework release production flow so builds run from a pushed version tag or draft release and the public GitHub Release is published only after every required artifact and checksum succeeds.
 - [x] Add a release-workflow failure test proving that a failed matrix job cannot leave a public empty or incomplete release.
 - [x] Generate a deterministic Android asset-manifest/content hash and use it to invalidate extracted assets instead of relying only on `GAME_VERSION` and one sentinel file.

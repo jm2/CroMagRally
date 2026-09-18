@@ -1,5 +1,6 @@
 // Reuse the real loopback transport fixture, then exercise production NetHigh
-// readiness/event helpers. Linker section GC omits unrelated graphics/UI paths.
+// readiness/event helpers plus production battle damage/victory logic. Linker
+// section GC omits unrelated graphics/UI paths; wrappers isolate tagged RNG/UI.
 #define main TransportTestMain
 #include "NetworkLifecycleTests.c"
 #undef main
@@ -11,24 +12,32 @@ static Boolean TestGatherScreen(void);
 #undef DoNetGatherScreen
 #include "../Source/Screens/NetGather.c"
 
-PlayerInfoType gPlayerInfo[MAX_PLAYERS];
-short gNumTotalPlayers, gNumRealPlayers;
-Boolean gGameOver;
 Boolean gSimulationPaused;
-int gGameMode;
+float gFramesPerSecondFrac, gStartingLightTimer;
 static int taggedChoices;
 static Boolean backPressed;
 static int expectedGatherState, gatherScreenCalls;
+static Byte winLoseMode[MAX_PLAYERS];
+static short winLoseWinner[MAX_PLAYERS];
 static Boolean TestGatherScreen(void)
 {
     CHECK(gNetSequenceState == expectedGatherState);
     gatherScreenCalls++;
     return true;
 }
-void ChooseTaggedPlayer(void) { taggedChoices++; }
+void __wrap_ChooseTaggedPlayer(void)
+{
+    taggedChoices++;
+    ChooseTaggedPlayerWithIndex(0);
+}
+void __wrap_UpdateTagMarker(void) {}
+void ShowWinLose(short playerNum, Byte mode, short winner)
+{
+    CHECK(playerNum >= 0 && playerNum < gNumTotalPlayers);
+    winLoseMode[playerNum] = mode;
+    winLoseWinner[playerNum] = winner;
+}
 Boolean GetNewNeedStateAnyP(int needID) { return needID == kNeed_UIBack && backPressed; }
-void SetNetworkPowerMode(Boolean enabled) { (void)enabled; }
-void SetNetworkDiscoveryMode(Boolean enabled) { (void)enabled; }
 
 static NSpGame* BeginSession(NSpGame** first, NSpGame** second)
 {
@@ -38,6 +47,12 @@ static NSpGame* BeginSession(NSpGame** first, NSpGame** second)
     gIsNetworkHost = true;
     gIsNetworkClient = false;
     gGameOver = false;
+    gTrackCompleted = false;
+    gNumPlayersEliminated = 0;
+    gFramesPerSecondFrac = 1.0f / 60.0f;
+    gStartingLightTimer = 0;
+    memset(winLoseMode, 0, sizeof(winLoseMode));
+    memset(winLoseWinner, 0, sizeof(winLoseWinner));
     backPressed = false;
     gNumGatheredPlayers = gNumRealPlayers = gNumTotalPlayers = 3;
     gGameMode = GAME_MODE_MULTIPLAYERRACE;
@@ -53,6 +68,7 @@ static NSpGame* BeginSession(NSpGame** first, NSpGame** second)
     gPlayerInfo[0].net.nspPlayerID = 0;
     gPlayerInfo[1].net.nspPlayerID = 2;
     gPlayerInfo[2].net.nspPlayerID = 1;
+    for (int i = 0; i < gNumTotalPlayers; i++) gPlayerInfo[i].health = 1;
     return host;
 }
 
@@ -83,6 +99,7 @@ static void Readiness(uint32_t timeout, int waiting, int ready)
     CHECK(gPlayerSyncMask == 5 && AreAllPlayersSynced());
     CHECK(gPlayerInfo[2].isComputer && !gPlayerInfo[1].isComputer && !gNetBadge[2]);
     CHECK(gNumGatheredPlayers == 2);
+    CHECK(gNumPlayersEliminated == 0); // race bots do not affect battle bookkeeping
     CHECK(ExpectLeave(second) == 1);
     EndSession(host, first, second);
 }
@@ -148,6 +165,94 @@ static void DelayedReady(void)
     EndSession(host, first, second);
 }
 
+static void ExpectSurvivalWinner(void)
+{
+    CHECK(gPlayerInfo[2].isEliminated && gNumPlayersEliminated == 1);
+    PlayerLoseHealth(2, 1); // the dropped player cannot be eliminated twice
+    ApplyBecomeBot(2); // nor can a duplicate disconnect count twice
+    CHECK(gNumPlayersEliminated == 1 && gNumGatheredPlayers == 2);
+    PlayerLoseHealth(1, 1);
+    CHECK(gNumPlayersEliminated == 2 && !gPlayerInfo[0].isEliminated);
+    UpdateGameModeSpecifics();
+    CHECK(gTrackCompleted && !gPlayerInfo[0].isEliminated);
+    for (int i = 0; i < gNumTotalPlayers; i++)
+        CHECK(winLoseWinner[i] == 0 && winLoseMode[i] == (i == 0 ? 1 : 2));
+}
+
+static void SurvivalReadinessRemoval(bool alreadyEliminated)
+{
+    NSpGame *first, *second;
+    NSpGame* host = BeginSession(&first, &second);
+    gGameMode = GAME_MODE_SURVIVAL;
+    if (alreadyEliminated) PlayerLoseHealth(2, 1);
+    PlayerInfoType before[MAX_PLAYERS];
+    memcpy(before, gPlayerInfo, sizeof(before));
+    ClearPlayerSyncMask();
+    MarkPlayerSynced(0);
+    MarkPlayerSynced(2);
+    gNetSequenceState = kNetSequence_HostWaitForPlayersToPrepareLevel;
+    testNow += LEVEL_READY_TIMEOUT_MS;
+    HostAdvanceReadinessBarrier(LEVEL_READY_TIMEOUT_MS,
+        kNetSequence_HostWaitForPlayersToPrepareLevel, kNetSequence_GameLoop);
+    CHECK(gNetSequenceState == kNetSequence_GameLoop && !gGameOver);
+    ExpectSurvivalWinner();
+
+    // Replay the actual leave notification against the surviving peer's pre-drop
+    // state, then use real damage/victory logic to prove it reaches the same winner.
+    NSpMessageHeader* leave = WaitMessage(second);
+    CHECK(leave->what == kNSpPlayerLeft);
+    memcpy(gPlayerInfo, before, sizeof(before));
+    gNumPlayersEliminated = alreadyEliminated ? 1 : 0;
+    gNumGatheredPlayers = 3;
+    gTrackCompleted = false;
+    gIsNetworkHost = false;
+    gIsNetworkClient = true;
+    gNetGame = second;
+    gNetSequenceState = kNetSequence_ClientWaitForSyncFromHost;
+    CHECK(!HandleOtherNetMessage(leave));
+    NSpMessage_Release(second, leave);
+    ExpectSurvivalWinner();
+    EndSession(host, first, second);
+}
+
+static void BattleDepartureWinner(int mode)
+{
+    NSpGame *first, *second;
+    NSpGame* host = BeginSession(&first, &second);
+    gGameMode = mode;
+    if (mode == GAME_MODE_TAG1)
+    {
+        for (int i = 0; i < gNumTotalPlayers; i++) gPlayerInfo[i].tagTimer = 60;
+        ChooseTaggedPlayerWithIndex(1);
+        gPlayerInfo[1].tagTimer = 0;
+        UpdateGameModeSpecifics();
+    }
+    else
+        PlayerLoseHealth(1, 1);
+    CHECK(gNumPlayersEliminated == 1 && !gTrackCompleted);
+    ApplyBecomeBot(2);
+    ApplyBecomeBot(2);
+    CHECK(gNumPlayersEliminated == 2 && gNumGatheredPlayers == 2);
+    UpdateGameModeSpecifics();
+    CHECK(gTrackCompleted && !gPlayerInfo[0].isEliminated);
+    for (int i = 0; i < gNumTotalPlayers; i++)
+        CHECK(winLoseWinner[i] == 0 && winLoseMode[i] == (i == 0 ? 1 : 2));
+    EndSession(host, first, second);
+}
+
+static void SurvivalWithoutSurvivors(void)
+{
+    NSpGame *first, *second;
+    NSpGame* host = BeginSession(&first, &second);
+    gGameMode = GAME_MODE_SURVIVAL;
+    for (int i = 0; i < gNumTotalPlayers; i++) PlayerLoseHealth(i, 1);
+    UpdateGameModeSpecifics();
+    CHECK(gTrackCompleted && gNumPlayersEliminated == gNumTotalPlayers);
+    for (int i = 0; i < gNumTotalPlayers; i++)
+        CHECK(winLoseWinner[i] == -1 && winLoseMode[i] == 2);
+    EndSession(host, first, second);
+}
+
 static void PausedLeaveAndReset(void)
 {
     NSpGame *first, *second;
@@ -164,6 +269,7 @@ static void PausedLeaveAndReset(void)
     uint32_t frame = sFrameEventTable[0].effectiveFrame;
     CHECK(sFrameEventTable[0].valid);
     gGameMode = GAME_MODE_TAG1;
+    taggedChoices = 0;
     gPlayerInfo[2].isIt = true;
     gHostSendCounter = frame; // ApplyPendingFrameEvents applies the last transmitted frame
     ApplyPendingFrameEvents();
@@ -172,7 +278,7 @@ static void PausedLeaveAndReset(void)
     ApplyPendingFrameEvents();
     ApplyPendingFrameEvents();
     CHECK(gPlayerInfo[2].isComputer && !IsNetGamePaused());
-    CHECK(gNumGatheredPlayers == 2 && taggedChoices == 1);
+    CHECK(gNumGatheredPlayers == 2 && taggedChoices == 1 && gNumPlayersEliminated == 1);
     gNetBadge[1] = true;
     gPlayerSyncMask = 7;
     ResetNetGameTransientState();
@@ -188,6 +294,11 @@ int main(void)
     DelayedReady();
     LastPeerTimeout();
     SelectorResumesAfterTeardown();
+    SurvivalReadinessRemoval(false);
+    SurvivalReadinessRemoval(true);
+    BattleDepartureWinner(GAME_MODE_SURVIVAL);
+    BattleDepartureWinner(GAME_MODE_TAG1);
+    SurvivalWithoutSurvivors();
     PausedLeaveAndReset();
     puts("Readiness and paused-leave tests passed");
     return 0;

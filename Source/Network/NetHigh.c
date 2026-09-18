@@ -465,6 +465,9 @@ static void ApplyBecomeBot(int i)
 		return;
 
 	gPlayerInfo[i].isComputer = true;							// turn it into a computer player.
+	if (!gPlayerInfo[i].isEliminated
+		&& (gGameMode == GAME_MODE_TAG1 || gGameMode == GAME_MODE_SURVIVAL))
+		gNumPlayersEliminated++;									// disconnected players count toward the battle's win condition
 	gPlayerInfo[i].isEliminated = true;							// also eliminate from battles
 	gPlayerInfo[i].net.pauseState = 0;							// unpause if they were paused
 	gNumGatheredPlayers--;										// one less net player in the game

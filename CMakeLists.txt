@@ -629,11 +629,13 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 		set_tests_properties(network_lifecycle PROPERTIES TIMEOUT 30)
 		if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 			add_executable(CroMagRallyNetworkReadinessTests Tests/NetworkReadinessTests.c
-				Source/Network/NetValidation.c Source/System/TextUtils.c)
+				Source/Network/NetValidation.c Source/System/TextUtils.c
+				Source/Player/Player.c Source/System/Main.c Source/System/DeterministicMath.c)
 			target_include_directories(CroMagRallyNetworkReadinessTests PRIVATE ${GAME_GENERATED_INCLUDE_DIR} ${GAME_SRCDIR}/Headers)
 			target_link_libraries(CroMagRallyNetworkReadinessTests PRIVATE Pomme SDL3::SDL3)
 			target_compile_options(CroMagRallyNetworkReadinessTests PRIVATE -ffunction-sections -fdata-sections)
-			target_link_options(CroMagRallyNetworkReadinessTests PRIVATE -Wl,--gc-sections)
+			target_link_options(CroMagRallyNetworkReadinessTests PRIVATE -Wl,--gc-sections
+				-Wl,--wrap=ChooseTaggedPlayer -Wl,--wrap=UpdateTagMarker)
 			if(SANITIZE)
 				target_compile_options(CroMagRallyNetworkReadinessTests PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
 				target_link_options(CroMagRallyNetworkReadinessTests PRIVATE -fsanitize=address,undefined)

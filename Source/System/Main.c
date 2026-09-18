@@ -1632,9 +1632,30 @@ static void CleanupLevel(void)
 
 /*************** UPDATE GAME MODE SPECIFICS **********************/
 
+// A readiness timeout or a frame-aligned departure can leave one survivor without
+// a new damage/tag event. Both elimination modes must check that state each frame.
+static Boolean CompleteEliminationBattle(void)
+{
+	if (gNumTotalPlayers <= 0 || gNumPlayersEliminated < gNumTotalPlayers - 1)
+		return false;
+
+	gTrackCompleted = true;
+	gTrackCompletedCoolDownTimer = TRACK_COMPLETE_COOLDOWN_TIME;
+	short winner = -1;
+	for (short i = 0; i < gNumTotalPlayers; i++)
+		if (!gPlayerInfo[i].isEliminated)
+		{
+			winner = i;
+			break;
+		}
+	for (short i = 0; i < gNumTotalPlayers; i++)
+		ShowWinLose(i, i == winner ? 1 : 2, winner);
+	return true;
+}
+
 void UpdateGameModeSpecifics(void)
 {
-short	i,t,winner;
+short	i,t;
 
 	if (gTrackCompleted)										// if track is done then dont do anything
 		return;
@@ -1646,6 +1667,8 @@ short	i,t,winner;
 				/****************************/
 
 		case	GAME_MODE_TAG1:
+				if (CompleteEliminationBattle())
+					break;
 				gReTagTimer -= gFramesPerSecondFrac;						// dec this timer
 
 				if (gStartingLightTimer <= 1.0f)
@@ -1659,30 +1682,7 @@ short	i,t,winner;
 					gPlayerInfo[eliminatedPlayer].isIt = false;
 
 					gNumPlayersEliminated++;
-					if (gNumPlayersEliminated == (gNumTotalPlayers-1))		// if all players eliminated except 1 then we're done!
-					{
-							/* GAME IS DONE */
-
-						gTrackCompleted = true;
-						gTrackCompletedCoolDownTimer = TRACK_COMPLETE_COOLDOWN_TIME;
-
-						for (winner = 0; winner < gNumTotalPlayers; winner++)
-							if (!gPlayerInfo[winner].isEliminated)			// scan for the winner
-								break;
-
-						for (i = 0; i < gNumTotalPlayers; i++)				// see which player Won (was not eliminated)
-						{
-							if (gPlayerInfo[i].isEliminated)
-							{
-								ShowWinLose(i, 2, winner);					// lost
-							}
-							else
-								ShowWinLose(i, 1, winner);					// won!
-						}
-					}
-
-							/* ELIMINATE THIS PLAYER AND CHOOSE ANOTHER */
-					else
+					if (!CompleteEliminationBattle())
 					{
 						ShowWinLose(eliminatedPlayer, 0, 0);					// this player is eliminated
 						// Re-select the tagged player WITHOUT advancing the synced RNG: this in-sim
@@ -1739,40 +1739,7 @@ short	i,t,winner;
 					gPlayerInfo[i].impactResetTimer -= gFramesPerSecondFrac;
 				}
 
-				if (gNumPlayersEliminated == (gNumTotalPlayers-1))		// if all players eliminated except 1 then we're done!
-				{
-						/* GAME IS DONE */
-
-					gTrackCompleted = true;
-					gTrackCompletedCoolDownTimer = TRACK_COMPLETE_COOLDOWN_TIME;
-
-					for (winner = 0; winner < gNumTotalPlayers; winner++)
-						if (!gPlayerInfo[winner].isEliminated)			// scan for the winner
-							break;
-
-
-								/* NOBODY WON */
-
-					if (winner >= gNumTotalPlayers)
-					{
-						for (i = 0; i < gNumTotalPlayers; i++)			// all were eliminated
-							ShowWinLose(i, 2, -1);						// lost
-					}
-
-							/* SHOW WINNER/LOSERS */
-					else
-					{
-						for (i = 0; i < gNumTotalPlayers; i++)				// see which player Won (was not eliminated)
-						{
-							if (gPlayerInfo[i].isEliminated)
-							{
-								ShowWinLose(i, 2, winner);					// lost
-							}
-							else
-								ShowWinLose(i, 1, winner);					// won!
-						}
-					}
-				}
+				CompleteEliminationBattle();
 				break;
 
 
