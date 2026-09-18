@@ -17,6 +17,7 @@ float gFramesPerSecondFrac, gStartingLightTimer;
 long gNumCheckpoints = 1;
 short gWorstHumanPlace;
 static ObjNode playerModels[MAX_PLAYERS];
+static int unlockedAges;
 static int taggedChoices;
 static Boolean backPressed;
 static int expectedGatherState, gatherScreenCalls;
@@ -43,7 +44,7 @@ void ShowWinLose(short playerNum, Byte mode, short winner)
 Boolean GetNewNeedStateAnyP(int needID) { return needID == kNeed_UIBack && backPressed; }
 
 // Keep real level player initialization; isolate terrain/model/physics setup.
-int GetNumAgesCompleted(void) { return 0; }
+int GetNumAgesCompleted(void) { return unlockedAges; }
 uint16_t RandomRange(unsigned short min, unsigned short max) { CHECK(min <= max); return min; }
 float GetTerrainY(float x, float z) { (void)x; (void)z; return 0; }
 ObjNode* InitPlayer_Car(int playerNum, OGLPoint3D* where, float rotY)
@@ -75,6 +76,8 @@ static NSpGame* BeginSession(NSpGame** first, NSpGame** second)
     backPressed = false;
     gNumGatheredPlayers = gNumRealPlayers = gNumTotalPlayers = 3;
     gGameMode = GAME_MODE_MULTIPLAYERRACE;
+    gDifficulty = DIFFICULTY_MEDIUM;
+    unlockedAges = 0;
     gNetPort = 0;
     NSpGame* host = NSpGame_Host();
     CHECK(host);
@@ -340,6 +343,28 @@ static void SurvivalWithoutSurvivors(void)
     EndSession(host, first, second);
 }
 
+static void NetworkReplacementVehicle(int selectedVehicle)
+{
+    NSpGame *first, *second;
+    NSpGame* host = BeginSession(&first, &second);
+    gPlayerInfo[2].vehicleType = selectedVehicle;
+    ApplyBecomeBot(2);
+    const int difficulties[] = {DIFFICULTY_MEDIUM, DIFFICULTY_HARD};
+    for (int d = 0; d < 2; d++)
+    {
+        gDifficulty = difficulties[d];
+        for (int ages = 0; ages <= 2; ages += 2)
+        {
+            unlockedAges = ages; // peers may have different local tournament saves
+            gPlayerInfo[2].vehicleType = selectedVehicle;
+            InitPlayersAtStartOfLevel();
+            CHECK(gPlayerInfo[2].vehicleType == selectedVehicle);
+            CHECK(gPlayerInfo[2].isComputer && !gPlayerInfo[2].isEliminated);
+        }
+    }
+    EndSession(host, first, second);
+}
+
 static void TagWinnerDeparture(void)
 {
     NSpGame *first, *second;
@@ -411,6 +436,8 @@ int main(void)
     BattleVehicleTimeout(GAME_MODE_CAPTUREFLAG);
     BattleVehicleTimeout(GAME_MODE_MULTIPLAYERRACE);
     SurvivalWithoutSurvivors();
+    NetworkReplacementVehicle(CAR_TYPE_MAMMOTH); // the shared default before selection
+    NetworkReplacementVehicle(CAR_TYPE_GEODE); // a selection already received from the peer
     TagWinnerDeparture();
     PausedLeaveAndReset();
     puts("Readiness and paused-leave tests passed");

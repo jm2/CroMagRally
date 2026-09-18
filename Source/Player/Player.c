@@ -199,7 +199,9 @@ Boolean	taken[NUM_LAND_CAR_TYPES];
 
 	for (i = 0; i < gNumTotalPlayers; i++)
 	{
-		if (gPlayerInfo[i].isComputer)									// set CPU vehicle type
+		// Network replacements retain the shared selection (or its default).
+		// Local unlock progress must not change their vehicle or consume synced RNG.
+		if (gPlayerInfo[i].isComputer && !gNetGameInProgress)		// set local CPU vehicle type
 		{
 			if (gDifficulty == DIFFICULTY_HARD)					// in hard mode, the CPU can have duplicate cars
 				gPlayerInfo[i].vehicleType = RandomRange(0, type);
@@ -790,7 +792,6 @@ ObjNode *obj;
 		obj = obj->ChainNode;
 	}
 }
-
 
 
 
