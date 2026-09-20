@@ -197,7 +197,7 @@ int SaveRaceTime(int playerNum)
 	SDL_memset(myRecord, 0, sizeof(*myRecord));
 	SDL_memcpy(myRecord->lapTimes, pi->lapTimes, sizeof(myRecord->lapTimes));
 	myRecord->timestamp		= timestampNanoseconds / 1e9;
-	myRecord->difficulty	= gGamePrefs.difficulty;
+	myRecord->difficulty	= gDifficulty;
 	myRecord->gameMode		= gGameMode;
 	myRecord->trackNum		= gTrackNum;
 	myRecord->vehicleType	= pi->vehicleType;
