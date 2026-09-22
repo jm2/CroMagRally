@@ -196,17 +196,26 @@ static void TestPlayerCounts(void)
 		CHECK_ENTRY(Fill(entry, 8, poses) == entry, entry);
 		CHECK_ENTRY(SamePose(poses[6], entry->extra[0]) && SamePose(poses[7], entry->extra[1]), entry);
 
-				/* 16 PLAYERS: MORE THAN THE TABLE HAS, SO THE RULE FILLS THEM ALL */
+				/* 16 PLAYERS: THE TABLE'S SIX, THEN THE RULE, CLEAR OF THEM */
 
-		CHECK_ENTRY(Fill(entry, MAX_TEST_SLOTS, poses) == NULL, entry);
-		for (int p = 0; p < AUTHORED; p++)
-			CHECK_ENTRY(SamePose(poses[p], entry->authored[p]), entry);
-		for (int p = AUTHORED; p < MAX_TEST_SLOTS; p++)
+		CHECK_ENTRY(Fill(entry, MAX_TEST_SLOTS, poses) == entry, entry);
+		for (int p = 0; p < TABLE_SLOTS; p++)
+			CHECK_ENTRY(SamePose(poses[p], p < AUTHORED ? entry->authored[p] : entry->extra[p - AUTHORED]), entry);
+		for (int p = TABLE_SLOTS; p < MAX_TEST_SLOTS; p++)
 		{
 			CHECK_ENTRY(poses[p].x >= 0 && poses[p].x < entry->mapUnitWidth, entry);
 			CHECK_ENTRY(poses[p].z >= 0 && poses[p].z < entry->mapUnitDepth, entry);
-			for (int q = 0; q < p; q++)
-				CHECK_ENTRY(poses[q].x != poses[p].x || poses[q].z != poses[p].z, entry);
+		}
+		CheckDistinctAndSpaced(entry, poses, MAX_TEST_SLOTS);
+
+				/* A RACE GRID'S THIRD WAVE STARTS BEHIND THE TABLE'S */
+
+		if (entry->set == START_SLOT_SET_RACE)
+		{
+			const int rot16 = entry->authored[0].rot16;
+			for (int p = TABLE_SLOTS; p < MAX_TEST_SLOTS; p++)
+				for (int q = AUTHORED; q < TABLE_SLOTS; q++)
+					CHECK_ENTRY(Depth(poses[p].x, poses[p].z, rot16) < Depth(poses[q].x, poses[q].z, rot16), entry);
 		}
 	}
 }

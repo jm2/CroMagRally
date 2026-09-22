@@ -69,14 +69,14 @@ int StartSlots_CountAuthored(const bool authored[], int numSlots)
 /********************** FIND TABLE ENTRY **************************/
 //
 // The table entry for this map, if the map's authored slots of this set are exactly players
-// 0-5 with exactly the coordinates and headings the table was generated from, and the table
-// has a slot for every other player. Anything else is a modified map: use the procedural rule.
+// 0-5 with exactly the coordinates and headings the table was generated from. Anything else is
+// a modified map: use the procedural rule.
 //
 
 static const StartSlotTableEntry* FindTableEntry(StartSlotSet set, int mapUnitWidth, int mapUnitDepth,
 												const StartSlot items[], const bool authored[], int numSlots)
 {
-	if (numSlots > START_SLOT_TABLE_AUTHORED + START_SLOT_TABLE_EXTRA)
+	if (numSlots < START_SLOT_TABLE_AUTHORED)
 		return NULL;
 
 	for (int p = 0; p < numSlots; p++)
@@ -341,7 +341,8 @@ static void FillByRule(StartSlotSet set, int mapUnitWidth, int mapUnitDepth,
 //
 // items[p] is player p's MyStartCoord item where authored[p]. Fills poses[0 .. numSlots-1]:
 // authored players keep their item; the others take the table's slots when this map and set
-// match a table entry, else the procedural rule's. Returns the table entry used, or NULL when
+// match a table entry, else the procedural rule's. Players beyond the table's (12 and up) take
+// the rule's slots either way, clear of the table's. Returns the table entry used, or NULL when
 // nothing was missing or the rule filled the gaps.
 //
 
@@ -372,16 +373,16 @@ const StartSlotTableEntry* StartSlots_Fill(StartSlotSet set, int mapUnitWidth, i
 	const StartSlotTableEntry* entry = FindTableEntry(set, mapUnitWidth, mapUnitDepth, items, authored, numSlots);
 	if (entry)
 	{
-		for (int p = START_SLOT_TABLE_AUTHORED; p < numSlots; p++)
+		for (int p = START_SLOT_TABLE_AUTHORED; p < numSlots && p < START_SLOT_TABLE_AUTHORED + START_SLOT_TABLE_EXTRA; p++)
 		{
 			const StartSlot* s = &entry->extra[p - START_SLOT_TABLE_AUTHORED];
 			poses[p] = (StartSlotPose) { s->x, s->z, StartSlot_RotY(s->rot16) };
+			placed[p] = true;
 		}
-		return entry;
 	}
 
 	FillByRule(set, mapUnitWidth, mapUnitDepth, items, authored, numSlots, poses, placed);
-	return NULL;
+	return entry;
 }
 
 
