@@ -8,6 +8,7 @@
 
 #include "game.h"
 #include "mytraps.h"
+#include "startslots.h"
 
 
 /****************************/
@@ -209,16 +210,23 @@ int						total;
 /******************** FIND PLAYER START COORD ITEM *******************/
 //
 // Scans thru item list for item type #14 which is a teleport reciever / start coord,
+// then gives every player without one a slot from the start-slot table or the procedural
+// rule (StartSlots.c).
 //
 
 void FindPlayerStartCoordItems(void)
 {
 long					i;
 TerrainItemEntryType	*itemPtr;
-Boolean                 flags[MAX_PLAYERS];
+bool					flags[MAX_PLAYERS];
+StartSlot				items[MAX_PLAYERS];
+StartSlotPose			poses[MAX_PLAYERS];
 
 	for (i = 0; i < MAX_PLAYERS; i++)
+	{
 		flags[i] = false;
+		items[i] = (StartSlot) { 0, 0, 0 };
+	}
 
 
 	itemPtr = *gMasterItemList; 												// get pointer to data inside the LOCKED handle
@@ -250,14 +258,45 @@ Boolean                 flags[MAX_PLAYERS];
 			if (p >= MAX_PLAYERS)											// skip illegal player #'s
 				continue;
 
-			gPlayerInfo[p].coord.x = gPlayerInfo[p].startX = itemPtr[i].x;
-			gPlayerInfo[p].coord.z = gPlayerInfo[p].startZ = itemPtr[i].y;
-			gPlayerInfo[p].startRotY = PI2 * ((float)itemPtr[i].parm[1] * (1.0f/16.0f));	// calc starting rotation aim
+			items[p].x = itemPtr[i].x;
+			items[p].z = itemPtr[i].y;
+			items[p].rot16 = itemPtr[i].parm[1];							// starting rotation aim, 1/16 turns
 
 			if (flags[p])                      								// if we already got a coord for this player then err
                 DoFatalAlert("FindPlayerStartCoordItems:  duplicate start item for player #n");
 	        flags[p] = true;
 		}
+	}
+
+
+			/* FILL IN PLAYERS WITHOUT AN ITEM */
+			//
+			// The shipped maps author 6 slots per set; the table has the rest for them.
+			//
+
+	const StartSlotSet set = gGameMode == GAME_MODE_CAPTUREFLAG ? START_SLOT_SET_CTF
+						: (gGameMode == GAME_MODE_TAG1 || gGameMode == GAME_MODE_TAG2 || gGameMode == GAME_MODE_SURVIVAL)
+						? START_SLOT_SET_BATTLE : START_SLOT_SET_RACE;
+
+	StartSlots_Fill(set, (int) gTerrainUnitWidth, (int) gTerrainUnitDepth, items, flags, MAX_PLAYERS, poses);
+
+
+			/* KEEP HUMANS AT THE BACK OF A RACE GRID */
+
+	if (set == START_SLOT_SET_RACE)
+	{
+		bool isComputer[MAX_PLAYERS];
+
+		for (i = 0; i < MAX_PLAYERS; i++)
+			isComputer[i] = gPlayerInfo[i].isComputer;
+		StartSlots_KeepHumansAtBack(poses, isComputer, gNumTotalPlayers, StartSlots_CountAuthored(flags, MAX_PLAYERS));
+	}
+
+	for (i = 0; i < MAX_PLAYERS; i++)
+	{
+		gPlayerInfo[i].coord.x = gPlayerInfo[i].startX = poses[i].x;
+		gPlayerInfo[i].coord.z = gPlayerInfo[i].startZ = poses[i].z;
+		gPlayerInfo[i].startRotY = poses[i].rotY;
 	}
 }
 

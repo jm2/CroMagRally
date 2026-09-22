@@ -596,6 +596,8 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 		endif()
 		if(MSVC)
 			target_compile_definitions(${target} PRIVATE WIN32_LEAN_AND_MEAN NOGDI NOUSER)
+		else()
+			target_compile_options(${target} PRIVATE -Wno-multichar)	# Pomme's four-char codes, as for the game
 		endif()
 		if(SANITIZE)
 			target_compile_options(${target} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
@@ -631,6 +633,8 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 	cmr_add_gameplay_test(CroMagRallyCPUDriverTests cpu_driver Tests/CPUDriverTests.c Source/Player/CPUDriver.c)
 	cmr_add_gameplay_test(CroMagRallyCarCountTuningTests car_count_tuning Tests/CarCountTuningTests.c
 		Source/Player/CarCountTuning.c)
+	cmr_add_gameplay_test(CroMagRallyStartSlotTests start_slots Tests/StartSlotTests.c
+		Source/Terrain/StartSlots.c Source/Terrain/StartSlotTable.c)
 	add_executable(CroMagRallyValidationTests
 		Tests/ValidationTests.c
 		Source/Network/NetValidation.c
