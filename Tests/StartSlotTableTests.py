@@ -2,7 +2,8 @@
 """Checks Source/Terrain/StartSlotTable.c, the generated start slots for players 6-11.
 
 Re-validates every slot in the checked-in table against the shipped playfields (spacing,
-fences, flatness and height, water, obstacles, map bounds, CTF sides, the checkpoint rule),
+fences, flatness and height, water, obstacles, map bounds, a clear run ahead, CTF sides,
+the checkpoint rule),
 checks that the table is exactly what tools/gen_start_slots.py generates today, and checks
 that the validator rejects each kind of bad slot. Uses only the standard library.
 
@@ -90,6 +91,27 @@ class StartSlotTableTests(unittest.TestCase):
         self.assertGreater(top[0], 1000)          # a hedge top, well above the corridors
         self.assertRejected(self.problems_with('Battle_Maze', gen.SET_BATTLE, 6, top[1], top[2]),
                             'height range', 'from its source', 'terrain rises', 'steep')
+
+    def test_footprint_height_range_is_exact(self):
+        pf = self.map('StoneAge_Desert').pf
+        for x, z in ((72200, 86128), (70150, 87105), (41234.5, 60321.25)):
+            lo, hi = pf.height_range(x, z, gen.FOOTPRINT_R)
+            dense = [pf.terrain_y(x + i * 20, z + j * 20) for i in range(-20, 21) for j in range(-20, 21)
+                     if (i * 20) ** 2 + (j * 20) ** 2 <= gen.FOOTPRINT_R ** 2]
+            self.assertLessEqual(lo, min(dense) + 1e-6)
+            self.assertGreaterEqual(hi, max(dense) - 1e-6)
+            self.assertLess((hi - lo) - (max(dense) - min(dense)), 20)     # and no looser than sampling
+
+    def test_rejects_rough_footprint_between_grid_samples(self):
+        # The first table's Desert p10, at the foot of the canyon wall: 278 on a 100-unit grid,
+        # 328 exactly.
+        self.assertRejected(self.problems_with('StoneAge_Desert', gen.SET_RACE, 10, 72200, 86128),
+                            'footprint height range 328')
+
+    def test_rejects_wall_late_in_the_clear_run(self):
+        # The first table's China p11 faced a 63% bank 950 ahead, though the average grade over
+        # the whole run was only 21%.
+        self.assertRejected(self.problems_with('BronzeAge_China', gen.SET_RACE, 11, 24350, 71750), 'wall 950 ahead')
 
     def test_rejects_water(self):
         md = self.map('BronzeAge_Egypt')

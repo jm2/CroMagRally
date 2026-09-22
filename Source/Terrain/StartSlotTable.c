@@ -28,12 +28,12 @@ const StartSlotTableEntry kStartSlotTable[] =
 		},
 		.extra =
 		{
-			{ 70150,  87105, 12 },	// p6: rule wave 1200 left, lanes x1.15
-			{ 71250,  86013, 12 },	// p7: rule wave 1200 left, lanes x1.15
-			{ 71150,  88198, 12 },	// p8: rule wave 1200 left, lanes x1.15
-			{ 71050,  87220, 12 },	// p9: rule wave 1200 left, lanes x1.15
-			{ 72200,  86128, 12 },	// p10: rule wave 1200 left, lanes x1.15
-			{ 72100,  87738, 12 },	// p11: rule wave 1200 left, lanes x1.15
+			{ 70150,  86675, 12 },	// p6: rule wave 600 left, rows 500 left per 1000 back
+			{ 71250,  86275, 12 },	// p7: rule wave 600 left, rows 500 left per 1000 back
+			{ 71150,  88125, 12 },	// p8: rule wave 600 left, rows 500 left per 1000 back
+			{ 71050,  87225, 12 },	// p9: rule wave 600 left, rows 500 left per 1000 back
+			{ 72200,  86850, 12 },	// p10: rule wave 600 left, rows 500 left per 1000 back
+			{ 72100,  88200, 12 },	// p11: rule wave 600 left, rows 500 left per 1000 back
 		},
 	},
 	{
@@ -116,12 +116,12 @@ const StartSlotTableEntry kStartSlotTable[] =
 		},
 		.extra =
 		{
-			{ 23150,  74000,  0 },	// p6: rule wave 4400 right
-			{ 23150,  72900,  0 },	// p7: rule wave 4400 right
-			{ 24350,  72900,  0 },	// p8: rule wave 4400 right
-			{ 24350,  74000,  0 },	// p9: rule wave 4400 right
-			{ 23150,  71800,  0 },	// p10: rule wave 4400 right
-			{ 24350,  71750,  0 },	// p11: rule wave 4400 right
+			{ 23100,  74000,  0 },	// p6: rule wave 2100 right, rows 1000 right per 1000 back
+			{ 22000,  72900,  0 },	// p7: rule wave 2100 right, rows 1000 right per 1000 back
+			{ 23200,  72900,  0 },	// p8: rule wave 2100 right, rows 1000 right per 1000 back
+			{ 24300,  74000,  0 },	// p9: rule wave 2100 right, rows 1000 right per 1000 back
+			{ 20900,  71800,  0 },	// p10: rule wave 2100 right, rows 1000 right per 1000 back
+			{ 22050,  71750,  0 },	// p11: rule wave 2100 right, rows 1000 right per 1000 back
 		},
 	},
 	{
@@ -182,12 +182,12 @@ const StartSlotTableEntry kStartSlotTable[] =
 		},
 		.extra =
 		{
-			{ 87267,  24114,  3 },	// p6: rule wave 900 right
-			{ 87167,  25414,  3 },	// p7: rule wave 900 right
-			{ 85817,  24214,  3 },	// p8: rule wave 900 right
-			{ 85767,  25464,  3 },	// p9: rule wave 900 right
-			{ 84417,  24214,  3 },	// p10: rule wave 900 right
-			{ 84417,  25564,  3 },	// p11: rule wave 900 right
+			{ 87359,  24152,  3 },	// p6: rule wave 100 further back, 900 right
+			{ 87259,  25452,  3 },	// p7: rule wave 100 further back, 900 right
+			{ 85909,  24252,  3 },	// p8: rule wave 100 further back, 900 right
+			{ 85859,  25502,  3 },	// p9: rule wave 100 further back, 900 right
+			{ 84509,  24252,  3 },	// p10: rule wave 100 further back, 900 right
+			{ 84509,  25602,  3 },	// p11: rule wave 100 further back, 900 right
 		},
 	},
 	{
@@ -270,7 +270,7 @@ const StartSlotTableEntry kStartSlotTable[] =
 		},
 		.extra =
 		{
-			{ 34300,   9100,  5 },	// p6: moved 416 from the rule
+			{ 34000,   9800,  4 },	// p6: moved 520 from the rule
 			{ 30935,  13077,  0 },	// p7: rule
 			{ 27834,   8516, 11 },	// p8: rule
 			{ 31606,   8863,  6 },	// p9: rule
@@ -358,12 +358,12 @@ const StartSlotTableEntry kStartSlotTable[] =
 		},
 		.extra =
 		{
-			{ 33718,  20048,  4 },	// p6: rule
+			{ 33900,  20300,  4 },	// p6: moved 310 from the rule
 			{ 27970,  16747,  8 },	// p7: rule
 			{ 24515,  22594, 13 },	// p8: rule
-			{ 26300,  19600, 11 },	// p9: moved 1585 from the rule
+			{ 26500,  19500, 11 },	// p9: moved 1611 from the rule
 			{ 25800,  23000, 14 },	// p10: moved 1467 from the rule
-			{ 31300,  19700,  4 },	// p11: moved 2242 from the rule
+			{ 31200,  19700,  4 },	// p11: moved 2321 from the rule
 		},
 	},
 	{
@@ -382,7 +382,7 @@ const StartSlotTableEntry kStartSlotTable[] =
 		{
 			{ 18900,  41600,  6 },	// p6: moved 390 from the rule
 			{ 43300,  19100,  0 },	// p7: moved 1923 from the rule
-			{ 19600,  39900,  6 },	// p8: moved 1408 from the rule
+			{ 19500,  39900,  6 },	// p8: moved 1439 from the rule
 			{ 44500,  19100,  0 },	// p9: moved 1589 from the rule
 			{ 19250,  42800,  6 },	// p10: rule
 			{ 42800,  16900,  0 },	// p11: moved 827 from the rule
@@ -428,7 +428,7 @@ const StartSlotTableEntry kStartSlotTable[] =
 			{ 46600,  47900,  1 },	// p7: moved 223 from the rule
 			{ 16800,   3300,  8 },	// p8: rule
 			{ 45600,  49350,  1 },	// p9: rule
-			{ 15650,   4650,  8 },	// p10: rule
+			{ 15300,   4700,  8 },	// p10: moved 353 from the rule
 			{ 44850,  47750,  1 },	// p11: rule
 		},
 	},
@@ -446,11 +446,11 @@ const StartSlotTableEntry kStartSlotTable[] =
 		},
 		.extra =
 		{
-			{ 29300,  23800, 10 },	// p6: moved 1005 from the rule
+			{ 29600,  23600,  9 },	// p6: moved 1364 from the rule
 			{ 30740,  28935,  0 },	// p7: rule
-			{ 33200,  27200,  3 },	// p8: moved 533 from the rule
+			{ 33100,  27200,  3 },	// p8: moved 582 from the rule
 			{ 33376,  24515,  5 },	// p9: rule
-			{ 29200,  28900, 15 },	// p10: moved 1624 from the rule
+			{ 29200,  29000, 15 },	// p10: moved 1716 from the rule
 			{ 31295,  22989,  8 },	// p11: rule
 		},
 	},
@@ -471,9 +471,9 @@ const StartSlotTableEntry kStartSlotTable[] =
 			{ 14800,  12450, 10 },	// p6: rule
 			{ 43400,  42300,  2 },	// p7: moved 790 from the rule
 			{ 14900,  10900, 10 },	// p8: moved 300 from the rule
-			{ 42800,  43100,  2 },	// p9: moved 514 from the rule
-			{ 14700,  13700, 10 },	// p10: moved 2220 from the rule
-			{ 42500,  41500,  2 },	// p11: moved 2009 from the rule
+			{ 42900,  43200,  1 },	// p9: moved 570 from the rule, turned -1/16 for a clear run
+			{ 14800,  13700, 10 },	// p10: moved 2280 from the rule
+			{ 44300,  44600,  2 },	// p11: moved 2282 from the rule
 		},
 	},
 	{
@@ -493,7 +493,7 @@ const StartSlotTableEntry kStartSlotTable[] =
 			{ 30100,  23900,  4 },	// p6: moved 232 from the rule
 			{ 27700,  23100,  7 },	// p7: moved 2616 from the rule, turned -1/16 for a clear run
 			{ 29270,  26310,  1 },	// p8: rule
-			{ 26700,  25500, 15 },	// p9: moved 2599 from the rule
+			{ 26800,  25500, 15 },	// p9: moved 2666 from the rule
 			{ 27400,  26600,  0 },	// p10: moved 1174 from the rule
 			{ 29200,  22000,  6 },	// p11: moved 548 from the rule
 		},
@@ -557,11 +557,11 @@ const StartSlotTableEntry kStartSlotTable[] =
 		.extra =
 		{
 			{ 25600,  41900,  0 },	// p6: moved 509 from the rule
-			{ 37500,   9100,  6 },	// p7: moved 710 from the rule
-			{ 25900,  40100,  0 },	// p8: moved 1486 from the rule
-			{ 37300,  10300,  6 },	// p9: moved 1644 from the rule
+			{ 37500,   9100,  7 },	// p7: moved 710 from the rule, turned +1/16 for a clear run
+			{ 25800,  40000,  0 },	// p8: moved 1615 from the rule
+			{ 37400,  10300,  6 },	// p9: moved 1680 from the rule
 			{ 25900,  42750,  0 },	// p10: rule
-			{ 38500,  10600,  6 },	// p11: moved 1432 from the rule
+			{ 36600,  11200,  6 },	// p11: moved 1453 from the rule
 		},
 	},
 };

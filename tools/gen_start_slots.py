@@ -11,9 +11,10 @@ procedural rule (Source/Terrain/StartSlots.c).
   race    The procedural rule: repeat the authored grid behind itself (shift = grid depth span
           + 1300 along -forward), same heading, slot 6+k behind authored slot k, so the game can
           swap each human into the rearmost wave. Where that wave breaks a constraint, the whole
-          wave moves further back or sideways and its lanes squeeze or widen; the passing wave
-          with the lowest cost (distance moved plus a penalty for rough ground) wins. If no
-          whole wave passes, single slots move to the best spot nearby.
+          wave moves further back or sideways, its lanes squeeze or widen and its rows stagger
+          sideways to follow a road that bends behind the grid; the passing wave with the lowest
+          cost (distance moved plus a penalty for rough ground) wins. If no whole wave passes,
+          single slots move to the best spot nearby.
   battle  Each slot keeps the procedural rule's spot (a second, wider ring rotated half a slot)
           if that passes, else takes the best passing spot nearby: close to the rule's spot, on
           flat ground, with room around it. Slots face the ring's centre.
@@ -70,11 +71,11 @@ MIN_SPACING = 900       # from every other slot of the same set, authored or gen
                         # own grid has one pair 856 apart; every other authored pair is >= 900.)
 MAP_EDGE = 1600         # two terrain tiles inside the playfield edge
 FENCE_CLEARANCE = 800   # from every fence: a car length plus room to steer (authored: >= 1440)
-FOOTPRINT_R = 400       # footprint radius sampled for flatness, water and blank supertiles: the
+FOOTPRINT_R = 400       # footprint radius checked for flatness, water and blank supertiles: the
                         # car's collision box is +-120 (Player_Car.c), plus room around it
-MAX_ROUGH = 300         # footprint height range. Authored: median 35, p95 243; only four exceed
-                        # 300 (Europe p2 at 322, two TarPits slots, a Maze CTF slot by a hedge).
-                        # A hedge flank or ridge side reads 700-1600.
+MAX_ROUGH = 300         # footprint height range (exact, terlib height_range). Authored: median 40,
+                        # p95 253; only four exceed 300 (Europe p2 at 330, two TarPits slots, a
+                        # Maze CTF slot by a hedge). A hedge flank or ridge side reads 700-1600.
 MAX_DH = 300            # |height - source height| <= MAX_DH + MAX_GRADE * distance. Authored
 MAX_GRADE = 0.15        # neighbours: p95 258, max 393 at 1500 apart (TarPits). The grade term
                         # lets a race slot 3-5k behind its source follow the track's climb;
@@ -83,9 +84,12 @@ MAX_HUMP = 100          # terrain between a slot and its source never rises this
                         # higher end (authored max 19): no hedge, ridge or bank in between
 MAX_STEP_GRADE = 0.35   # nor climbs or drops steeper than this over any 200-unit stretch (authored
                         # neighbours: median 0.07, p95 0.36): no terrace edge or cliff in between
-CLEAR_RUN = 1500        # the heading must have this much drivable ground ahead: no fence, map
-MAX_AHEAD_GRADE = 0.35  # edge, obstacle or climb steeper than 35% (authored p95 0.14; a hedge
-                        # wall is ~100%)
+# The heading must have this much drivable ground ahead: no fence, map edge or obstacle, and no
+# 200-unit stretch anywhere along it climbing steeper than MAX_STEP_GRADE (canyon walls and banks
+# read 40-65%, hedges ~100%). Authored race slots have >= 2000 before the first such stretch
+# (Atlantis 1450); authored arena slots >= 1500, except Maze battle p4 (1350) and four CTF slots
+# that start by a hedge or on a slope (Maze p0, TarPits p1 and p5, Ramps p3).
+CLEAR_RUN = {'race': 2000, 'battle': 1500, 'ctf': 1500}
 RACE_GAP = 1300         # the procedural rule's gap between the authored grid and its copy
 RACE_BEHIND = 900       # race slots stay this far behind the rearmost authored slot, so every
                         # human swapped into them starts behind every CPU on an authored slot
@@ -187,8 +191,6 @@ class Slot:
         return (self.x, self.z)
 
 
-_FOOTPRINT = [(dx, dz) for dx in range(-FOOTPRINT_R, FOOTPRINT_R + 1, 100)
-              for dz in range(-FOOTPRINT_R, FOOTPRINT_R + 1, 100) if dx * dx + dz * dz <= FOOTPRINT_R ** 2]
 _CELL = 2048                # obstacle lookup grid
 _FOOTPRINT_CORNERS = [(dx, dz) for dx in (-FOOTPRINT_R, 0, FOOTPRINT_R) for dz in (-FOOTPRINT_R, 0, FOOTPRINT_R)]
 
@@ -241,8 +243,7 @@ class MapData:
                 label, fp = ITEM_FOOTPRINT.get(t, ('item type %d' % t, DEFAULT_FOOTPRINT))
                 self.circles.append((x, z, fp + CAR_MARGIN, label))
         self.bases = {it['parm'][0]: (it['x'], it['z']) for it in pf.items if it['type'] == 27}
-        self._y = {}
-        self._rough = {}
+        self._range = {}
         # circles bucketed by grid cell, in item order (so the first hit matches a full scan)
         self._cells = {}
         for c in self.circles:
@@ -250,14 +251,6 @@ class MapData:
             for i in range(int((cx - r) // _CELL), int((cx + r) // _CELL) + 1):
                 for j in range(int((cz - r) // _CELL), int((cz + r) // _CELL) + 1):
                     self._cells.setdefault((i, j), []).append(c)
-
-    def y(self, x, z):
-        """terrain_y, cached (candidates and footprint samples share grid points)."""
-        key = (x, z)
-        v = self._y.get(key)
-        if v is None:
-            v = self._y[key] = self.pf.terrain_y(x, z)
-        return v
 
     def authored(self, ctf):
         slots = sorted((s for s in self.pf.starts if s['ctf'] == ctf), key=lambda s: s['player'])
@@ -301,66 +294,77 @@ class MapData:
         return None
 
     def liquid_at(self, x, z):
-        """The liquid a car at (x, z) would sit in (checked over its footprint), or None."""
+        """The liquid a car at (x, z) could sit in, or None: its footprint overlaps a patch and
+        the lowest ground in the footprint is below that patch's surface (exact and cautious)."""
         near = [lq for lq in self.liquids
                 if lq[0] - FOOTPRINT_R <= x <= lq[2] + FOOTPRINT_R and lq[1] - FOOTPRINT_R <= z <= lq[3] + FOOTPRINT_R]
         if not near:
             return None
-        for dx, dz in _FOOTPRINT:
-            px, pz = x + dx, z + dz
-            for x0, z0, x1, z1, surface, label in near:
-                if x0 <= px <= x1 and z0 <= pz <= z1 and self.y(px, pz) < surface + LIQUID_MARGIN:
-                    return label
+        low = self.height_range(x, z)[0]
+        for x0, z0, x1, z1, surface, label in near:
+            if low < surface + LIQUID_MARGIN:
+                return label
         return None
 
-    def rough(self, x, z):
-        v = self._rough.get((x, z))
+    def height_range(self, x, z):
+        """Exact (lowest, highest) ground in the footprint around (x, z), cached."""
+        v = self._range.get((x, z))
         if v is None:
-            y = self.y
-            hs = [y(x + dx, z + dz) for dx, dz in _FOOTPRINT]
-            v = self._rough[(x, z)] = max(hs) - min(hs)
+            v = self._range[(x, z)] = self.pf.height_range(x, z, FOOTPRINT_R)
         return v
 
-    def profile(self, a, b):
-        """Terrain heights every ~100 units from a to b, and the sample spacing."""
-        n = max(2, int(dist(a, b) / 100))
-        y = self.pf.terrain_y
-        return [y(a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n) for i in range(n + 1)], dist(a, b) / n
+    def rough(self, x, z):
+        lo, hi = self.height_range(x, z)
+        return hi - lo
 
     def hump(self, a, b):
-        """How far the terrain between a and b rises above the higher end."""
-        hs, _ = self.profile(a, b)
+        """How far the terrain between a and b rises above the higher end (exact)."""
+        hs = self.pf.segment_heights(a, b)
         return max(hs) - max(hs[0], hs[-1])
 
     def step_grade(self, a, b):
-        """The steepest climb or drop over any ~200-unit stretch between a and b."""
-        hs, step = self.profile(a, b)
+        """The steepest climb or drop over any 200-unit stretch between a and b (sampled
+        every ~100 units)."""
+        n = max(2, int(dist(a, b) / 100))
+        y = self.pf.terrain_y
+        hs = [y(a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n) for i in range(n + 1)]
+        step = dist(a, b) / n
         k = max(1, int(round(200 / step))) if step > 0 else 1
         return max([abs(hs[i + k] - hs[i]) / (k * step) for i in range(len(hs) - k)] or [0.0])
 
+    def on_map(self, x, z):
+        """Inside the playfield's MAP_EDGE margin and on a textured supertile."""
+        pf = self.pf
+        return MAP_EDGE <= x <= pf.unitW - MAP_EDGE and MAP_EDGE <= z <= pf.unitD - MAP_EDGE and pf.supertile_id(x, z) > 0
+
     def on_terrain(self, x, z):
+        """on_map for the whole footprint around (x, z)."""
         pf = self.pf
         if not (MAP_EDGE <= x <= pf.unitW - MAP_EDGE and MAP_EDGE <= z <= pf.unitD - MAP_EDGE):
             return False
         return all(pf.supertile_id(x + dx, z + dz) > 0 for dx, dz in _FOOTPRINT_CORNERS)
 
-    def ahead_problem(self, x, z, rot16):
-        """Why the first CLEAR_RUN units ahead of a car at (x, z) are not drivable, or None."""
+    def ahead_problem(self, x, z, rot16, run):
+        """Why the first run units ahead of a car at (x, z) are not drivable, or None."""
         f = heading(rot16)
-        end = (x + f[0] * CLEAR_RUN, z + f[1] * CLEAR_RUN)
-        if self.fence_between((x, z), end):
+        if self.fence_between((x, z), (x + f[0] * run, z + f[1] * run)):
             return 'fence ahead'
-        h0 = self.pf.terrain_y(x, z)
-        for d in range(100, CLEAR_RUN + 1, 100):
+        stretch = 200
+        hs = []
+        for d in range(0, run + stretch + 1, 50):
             px, pz = x + f[0] * d, z + f[1] * d
-            if not self.on_terrain(px, pz):
-                return 'map edge ahead'
-            if (self.pf.terrain_y(px, pz) - h0) / d > MAX_AHEAD_GRADE:
-                return 'wall ahead'
-            if d >= 300:
-                hit = self.obstacle_at(px, pz, slack=300)
+            if d <= run:
+                if not self.on_map(px, pz):
+                    return 'map edge %d ahead' % d
+                hit = self.obstacle_at(px, pz, slack=300) if d >= 300 else None
                 if hit:
-                    return hit + ' ahead'
+                    return '%s %d ahead' % (hit, d)
+            hs.append(self.pf.terrain_y(px, pz))
+        k = stretch // 50
+        for i in range(len(hs) - k):
+            grade = (hs[i + k] - hs[i]) / stretch
+            if grade > MAX_STEP_GRADE:
+                return 'wall %d ahead (%d%% over %d)' % (i * 50, 100 * grade, stretch)
         return None
 
 
@@ -470,7 +474,7 @@ def check_site(ctx, slot, full=False):
         if m['step'] > MAX_STEP_GRADE and not sub and \
                 failed('ground between it and its source is %d%% steep' % (100 * m['step'])):
             break
-        m['ahead'] = md.ahead_problem(slot.x, slot.z, slot.rot16)
+        m['ahead'] = md.ahead_problem(slot.x, slot.z, slot.rot16, CLEAR_RUN[ctx.set])
         if m['ahead']:
             failed(m['ahead'])
         break
@@ -561,18 +565,22 @@ def generate_race(ctx):
     lat = (-f[1], f[0])
     depths = [ctx.depth(s.pos) for s in a]
     shift = max(depths) - min(depths) + RACE_GAP
+    front = max(depths)
     lat0 = sum(s.x * lat[0] + s.z * lat[1] for s in a) / len(a)
 
-    def place(ds, dl, squeeze):
+    def place(ds, dl, squeeze, stagger):
+        """The rule's wave moved ds further back and dl to the right, its lanes spread by
+        squeeze and each slot moved stagger units right per unit its row is further back
+        (so the wave can follow a road that bends away behind the grid)."""
         slots = []
         for k, s in enumerate(a):
-            off = (s.x * lat[0] + s.z * lat[1] - lat0) * (squeeze - 1.0) + dl
+            off = (s.x * lat[0] + s.z * lat[1] - lat0) * (squeeze - 1.0) + dl + stagger * (front - depths[k])
             x = s.x - f[0] * (shift + ds) + lat[0] * off
             z = s.z - f[1] * (shift + ds) + lat[1] * off
             slots.append(Slot(AUTHORED + k, math.floor(x + 0.5), math.floor(z + 0.5), s.rot16, source=s))
         return slots
 
-    def describe(ds, dl, squeeze):
+    def describe(ds, dl, squeeze, stagger):
         bits = []
         if ds:
             bits.append('%d further back' % ds)
@@ -580,26 +588,32 @@ def generate_race(ctx):
             bits.append('%d %s' % (abs(dl), 'right' if dl > 0 else 'left'))
         if squeeze != 1.0:
             bits.append('lanes x%.2f' % squeeze)
+        if stagger:
+            bits.append('rows %d %s per 1000 back' % (abs(stagger) * 1000, 'right' if stagger > 0 else 'left'))
         return 'rule' if not bits else 'rule wave ' + ', '.join(bits)
 
     def cost(t):
-        ds, dl, sq = t
-        return (ds + abs(dl) + 4000 * abs(1 - sq), ds, abs(dl), dl, sq)
+        ds, dl, sq, st = t
+        return (ds + abs(dl) + 4000 * abs(1 - sq) + 2000 * abs(st), ds, abs(dl), dl, sq, abs(st), st)
 
     squeezes = (1.0, 0.85, 0.7, 1.15)
-    transforms = sorted(((ds, dl, sq) for ds in range(0, 4001, 100) for dl in range(-5000, 5001, 100)
-                         for sq in squeezes), key=cost)
+    staggers = (0.0, -0.25, 0.25, -0.5, 0.5, -0.75, 0.75, -1.0, 1.0)
+    transforms = sorted(((ds, dl, sq, st) for ds in range(0, 4001, 100) for dl in range(-5000, 5001, 100)
+                         for sq in squeezes for st in staggers), key=cost)
     # The passing wave with the lowest cost + roughness penalty (a flat copy of the rule wins
     # outright; a wave on rough ground only wins if nothing flatter is nearly as cheap).
     found, found_score = None, float('inf')
+    order = list(range(len(a)))
     for t in transforms:
         if cost(t)[0] >= found_score:
             break
         slots = place(*t)
         rough = 0.0
-        for i, s in enumerate(slots):
-            fails, m = check_slot(ctx, s, ctx.authored + slots[:i] + slots[i + 1:])
+        for i in order:
+            fails, m = check_slot(ctx, slots[i], ctx.authored + slots[:i] + slots[i + 1:])
             if fails:
+                order.remove(i)                 # check the slot that failed last first next time
+                order.insert(0, i)
                 break
             rough += penalty(m, rough_only=True, md=ctx.md)
         else:
@@ -616,7 +630,7 @@ def generate_race(ctx):
     def count_failing(t):
         slots = place(*t)
         return sum(1 for i, s in enumerate(slots) if check_slot(ctx, s, ctx.authored + slots[:i] + slots[i + 1:])[0])
-    coarse = [t for t in transforms if t[0] % 500 == 0 and t[1] % 500 == 0]
+    coarse = [t for t in transforms if t[0] % 500 == 0 and t[1] % 500 == 0 and t[3] % 0.5 == 0]
     best = min(coarse, key=lambda t: (count_failing(t), cost(t)))
     slots = place(*best)
     for s in slots:
@@ -632,7 +646,7 @@ def generate_race(ctx):
         spot = nearest_valid(ctx, slots[i], others, lambda x, z, r=slots[i].rot16: r, accept=keeps_rows)
         if spot is None:
             raise SystemExit('%s: no valid spot for race slot %d' % (ctx.md.name, slots[i].player))
-        spot.note = 'moved %d from the %s' % (dist(spot.pos, slots[i].pos), 'rule' if best == (0, 0, 1.0) else 'shifted wave')
+        spot.note = 'moved %d from the %s' % (dist(spot.pos, slots[i].pos), 'rule' if best == (0, 0, 1.0, 0.0) else 'shifted wave')
         slots[i] = spot
     return slots
 

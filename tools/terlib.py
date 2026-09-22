@@ -124,6 +124,20 @@ def seg_intersect(p1, p2, p3, p4):
     return 0 <= t <= 1 and 0 <= u <= 1
 
 
+def _circle_segment(cx, cz, r, a, b):
+    """Points where the circle (cx, cz, r) crosses segment a-b."""
+    dx, dz = b[0] - a[0], b[1] - a[1]
+    fx, fz = a[0] - cx, a[1] - cz
+    qa = dx * dx + dz * dz
+    qb = 2 * (fx * dx + fz * dz)
+    qc = fx * fx + fz * fz - r * r
+    disc = qb * qb - 4 * qa * qc
+    if qa == 0 or disc < 0:
+        return []
+    root = math.sqrt(disc)
+    return [(a[0] + t * dx, a[1] + t * dz) for t in ((-qb - root) / (2 * qa), (-qb + root) / (2 * qa)) if 0 <= t <= 1]
+
+
 def heading_vector(rot):
     """Car forward (x, z) for a rotY in radians: (-sin rotY, -cos rotY), as Checkpoints.c aims."""
     return (-math.sin(rot), -math.cos(rot))
@@ -234,10 +248,11 @@ class Playfield:
         xi = x - col * TERRAIN_POLYGON_SIZE
         zi = z - row * TERRAIN_POLYGON_SIZE
         s = TERRAIN_POLYGON_SIZE
-        y0 = self.vertex_y(row, col)            # far left
-        y1 = self.vertex_y(row, col + 1)        # far right
-        y2 = self.vertex_y(row + 1, col + 1)    # near right
-        y3 = self.vertex_y(row + 1, col)        # near left
+        h, k, n, sc = self._heights, row * self._rowStride + col, self._rowStride, self.heightScale
+        y0 = h[k] * sc                          # far left (vertex_y, inlined: this is the hot path)
+        y1 = h[k + 1] * sc                      # far right
+        y2 = h[k + n + 1] * sc                  # near right
+        y3 = h[k + n] * sc                      # near left
         # CalculateSplitModeMatrix: flat tiles and |y0-y2| < |y1-y3| split "\", others "/".
         backward = (y0 == y1 == y2 == y3) or abs(y0 - y2) < abs(y1 - y3)
         if backward:
@@ -247,6 +262,83 @@ class Playfield:
         if s - xi > zi:                         # triangle p0, p1, p3
             return y0 + (y1 - y0) * xi / s + (y3 - y0) * zi / s
         return y1 + (y2 - y3) * (xi - s) / s + (y2 - y1) * zi / s   # triangle p1, p2, p3
+
+    def _tile_split(self, row, col):
+        """(backward, y0, y1, y2, y3) for tile (row, col), as terrain_y splits it."""
+        y0 = self.vertex_y(row, col)
+        y1 = self.vertex_y(row, col + 1)
+        y2 = self.vertex_y(row + 1, col + 1)
+        y3 = self.vertex_y(row + 1, col)
+        return (y0 == y1 == y2 == y3) or abs(y0 - y2) < abs(y1 - y3), y0, y1, y2, y3
+
+    def height_range(self, x, z, r):
+        """Exact (min, max) of terrain_y over the disk of radius r around (x, z).
+
+        The terrain is linear on each triangle, so the extremes over the disk lie at a mesh
+        vertex inside it, where the circle crosses a triangle edge, or where the circle is
+        tangent to a triangle's contour lines (centre +- r along its gradient). Every
+        candidate is a point of the disk, so the result is exact; no grid sampling can miss
+        a narrow ridge or the rim of a slope."""
+        s = TERRAIN_POLYGON_SIZE
+        pts = [(x, z)]
+        k0, k1 = math.ceil((x - r) / s), math.floor((x + r) / s)
+        j0, j1 = math.ceil((z - r) / s), math.floor((z + r) / s)
+        for k in range(k0, k1 + 1):                 # vertices inside, circle x grid lines
+            gx = k * s
+            h = math.sqrt(max(0.0, r * r - (gx - x) ** 2))
+            pts += [(gx, z - h), (gx, z + h)]
+            for j in range(j0, j1 + 1):
+                if (gx - x) ** 2 + (j * s - z) ** 2 <= r * r:
+                    pts.append((gx, j * s))
+        for j in range(j0, j1 + 1):
+            gz = j * s
+            h = math.sqrt(max(0.0, r * r - (gz - z) ** 2))
+            pts += [(x - h, gz), (x + h, gz)]
+        for row in range(max(0, math.floor((z - r) / s)), min(self.mapH - 1, math.floor((z + r) / s)) + 1):
+            for col in range(max(0, math.floor((x - r) / s)), min(self.mapW - 1, math.floor((x + r) / s)) + 1):
+                backward, y0, y1, y2, y3 = self._tile_split(row, col)
+                if backward:                        # diagonal p0-p2; triangles (p0,p2,p3), (p0,p1,p2)
+                    a, b = (col * s, row * s), ((col + 1) * s, (row + 1) * s)
+                    grads = (((y2 - y3) / s, (y3 - y0) / s), ((y1 - y0) / s, (y2 - y1) / s))
+                else:                               # diagonal p1-p3; triangles (p0,p1,p3), (p1,p2,p3)
+                    a, b = ((col + 1) * s, row * s), (col * s, (row + 1) * s)
+                    grads = (((y1 - y0) / s, (y3 - y0) / s), ((y2 - y3) / s, (y2 - y1) / s))
+                pts += _circle_segment(x, z, r, a, b)
+                for gx, gz in grads:
+                    g = math.sqrt(gx * gx + gz * gz)
+                    if g > 0:
+                        pts += [(x + r * gx / g, z + r * gz / g), (x - r * gx / g, z - r * gz / g)]
+        hs = [self.terrain_y(px, pz) for px, pz in pts]
+        return min(hs), max(hs)
+
+    def segment_heights(self, a, b):
+        """terrain_y at a, at b and at every point where segment a-b crosses a triangle edge,
+        in order from a. The terrain is linear between these points, so their maximum and
+        minimum are exactly the highest and lowest ground along the segment."""
+        s = TERRAIN_POLYGON_SIZE
+        (ax, az), (bx, bz) = a, b
+        dx, dz = bx - ax, bz - az
+        ts = {0.0, 1.0}
+        for k in range(math.ceil(min(ax, bx) / s), math.floor(max(ax, bx) / s) + 1):
+            if dx:
+                ts.add((k * s - ax) / dx)
+        for j in range(math.ceil(min(az, bz) / s), math.floor(max(az, bz) / s) + 1):
+            if dz:
+                ts.add((j * s - az) / dz)
+        for row in range(max(0, math.floor(min(az, bz) / s)), min(self.mapH - 1, math.floor(max(az, bz) / s)) + 1):
+            for col in range(max(0, math.floor(min(ax, bx) / s)), min(self.mapW - 1, math.floor(max(ax, bx) / s)) + 1):
+                if self._tile_split(row, col)[0]:
+                    p, q = (col * s, row * s), ((col + 1) * s, (row + 1) * s)
+                else:
+                    p, q = ((col + 1) * s, row * s), (col * s, (row + 1) * s)
+                ex, ez = q[0] - p[0], q[1] - p[1]
+                den = dx * ez - dz * ex
+                if den:
+                    t = ((p[0] - ax) * ez - (p[1] - az) * ex) / den
+                    u = ((p[0] - ax) * dz - (p[1] - az) * dx) / den
+                    if 0 <= u <= 1:
+                        ts.add(t)
+        return [self.terrain_y(ax + t * dx, az + t * dz) for t in sorted(t for t in ts if 0 <= t <= 1)]
 
     def supertile_id(self, x, z):
         """Texture id of the supertile under (x, z), or -1 when off the map or blank."""
