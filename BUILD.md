@@ -141,12 +141,41 @@ Distributions must include both [LICENSE.md](LICENSE.md) and [THIRD-PARTY-LICENS
 On Linux, `python3 Tests/StartupSmokeTests.py <path-to-CroMagRally>` exercises
 every CLI-selectable race track with SDL's offscreen video and dummy audio
 backends. It checks practice gameplay, host lobby startup, invalid track IDs,
-and teardown with isolated preferences and a 45-second limit per invocation.
-Host gameplay and peer readiness require separate network tests.
+invalid developer options, and teardown with isolated preferences and a
+45-second limit per invocation.
 
-The developer option `--smoke-test-frames N` (1–600) requires `--track` and exits
-after that many gameplay frames, or lobby frames when combined with `--host`.
-It cannot be used with `--join`. CI builds the full game with ASan/UBSan before
-running these tests; unit tests alone do not exercise asset loading. Leak
-detection remains enabled in the unit suite, but is disabled for the rendering
-smoke because Mesa/EGL retains process-lifetime driver allocations after unload.
+The developer option `--smoke-test-frames N` (1–600) requires `--track` or
+`--join-address` and exits after that many gameplay frames, or lobby frames when
+combined with `--host`. It cannot be used with `--join`. A smoke run that ends
+before printing its `SMOKE:` completion line exits with status 1. CI builds the
+full game with ASan/UBSan before running these tests; unit tests alone do not
+exercise asset loading. Leak detection remains enabled in the unit suite, but is
+disabled for the rendering smoke because Mesa/EGL retains process-lifetime driver
+allocations after unload.
+
+### LAN smoke tests
+
+Several game instances on one machine can't all use LAN discovery, because it
+binds a fixed UDP port. These developer options let them meet directly:
+
+- `--join-address HOST[:PORT]` joins the host at an IPv4 address without
+  searching the LAN. It applies to the join started at launch only; joining from
+  the menu later searches as usual. It can't be combined with `--host`, `--join`
+  or `--track` (the host picks the track), nor with `--port` when the address
+  already names a port.
+- `--smoke-net-players N` (with `--host`, `--track` and `--smoke-test-frames`)
+  keeps the lobby open until N players, the host included, have joined, then
+  starts the race. `--smoke-net-refusals N` (only with N equal to the most
+  players a game seats) also waits until N further joins were turned away
+  because the game is full. Clients started with
+  `--join-address` and `--smoke-test-frames` accept the default character and
+  vehicle. Each instance races that many simulated frames and exits 0.
+- `--print-max-net-players` prints how many players one LAN game seats, then
+  exits.
+
+`python3 Tests/NetworkSmokeTests.py <path-to-CroMagRally> [PLAYERS] [--track N]
+[--frames K]` uses these options to race a host and its clients on loopback,
+headless, and checks that one join too many is refused. PLAYERS defaults to the
+most the binary seats. Use a sanitizer build: it is how out-of-bounds HUD or
+network state for high player numbers shows up. CI doesn't run this script yet;
+a six-player run takes about 15–30 seconds.
