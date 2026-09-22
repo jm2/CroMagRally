@@ -84,9 +84,11 @@ StartupSmoke PASS lines, MalformedAssetTests PASS. GitHub CI has not run on it y
    Renders and a per-car trace patch are in `/var/tmp/cmr-b2-stuck-evidence/`. The robust
    fix is a deterministic CPU rescue that returns the car to its last checkpoint after about
    20 s without progress. That is a visible gameplay change, left for a later decision.
-3. **§4.8 LAN at 12 humans:** not measured (13 processes with
-   `Tests/NetworkSmokeTests.py` after the raise; host downlink, packets/s, input
-   grace wait).
+3. **§4.8 LAN at 12 humans:** a 12-human race runs clean on loopback (item 4). The
+   bandwidth figures are computed, not measured: the host sends one 628 B control message
+   per client per frame, which is ≈3.3 Mbit/s and ≈660 packets/s each way with 11 clients at
+   60 fps, or ≈2.4× that at 144 Hz. Not measured on a real LAN: the host's input grace
+   wait (`SDL_Delay(1)` when a client queue is empty) with 11 clients on Wi-Fi.
 4. **§4.9 acceptance, partly done.** A soak on this branch (normal build, `tools/run_race_metrics.sh`)
    ran 9 tracks × 50/60/72 Hz at 12 and at 6 cars, with autopilot and seed 12345. All 54 races
    finished; logs are in `/var/tmp/cmr-soak/b2real`.
@@ -97,8 +99,13 @@ StartupSmoke PASS lines, MalformedAssetTests PASS. GitHub CI has not run on it y
      +26%), and hard hits per minute ×2.3.
    - Narrow China is still +14% on lap 2.
 
-   Still to do: 12-car soaks under ASan/UBSan on this branch (≈287k clean 12-car frames so far,
-   but on the prototype measurement build) and the 7–12 human LAN runs.
+   - 12 cars under ASan/UBSan (`-DSANITIZE=ON`, 9 tracks at 60 Hz, 20000-frame cap,
+     ≈170k frames, `/var/tmp/cmr-soak/b2real-san12`): 0 AddressSanitizer, UBSan, fatal or
+     non-finite lines.
+   - 12 humans on LAN under ASan/UBSan: `Tests/NetworkSmokeTests.py build-cmr-san/CroMagRally 12`
+     (host + 11 clients, 600 frames, plus a 13th join that must be refused) passes on Desert,
+     Egypt and Atlantis, in about 16 s each. The in-process readiness and lifecycle tests run
+     at `MAX_CLIENTS` = 12 in ctest.
 5. **Start-slot CTF balance** (minor, from the last verification). Red and green
    extras on TarPits, Ramps, Celtic and Spiral differ by ≈1.8–2.3k in drivable
    path to their torches. There is a work-in-progress generator change in
