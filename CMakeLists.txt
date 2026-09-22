@@ -615,13 +615,15 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 	cmr_add_gameplay_test(CroMagRallyPlayerLimitTests player_limits Tests/PlayerLimitTests.c
 		Source/Terrain/TerrainResidency.c Source/Screens/InfobarPlace.c Source/System/CollisionList.c)
 	if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-		# Linker section GC keeps only the place calculation from Checkpoints.c.
-		cmr_add_gameplay_test(CroMagRallyRacePlaceTests race_places Tests/RacePlaceTests.c Source/Terrain/Checkpoints.c)
+		# Linker section GC keeps only the place and race-completion code from Checkpoints.c.
+		cmr_add_gameplay_test(CroMagRallyRacePlaceTests race_places Tests/RacePlaceTests.c Source/Terrain/Checkpoints.c
+			Source/Player/CPUFill.c)
 		target_compile_options(CroMagRallyRacePlaceTests PRIVATE -ffunction-sections -fdata-sections)
 		target_link_options(CroMagRallyRacePlaceTests PRIVATE -Wl,--gc-sections)
 	endif()
 	cmr_add_gameplay_test(CroMagRallyCheckpointTests checkpoints Tests/CheckpointTests.c Source/Terrain/CheckpointProgress.c)
 	cmr_add_gameplay_test(CroMagRallyCPUDriverTests cpu_driver Tests/CPUDriverTests.c Source/Player/CPUDriver.c)
+	cmr_add_gameplay_test(CroMagRallyCPUFillTests cpu_fill Tests/CPUFillTests.c Source/Player/CPUFill.c)
 	add_executable(CroMagRallyValidationTests
 		Tests/ValidationTests.c
 		Source/Network/NetValidation.c

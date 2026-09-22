@@ -8,6 +8,7 @@
 /***************/
 
 #include "game.h"
+#include "cpu_fill.h"
 
 
 /****************************/
@@ -273,23 +274,21 @@ void PlayerCompletedRace(short playerNum)
 
 			/* TELL WINNER IN MULTIPLAYER RACE */
 			//
-			// Game ends as soon as 1st player finishes the race
+			// Game ends as soon as the 1st player finishes the race
+			// (with CPU fill, the 1st human: CPU cars never win it)
 			//
 
 	if (gGameMode == GAME_MODE_MULTIPLAYERRACE)
 	{
-		short	i;
+		Byte	results[MAX_PLAYERS];
 
-		if (!gTrackCompleted)									// only if this is the 1st guy to win
+		if (DecideMultiplayerRaceFinish(gPlayerInfo, gNumTotalPlayers, playerNum,
+				gTrackCompleted, gCPUFillThisRace, results))
 		{
-			for (i = 0; i < gNumTotalPlayers; i++)				// see which player Won (was not eliminated)
+			for (short i = 0; i < gNumTotalPlayers; i++)
 			{
-				if (i != playerNum)
-				{
-					ShowWinLose(i, 2, playerNum);					// lost
-				}
-				else
-					ShowWinLose(i, 1, playerNum);					// won!
+				if (results[i] != kRaceResult_None)
+					ShowWinLose(i, results[i] == kRaceResult_Won ? 1 : 2, playerNum);	// won! or lost
 			}
 
 			gTrackCompleted = true;

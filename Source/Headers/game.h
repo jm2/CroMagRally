@@ -47,6 +47,7 @@ extern Atlas*					gAtlases[MAX_SPRITE_GROUPS];
 extern BG3DFileContainer		*gBG3DContainerList[MAX_BG3D_GROUPS];
 extern Boolean					gAnnouncedPOW[MAX_POW_TYPES];
 extern Boolean					gAutoPilot;
+extern Boolean					gCPUFillThisRace;
 extern Boolean					gDisableAnimSounds;
 extern Boolean					gDisableHiccupTimer;
 extern Boolean					gDrawLensFlare;

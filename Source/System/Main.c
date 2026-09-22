@@ -10,6 +10,7 @@
 /****************************/
 
 #include "game.h"
+#include "cpu_fill.h"
 #include "miscscreens.h"
 #include "network.h"
 #include <SDL3/SDL.h>
@@ -87,6 +88,7 @@ int					gTheAge;
 int					gTrackNum;
 int					gDifficulty = DIFFICULTY_MEDIUM;
 int					gTagDuration = 3;
+Boolean				gCPUFillThisRace = false;				// CPU cars race in this game's empty slots (see PlayGame)
 
 
 			/* BATTLE MODE VARS */
@@ -206,6 +208,18 @@ static Boolean PlayGame(void)
 
 	if (!gNetGameInProgress || gIsNetworkHost)
 		gDifficulty = gGamePrefs.difficulty;				// set transient difficulty for this game
+
+			/* DECIDE CPU SLOT FILL */
+			//
+			// Once per game, before InitPlayerInfo_Game counts the cars; CleanupLevel clears it.
+			// Local games take the pref. Network games keep it off until the host's game
+			// config carries the host's choice: every peer must seat the same cars, so a
+			// client must never apply its own pref.
+			//
+
+	gCPUFillThisRace = !gNetGameInProgress
+					&& gGamePrefs.cpuFill
+					&& CPUFillAppliesToMode(gGameMode);
 
 	if (!gIsSelfRunningDemo && gNumLocalPlayers > 1)
 	{
@@ -1620,6 +1634,7 @@ static void CleanupLevel(void)
 
 	gNumRealPlayers = 1;					// reset at end of level to be safe
 	gNumLocalPlayers = 1;
+	gCPUFillThisRace = false;
 	gActiveSplitScreenMode = SPLITSCREEN_MODE_NONE;
 }
 
