@@ -145,8 +145,25 @@ class StartSlotTableTests(unittest.TestCase):
 
     def test_rejects_obstacle(self):
         md = self.map('BronzeAge_Egypt')
-        pillar = next((x, z) for x, z, r, label in md.circles if label == 'pillar')
+        pillar = next((x, z) for x, z, r, label, _ in md.circles if label == 'pillar')
         self.assertRejected(self.problems_with('BronzeAge_Egypt', gen.SET_RACE, 7, *pillar), 'clearance of a pillar')
+
+    def test_team_torches_and_bases_only_block_ctf_slots(self):
+        # AddTeamTorch and AddTeamBase create nothing outside Capture the Flag.
+        md = self.map('Battle_Spiral')
+        for item_type, label in ((26, 'team torch'), (27, 'team base')):
+            item = next(it for it in md.pf.items if it['type'] == item_type)
+            self.assertEqual(md.obstacle_at(item['x'], item['z'], ctf=True), label)
+            self.assertIsNone(md.obstacle_at(item['x'], item['z'], ctf=False))
+        entry = next(e for e in self.entries if e[0] == 'Battle_Spiral' and e[1] == gen.SET_CTF)
+        base = md.bases[1]
+        self.assertRejected(self.problems_with('Battle_Spiral', gen.SET_CTF, 7, base[0], base[1], entry[3][1][2]),
+                            'clearance of a team base')
+        # The first tables moved Spiral's battle p6 off the rule's spot only for a torch 450 ahead.
+        ctx = gen.Context(md, gen.SET_BATTLE, md.authored(False))
+        rule_p6 = next((x, z) for p, x, z, _, _ in gen.rule_slots(ctx) if p == 6)
+        battle = next(e for e in self.entries if e[0] == 'Battle_Spiral' and e[1] == gen.SET_BATTLE)
+        self.assertEqual(battle[3][0][:2], rule_p6)
 
     def test_rejects_fence_between(self):
         md = self.map('StoneAge_Desert')

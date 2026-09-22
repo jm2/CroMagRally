@@ -138,6 +138,9 @@ DEFAULT_FOOTPRINT = 1100    # anything else (none sits near a start area)
 # creatures (the item only anchors a spline), bubble generators, hanging vines, and the
 # Coliseum wall model (the arena fence is its collision).
 IGNORED_ITEMS = {0, 5, 6, 10, 11, 12, 13, 18, 23, 28, 29, 33, 35, 46, 53, 54, 58, 61, 64, 66}
+# Team torches and bases exist only in Capture the Flag (AddTeamTorch, AddTeamBase return early in
+# every other mode), so they are obstacles only for CTF slots.
+CTF_ONLY_ITEMS = {26, 27}
 ITEM_STONEHENGE = 45
 HENGE_PYLON_RADIUS = 900    # Items.c: collision boxes of the inner and outer henge stones
 HENGE_POST_FOOTPRINT = 839  # stonehenge.bg3d Post
@@ -211,7 +214,7 @@ class MapData:
         self.is_arena = name.startswith('Battle_')
         self.fence_segs = [(a, b, min(a[0], b[0]), max(a[0], b[0]), min(a[1], b[1]), max(a[1], b[1]))
                            for a, b in pf.fence_segments()]
-        self.circles = []            # (x, z, clearance, label)
+        self.circles = []            # (x, z, clearance, label, CTF only)
         self.liquids = []            # (x0, z0, x1, z1, surface y, label)
         for it in pf.items:
             t = it['type']
@@ -237,18 +240,18 @@ class MapData:
                 ox, oz = round(1300 * math.cos(r)), round(1300 * math.sin(r))
                 clear = HENGE_PYLON_RADIUS * math.sqrt(2) + CAR_MARGIN
                 for sx, sz in ((ox, -oz), (-ox, oz)):
-                    self.circles.append((x + sx, z + sz, clear, 'henge stone'))
+                    self.circles.append((x + sx, z + sz, clear, 'henge stone', False))
             elif t == ITEM_STONEHENGE:
                 fp = HENGE_PYLON_RADIUS * math.sqrt(2) if parm[0] == 2 else HENGE_POST_FOOTPRINT
-                self.circles.append((x, z, fp + CAR_MARGIN, 'henge stone'))
+                self.circles.append((x, z, fp + CAR_MARGIN, 'henge stone', False))
             elif t == ITEM_PILLAR:
                 fp = PILLAR_FOOTPRINT.get(name, DEFAULT_FOOTPRINT)
                 if isinstance(fp, dict):
                     fp = fp.get(parm[0], DEFAULT_FOOTPRINT)
-                self.circles.append((x, z, fp + CAR_MARGIN, 'pillar'))
+                self.circles.append((x, z, fp + CAR_MARGIN, 'pillar', False))
             else:
                 label, fp = ITEM_FOOTPRINT.get(t, ('item type %d' % t, DEFAULT_FOOTPRINT))
-                self.circles.append((x, z, fp + CAR_MARGIN, label))
+                self.circles.append((x, z, fp + CAR_MARGIN, label, t in CTF_ONLY_ITEMS))
         self.bases = {it['parm'][0]: (it['x'], it['z']) for it in pf.items if it['type'] == 27}
         self._range = {}
         # circles bucketed by grid cell, in item order (so the first hit matches a full scan)
@@ -294,8 +297,12 @@ class MapData:
     def checkpoints_between(self, a, b):
         return [i for i, (p, q) in enumerate(self.pf.checkpoints) if terlib.seg_intersect(a, b, p, q)]
 
-    def obstacle_at(self, x, z, slack=0.0):
-        for cx, cz, r, label in self._cells.get((int(x // _CELL), int(z // _CELL)), ()):
+    def obstacle_at(self, x, z, ctf, slack=0.0):
+        """The item whose clearance (x, z) is inside, or None. ctf: the slot is for Capture the
+        Flag, the only mode with team torches and bases."""
+        for cx, cz, r, label, ctf_only in self._cells.get((int(x // _CELL), int(z // _CELL)), ()):
+            if ctf_only and not ctf:
+                continue
             if abs(cx - x) < r and abs(cz - z) < r and dist((cx, cz), (x, z)) < r - slack:
                 return label
         return None
@@ -351,7 +358,7 @@ class MapData:
             return False
         return all(pf.supertile_id(x + dx, z + dz) > 0 for dx, dz in _FOOTPRINT_CORNERS)
 
-    def ahead_problem(self, x, z, rot16, run):
+    def ahead_problem(self, x, z, rot16, run, ctf):
         """Why the first run units ahead of a car at (x, z) are not drivable, or None."""
         f = heading(rot16)
         if self.fence_between((x, z), (x + f[0] * run, z + f[1] * run)):
@@ -363,7 +370,7 @@ class MapData:
             if d <= run:
                 if not self.on_map(px, pz):
                     return 'map edge %d ahead' % d
-                hit = self.obstacle_at(px, pz, slack=300) if d >= 300 else None
+                hit = self.obstacle_at(px, pz, ctf, slack=300) if d >= 300 else None
                 if hit:
                     return '%s %d ahead' % (hit, d)
             hs.append(self.pf.terrain_y(px, pz))
@@ -454,7 +461,7 @@ def check_site(ctx, slot, full=False):
             m['side'] = ctx.side(slot)
             if m['side'] < CTF_SIDE_MARGIN and failed('%d units into its own half (need %d)' % (m['side'], CTF_SIDE_MARGIN)):
                 break
-        m['obstacle'] = md.obstacle_at(*p)
+        m['obstacle'] = md.obstacle_at(slot.x, slot.z, ctx.set == SET_CTF)
         if m['obstacle'] and failed('inside the clearance of a ' + m['obstacle']):
             break
         m['fence_dist'] = md.fence_distance(p, 4 * FENCE_CLEARANCE)
@@ -487,7 +494,7 @@ def check_site(ctx, slot, full=False):
         if m['step'] > MAX_STEP_GRADE and not sub and \
                 failed('ground between it and its source is %d%% steep' % (100 * m['step'])):
             break
-        m['ahead'] = md.ahead_problem(slot.x, slot.z, slot.rot16, CLEAR_RUN[ctx.set])
+        m['ahead'] = md.ahead_problem(slot.x, slot.z, slot.rot16, CLEAR_RUN[ctx.set], ctx.set == SET_CTF)
         if m['ahead']:
             failed(m['ahead'])
         break
@@ -1002,7 +1009,7 @@ def render_previews(sets, out_dir):
         arr = np.clip(np.array(im, dtype=float) * shade[..., None], 0, 255).astype(np.uint8)
         return Image.fromarray(arr)
 
-    def draw(md, im, x0, z0, x1, z1, slot_groups, title):
+    def draw(md, set_name, im, x0, z0, x1, z1, slot_groups, title):
         d = ImageDraw.Draw(im)
         sc = im.size[0] / (x1 - x0)
 
@@ -1010,7 +1017,9 @@ def render_previews(sets, out_dir):
             return ((x - x0) * sc, (z - z0) * sc)
         for x0s, z0s, x1s, z1s, surface, label in md.liquids:
             d.rectangle([P(x0s, z0s), P(x1s, z1s)], outline=(80, 170, 255) if label == 'water' else (20, 20, 20))
-        for cx, cz, r, label in md.circles:
+        for cx, cz, r, label, ctf_only in md.circles:
+            if ctf_only and set_name != SET_CTF:
+                continue
             X, Y = P(cx, cz)
             rr = r * sc
             if -rr < X < im.size[0] + rr and -rr < Y < im.size[1] + rr:
@@ -1103,7 +1112,7 @@ def render_previews(sets, out_dir):
             row = Image.new('RGB', (px * 2 + 6, px), (20, 20, 24))
             title = name.split('_')[1] + ('' if ctx.set == SET_RACE else ' ' + ctx.set)
             for i, (label, groups, _) in enumerate(views):
-                im = draw(md, base.copy(), x0, z0, x1, z1, groups, '%s  %s' % (title, label))
+                im = draw(md, ctx.set, base.copy(), x0, z0, x1, z1, groups, '%s  %s' % (title, label))
                 row.paste(im, (i * (px + 6), 0))
             rows.append(row)
         pair = Image.new('RGB', (px * 2 + 6, len(rows) * (px + 6) - 6), (20, 20, 24))

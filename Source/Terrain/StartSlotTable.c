@@ -490,12 +490,12 @@ const StartSlotTableEntry kStartSlotTable[] =
 		},
 		.extra =
 		{
-			{ 30100,  23900,  4 },	// p6: moved 232 from the rule
-			{ 28500,  22200,  8 },	// p7: moved 2701 from the rule, turned +1/16 (straight: team torch 1450 ahead)
+			{ 30170,  23678,  4 },	// p6: rule
+			{ 28700,  22000,  7 },	// p7: moved 2812 from the rule
 			{ 29270,  26310,  1 },	// p8: rule
-			{ 26800,  25500, 14 },	// p9: moved 2666 from the rule, turned -1/16 (straight: on the nose of p3)
+			{ 26600,  25200, 14 },	// p9: moved 2311 from the rule
 			{ 27400,  26600,  0 },	// p10: moved 1174 from the rule
-			{ 30000,  22700,  5 },	// p11: moved 1522 from the rule
+			{ 29900,  22500,  5 },	// p11: moved 1302 from the rule
 		},
 	},
 	{
