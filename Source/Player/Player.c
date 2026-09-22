@@ -202,7 +202,7 @@ CPUVehiclePickRules	cpuVehicleRules = { .randomRange = SyncedCPUVehicleRandom };
 		if (gPlayerInfo[i].isComputer && !gNetGameInProgress)		// set local CPU vehicle type
 			gPlayerInfo[i].vehicleType = PickCPUVehicle(&cpuVehicleRules, numCPUVehiclesPicked++);
 
-		gPlayerInfo[i].coord.y = GetTerrainY(gPlayerInfo[i].startX,gPlayerInfo[i].startX);
+		gPlayerInfo[i].coord.y = GetTerrainY(gPlayerInfo[i].startX,gPlayerInfo[i].startZ);
 
 			/* CREATE THE CAR MODEL */
 

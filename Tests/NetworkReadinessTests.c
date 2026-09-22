@@ -56,7 +56,15 @@ void DoAlert(const char* format, ...)
 // Keep real level player initialization; isolate terrain/model/physics setup.
 int GetNumAgesCompleted(void) { return unlockedAges; }
 uint16_t RandomRange(unsigned short min, unsigned short max) { CHECK(min <= max); return min; }
-float GetTerrainY(float x, float z) { (void)x; (void)z; return 0; }
+static OGLPoint2D terrainQueries[MAX_PLAYERS];
+static int numTerrainQueries;
+float GetTerrainY(float x, float z)
+{
+    if (numTerrainQueries < MAX_PLAYERS)
+        terrainQueries[numTerrainQueries] = (OGLPoint2D){x, z};
+    numTerrainQueries++;
+    return 0;
+}
 ObjNode* InitPlayer_Car(int playerNum, OGLPoint3D* where, float rotY)
 {
     (void)where; (void)rotY;
@@ -825,6 +833,22 @@ static void LocalCPUVehicles(void)
         CHECK(gPlayerInfo[i].vehicleType == CAR_TYPE_MAMMOTH);
 }
 
+// Each player's level-start height is sampled at its own start coordinate.
+static void StartHeightSampling(void)
+{
+    BeginLocalPractice();
+    for (int i = 0; i < gNumTotalPlayers; i++)
+    {
+        gPlayerInfo[i].startX = 1000 * (i + 1);
+        gPlayerInfo[i].startZ = -700 * (i + 1);
+    }
+    numTerrainQueries = 0;
+    InitPlayersAtStartOfLevel();
+    CHECK(numTerrainQueries == gNumTotalPlayers);
+    for (int i = 0; i < gNumTotalPlayers; i++)
+        CHECK(terrainQueries[i].x == gPlayerInfo[i].startX && terrainQueries[i].y == gPlayerInfo[i].startZ);
+}
+
 int main(void)
 {
     Readiness(VEHICLE_READY_TIMEOUT_MS, kNetSequence_WaitingForPlayerVehicles, kNetSequence_GotAllPlayerVehicles);
@@ -854,6 +878,7 @@ int main(void)
     DirectJoin();
     SmokeLobbyAutoStart();
     LocalCPUVehicles();
-    puts("Readiness, paused-leave, full-lobby and local CPU vehicle tests passed");
+    StartHeightSampling();
+    puts("Readiness, paused-leave, full-lobby, local CPU vehicle and start-height tests passed");
     return 0;
 }
