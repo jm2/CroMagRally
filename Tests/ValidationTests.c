@@ -533,6 +533,9 @@ static void TestHostControlValidation(void)
 	}
 	assert(!NetValidateHostControlPayload(&message, 4));
 
+	// A full event list names distinct (type, player) pairs, as the host's dedupe guarantees.
+	// Draw them from every network player so the list stays valid for any event capacity.
+	_Static_assert(NET_MAX_PENDING_EVENTS <= 2 * MAX_CLIENTS, "two event types per player fill the list");
 	message = ValidHostControlMessage();
 	message.eventCount = NET_MAX_PENDING_EVENTS;
 	for (int i = 0; i < NET_MAX_PENDING_EVENTS; i++)
@@ -540,13 +543,13 @@ static void TestHostControlValidation(void)
 		message.events[i] = (NetFrameEvent)
 		{
 			.effectiveFrame = message.frameCounter + NET_MAX_EVENT_LEAD,
-			.type = i < 4 ? kEvBecomeBot : kEvUnpauseForce,
-			.playerNum = i % 4,
+			.type = i < MAX_CLIENTS ? kEvBecomeBot : kEvUnpauseForce,
+			.playerNum = i % MAX_CLIENTS,
 		};
 	}
-	assert(NetValidateHostControlPayload(&message, 4));
+	assert(NetValidateHostControlPayload(&message, MAX_CLIENTS));
 	message.eventCount = NET_MAX_PENDING_EVENTS + 1;
-	assert(!NetValidateHostControlPayload(&message, 4));
+	assert(!NetValidateHostControlPayload(&message, MAX_CLIENTS));
 
 	message = ValidHostControlMessage();
 	message.events[0] = (NetFrameEvent){.effectiveFrame = UINT32_MAX, .type = 255, .playerNum = -1, .pad = 1};
