@@ -4,7 +4,18 @@
 
 #pragma once
 
-#define	MAX_PARTICLE_GROUPS		70
+// Particle groups are allocated on demand (~40 KB each with their geometry); this
+// caps how many exist at once. Ambient emitters (falling snow, bubble generators)
+// stop adding groups while fewer than their reserve are free, so cars' own effects
+// (skid smoke, sub bubbles, explosions) still find one. Ambient demand barely grows
+// with the grid but car effects do: uncapped, headless full races peak at 76 bubble
+// + 18 other groups on Atlantis with 6 cars (80 + 33 with 12) and at 63 other groups
+// on Jungle (78 with 12). So the pool grows by 5 groups per player and both reserves
+// scale from their original 6-player values (70 groups, 20 kept from snow, 15 from
+// bubbles; 100, 40 and 30 at 12 players).
+#define	MAX_PARTICLE_GROUPS		(40 + 5 * MAX_PLAYERS)
+#define	PARTICLE_GROUPS_KEPT_FROM_SNOW		(20 * MAX_PLAYERS / 6)
+#define	PARTICLE_GROUPS_KEPT_FROM_BUBBLES	(15 * MAX_PLAYERS / 6)
 #define	MAX_PARTICLES			250		// (note change Byte below if > 255)
 
 
