@@ -11,12 +11,15 @@
 
 #include "game.h"
 #include "vehicle_picker.h"
+#include "driver_looks.h"
 
 /****************************/
 /*    PROTOTYPES            */
 /****************************/
 
 static uint16_t SyncedCPUVehicleRandom(void* context, int cpuIndex, uint16_t min, uint16_t max);
+static void GetPlayerDriverLooks(DriverLook looks[MAX_PLAYERS]);
+static void SetPlayerDriverLooks(const DriverLook looks[MAX_PLAYERS]);
 
 
 /****************************/
@@ -59,9 +62,11 @@ short	i;
 
 	for (i = 0; i < MAX_PLAYERS; i++)
 	{
+		const DriverLook defaultLook = GetDefaultDriverLook(i);
+
 		gPlayerInfo[i].objNode			= nil;
 
-		gPlayerInfo[i].sex 				= i&1;			// altername male/female
+		gPlayerInfo[i].sex 				= defaultLook.sex;	// alternate male/female, swapped in each further wave of 6
 
 		gPlayerInfo[i].startX 			= 0;
 		gPlayerInfo[i].startZ 			= 0;
@@ -90,7 +95,7 @@ short	i;
 		}
 		else
 		{
-			gPlayerInfo[i].skin = i % NUM_CAVEMAN_SKINS;
+			gPlayerInfo[i].skin = defaultLook.skin;
 		}
 
 
@@ -190,6 +195,23 @@ CPUVehiclePickRules	cpuVehicleRules = { .randomRange = SyncedCPUVehicleRandom };
 
 	cpuVehicleRules.agesCompleted = GetNumAgesCompleted();
 	cpuVehicleRules.difficulty = gDifficulty;
+
+
+		/* DONT DRESS A CPU LIKE A HUMAN OR ANOTHER CPU */
+		//
+		// Humans (including network players who have since become bots) keep the look they
+		// chose. This reads only state every network peer shares, so they all dress the CPUs
+		// alike. Capture the Flag outfits are team colours, so they repeat on purpose.
+		//
+
+	if (gGameMode != GAME_MODE_CAPTUREFLAG)
+	{
+		DriverLook	looks[MAX_PLAYERS];
+
+		GetPlayerDriverLooks(looks);
+		ResolveCPUDriverLooks(looks, gNumTotalPlayers, gNumRealPlayers);
+		SetPlayerDriverLooks(looks);
+	}
 
 
 			/* SET SOME GLOBALS */
@@ -380,6 +402,28 @@ static uint16_t SyncedCPUVehicleRandom(void* context, int cpuIndex, uint16_t min
 	(void) cpuIndex;
 	return RandomRange(min, max);
 }
+
+
+/******************** GET/SET PLAYER DRIVER LOOKS ***********************/
+
+static void GetPlayerDriverLooks(DriverLook looks[MAX_PLAYERS])
+{
+	for (int i = 0; i < MAX_PLAYERS; i++)
+	{
+		looks[i].sex	= gPlayerInfo[i].sex;
+		looks[i].skin	= gPlayerInfo[i].skin;
+	}
+}
+
+static void SetPlayerDriverLooks(const DriverLook looks[MAX_PLAYERS])
+{
+	for (int i = 0; i < MAX_PLAYERS; i++)
+	{
+		gPlayerInfo[i].sex	= looks[i].sex;
+		gPlayerInfo[i].skin	= looks[i].skin;
+	}
+}
+
 
 #pragma mark -
 

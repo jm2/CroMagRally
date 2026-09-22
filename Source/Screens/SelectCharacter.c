@@ -11,6 +11,7 @@
 /****************************/
 
 #include "game.h"
+#include "driver_looks.h"
 
 /****************************/
 /*    PROTOTYPES            */
@@ -109,7 +110,7 @@ OGLColorRGBA		fillColor1 = { 1.0, 1.0, 1.0, 1 };
 OGLVector3D			fillDirection1 = { .9, -.3, -1 };
 ObjNode	*multiplayerText = NULL;
 
-	gSelectedCharacterIndex = 0;
+	gSelectedCharacterIndex = GetDefaultHumanDriverSex(whichPlayer);		// Brog, or Grag for a second wave of players
 
 			/**************/
 			/* SETUP VIEW */
@@ -198,7 +199,7 @@ ObjNode	*multiplayerText = NULL;
 	NewObjectDefinitionType newObjDef_Character =
 	{
 		.type = SKELETON_TYPE_MALESTANDING,
-		.animNum = 1,
+		.animNum = gSelectedCharacterIndex == 0 ? 1 : 0,			// the selected character strikes a pose
 		.coord = {-60, 0, 0},
 		.slot = 100,
 		.rot = PI,
@@ -210,7 +211,7 @@ ObjNode	*multiplayerText = NULL;
 
 	newObjDef_Character.type 		= SKELETON_TYPE_FEMALESTANDING;
 	newObjDef_Character.coord.x 	= -newObjDef_Character.coord.x;
-	newObjDef_Character.animNum	= 0;
+	newObjDef_Character.animNum	= gSelectedCharacterIndex == 1 ? 1 : 0;
 	gSex[1] = MakeNewSkeletonObject(&newObjDef_Character);
 
 			/* CREATE ARROW */
