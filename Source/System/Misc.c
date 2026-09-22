@@ -23,6 +23,8 @@ extern	SDL_Window* 	gSDLWindow;
 
 #define	PTRCOOKIE_SIZE		16
 
+_Static_assert(SMOKE_MIN_FIXED_FPS == NET_MIN_FPS, "--smoke-fixed-fps covers the production frame-rate range");
+
 /**********************/
 /*     VARIABLES      */
 /**********************/
@@ -465,6 +467,9 @@ unsigned long deltaTime;
 	if (GetKeyState(SDL_SCANCODE_KP_PLUS))		// debug speed-up with KP_PLUS
 		gFramesPerSecond = 10;
 #endif
+
+	if (gCommandLine.smokeFixedFPS)				// smoke soak: a fixed timestep makes the race reproducible
+		gFramesPerSecond = gCommandLine.smokeFixedFPS;
 
 	gFramesPerSecondFrac = 1.0f/gFramesPerSecond;		// calc fractional for multiplication
 

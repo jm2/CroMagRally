@@ -112,6 +112,10 @@ typedef struct
 
 		/* COMMAND-LINE OPTIONS */
 
+#define	SMOKE_TEST_MAX_FRAMES		600			// --smoke-test-frames limit for CI smoke runs
+#define	SMOKE_SOAK_MAX_FRAMES		100000		// ...and with a practice soak flag (--smoke-cars, --smoke-metrics...)
+#define	SMOKE_MIN_FIXED_FPS			9			// --smoke-fixed-fps range: NET_MIN_FPS..MAX_GAME_FPS
+
 typedef struct
 {
 	int		vsync;
@@ -119,6 +123,13 @@ typedef struct
 	int		smokeTestFrames;
 	int		smokeNetPlayers;		// smoke only: host starts once this many players (itself included) joined
 	int		smokeNetRefusals;		// smoke only: ...and after refusing this many extra joins as full
+	int		smokeCars;				// smoke soak: total cars in a practice race (0 = MAX_PLAYERS)
+	int		smokeFixedFPS;			// smoke soak: fixed simulation rate (0 = measured frame time)
+	uint32_t	smokeSeed;				// smoke soak: synced RNG seed, if hasSmokeSeed
+	bool	hasSmokeSeed;
+	bool	smokeAutopilot;			// smoke soak: the CPU AI drives player 1, who still counts as the human
+	bool	smokeUntilFinish;		// smoke soak: end the race when player 1 finishes
+	bool	smokeMetrics;			// smoke soak: log METRICS lines at the end of the race (race_metrics.h)
 	int		car;
 	bool	netHost;
 	bool	netJoin;

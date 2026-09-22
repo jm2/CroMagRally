@@ -12,6 +12,7 @@
 #include "game.h"
 #include "miscscreens.h"
 #include "network.h"
+#include "race_metrics.h"
 #include <SDL3/SDL.h>
 #if defined(__ANDROID__)
 #include <jni.h>
@@ -967,6 +968,13 @@ static void CheckCheats(void)
 static int		gSmokeFramesRemaining;
 static uint64_t	gSmokeHostLingerDeadline;
 
+// --smoke-metrics: log the practice race's METRICS lines (race_metrics.h).
+static void ReportSmokeRaceMetrics(const char *why)
+{
+	if (gRaceMetricsEnabled)
+		ReportRaceMetrics(why, gTrackNum + 1, gPlayerInfo, gNumTotalPlayers, gNumCheckpoints);
+}
+
 static Boolean UpdateSmokeTestFrame(void)
 {
 	if (gSmokeFramesRemaining > 0)
@@ -976,6 +984,7 @@ static Boolean UpdateSmokeTestFrame(void)
 			if (--gSmokeFramesRemaining > 0)
 				return false;
 			SDL_Log("SMOKE: practice track %d rendered %d frames", gTrackNum + 1, gCommandLine.smokeTestFrames);
+			ReportSmokeRaceMetrics("frame-cap");
 			gSmokeTestPassed = true;
 			return true;
 		}
@@ -1044,6 +1053,8 @@ static void PlayArea(void)
 	gNoCarControls = true;									// no control when starting light is going
 	gDisableHiccupTimer = true;
 	gIsInGame = true;
+	if (gRaceMetricsEnabled)
+		ResetRaceMetrics();
 
 		/******************/
 		/* MAIN GAME LOOP */
@@ -1100,6 +1111,16 @@ static void PlayArea(void)
 
 			StepGameSimulation(true);
 			terrainUpdatedThisFrame = true;
+
+			if (gRaceMetricsEnabled && !gNoCarControls)			// smoke soak: sample each step once racing starts
+				SampleRaceMetrics(gPlayerInfo, gNumTotalPlayers, gNumCheckpoints, gFramesPerSecondFrac);
+			if (gCommandLine.smokeUntilFinish && gTrackCompleted)	// smoke soak: stop as soon as player 1 finishes
+			{
+				SDL_Log("SMOKE: practice track %d player 1 finished after %u frames", gTrackNum + 1, (unsigned) gSimulationFrame);
+				ReportSmokeRaceMetrics("player1-finished");
+				gSmokeTestPassed = true;
+				break;
+			}
 		}
 		else if (gIsNetworkClient)
 		{
@@ -1254,6 +1275,14 @@ static void PlayArea(void)
 	}
 
 	gIsInGame = false;
+
+	if (gCommandLine.smokeTestFrames && gGameMode == GAME_MODE_PRACTICE && !gSmokeTestPassed
+		&& gTrackCompleted && !gGameOver)											// smoke soak: the race ended before the frame cap
+	{
+		SDL_Log("SMOKE: practice track %d race completed after %u frames", gTrackNum + 1, (unsigned) gSimulationFrame);
+		ReportSmokeRaceMetrics("race-complete");
+		gSmokeTestPassed = true;
+	}
 
 	if (gSmokeHostLingerDeadline && gNetSequenceState == kNetSequence_OfflineEverybodyLeft)	// smoke host: every client left after its frames
 	{
@@ -1948,6 +1977,8 @@ void GameMain(void)
 	{
 		unsigned long someLong;
 		GetDateTime(&someLong);		// init random seed
+		if (gCommandLine.hasSmokeSeed)
+			someLong = gCommandLine.smokeSeed;		// smoke soak: pin the synced RNG
 		SetMyRandomSeed(someLong);
 	}
 
@@ -1984,6 +2015,9 @@ void GameMain(void)
 		{
 			gPlayerInfo[0].vehicleType = gCommandLine.car - 1;
 		}
+
+		gAutoPilot = gCommandLine.smokeAutopilot;			// smoke soak: the CPU AI drives player 1, who stays the human
+		gRaceMetricsEnabled = gCommandLine.smokeMetrics;
 
 		InitArea();
 		PlayArea();

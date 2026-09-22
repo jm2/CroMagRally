@@ -11,6 +11,7 @@
 
 #include "game.h"
 #include "car_count_tuning.h"
+#include "race_metrics.h"
 #include <limits.h>
 
 /*******************/
@@ -340,6 +341,8 @@ Boolean	thud = false;
 
 	playerNum = whoNode->PlayerNum;
 	powType = theNode->POWType;
+	if (gRaceMetricsEnabled)
+		RaceMetricsPickup(playerNum);
 
 	if (gPlayerInfo[playerNum].powType == powType)		// see if we already have this
 	{

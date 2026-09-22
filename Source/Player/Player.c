@@ -151,6 +151,8 @@ short	i;
 		case	GAME_MODE_TOURNAMENT:
 //		case	GAME_MODE_MULTIPLAYERRACE:
 				gNumTotalPlayers = MAX_PLAYERS;                 // use them all
+				if (gCommandLine.smokeCars)						// smoke soak: --smoke-cars sets the field size
+					gNumTotalPlayers = gCommandLine.smokeCars;
 				break;
 
 		default:

@@ -11,6 +11,7 @@
 #include "PommeInit.h"
 #include <charconv>
 #include <cstdio>
+#include <climits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -184,6 +185,12 @@ static void ParseCommandLine(int argc, char **argv) {
   bool discoveryJoin = false;
   bool portOption = false;
   int joinPort = 0;
+  int smokeFramesArgument = 0;
+  const char *soakFlag = nullptr; // first practice soak flag, for error messages
+  const auto soak = [&soakFlag](const char *flag) {
+    if (!soakFlag)
+      soakFlag = flag;
+  };
 
   for (int i = 1; i < argc; i++) {
     std::string argument = argv[i];
@@ -192,8 +199,7 @@ static void ParseCommandLine(int argc, char **argv) {
       gCommandLine.bootToTrack =
           ParseIntegerArgument("--track", argc, argv, &i, 1, NUM_RACE_TRACKS);
     } else if (argument == "--smoke-test-frames") {
-      gCommandLine.smokeTestFrames =
-          ParseIntegerArgument("--smoke-test-frames", argc, argv, &i, 1, 600);
+      smokeFramesArgument = i++; // parsed after the loop: soak flags raise its limit
     } else if (argument == "--smoke-net-players") {
       // smoke only: a --host run starts the race once this many players (itself included) joined
       gCommandLine.smokeNetPlayers = ParseIntegerArgument(
@@ -202,6 +208,29 @@ static void ParseCommandLine(int argc, char **argv) {
       // smoke only: ...and once this many further joins were refused because the game is full
       gCommandLine.smokeNetRefusals = ParseIntegerArgument(
           "--smoke-net-refusals", argc, argv, &i, 1, NSpGame_GetMaxPlayers());
+    } else if (argument == "--smoke-autopilot") {
+      // smoke soak: the CPU AI drives player 1, who still counts as the human
+      soak("--smoke-autopilot");
+      gCommandLine.smokeAutopilot = true;
+    } else if (argument == "--smoke-cars") {
+      soak("--smoke-cars");
+      gCommandLine.smokeCars =
+          ParseIntegerArgument("--smoke-cars", argc, argv, &i, 1, MAX_PLAYERS);
+    } else if (argument == "--smoke-fixed-fps") {
+      soak("--smoke-fixed-fps");
+      gCommandLine.smokeFixedFPS = ParseIntegerArgument(
+          "--smoke-fixed-fps", argc, argv, &i, SMOKE_MIN_FIXED_FPS, MAX_GAME_FPS);
+    } else if (argument == "--smoke-seed") {
+      soak("--smoke-seed");
+      gCommandLine.smokeSeed =
+          (uint32_t)ParseIntegerArgument("--smoke-seed", argc, argv, &i, 0, INT_MAX);
+      gCommandLine.hasSmokeSeed = true;
+    } else if (argument == "--smoke-until-finish") {
+      soak("--smoke-until-finish");
+      gCommandLine.smokeUntilFinish = true;
+    } else if (argument == "--smoke-metrics") {
+      soak("--smoke-metrics");
+      gCommandLine.smokeMetrics = true;
     } else if (argument == "--print-max-net-players") {
       gCommandLine.printMaxNetPlayers = true;	// dev/test: report how many players one LAN game seats
     } else if (argument == "--car") {
@@ -245,6 +274,11 @@ static void ParseCommandLine(int argc, char **argv) {
 #endif
   }
 
+  if (smokeFramesArgument) {
+    gCommandLine.smokeTestFrames = ParseIntegerArgument(
+        "--smoke-test-frames", argc, argv, &smokeFramesArgument, 1,
+        soakFlag ? SMOKE_SOAK_MAX_FRAMES : SMOKE_TEST_MAX_FRAMES);
+  }
   if (discoveryJoin && gCommandLine.netJoinDirect) {
     throw std::invalid_argument("--join and --join-address are mutually exclusive");
   }
@@ -277,6 +311,12 @@ static void ParseCommandLine(int argc, char **argv) {
       gCommandLine.smokeNetPlayers != NSpGame_GetMaxPlayers()) {
     throw std::invalid_argument("--smoke-net-refusals requires --smoke-net-players " +
                                 std::to_string(NSpGame_GetMaxPlayers()));
+  }
+  // Soak flags shape one unattended practice race; a net game would desync.
+  if (soakFlag && (!gCommandLine.smokeTestFrames || !gCommandLine.bootToTrack ||
+                   gCommandLine.netHost || gCommandLine.netJoin)) {
+    throw std::invalid_argument(std::string(soakFlag) +
+                                " requires --smoke-test-frames and --track, without --host or --join");
   }
 }
 

@@ -179,3 +179,24 @@ headless, and checks that one join too many is refused. PLAYERS defaults to the
 most the binary seats. Use a sanitizer build: it is how out-of-bounds HUD or
 network state for high player numbers shows up. CI doesn't run this script yet;
 a six-player run takes about 15–30 seconds.
+
+## Race-metrics soaks
+
+Six more developer options shape one unattended practice race for measurement.
+They require `--smoke-test-frames` and `--track`, cannot be combined with
+`--host`, `--join` or `--join-address`, and raise the `--smoke-test-frames`
+limit from 600 to 100000, so a whole race fits:
+
+| Option | Effect |
+|--------|--------|
+| `--smoke-autopilot` | The CPU AI drives player 1, who still counts as the human (catch-up, race end). |
+| `--smoke-cars N` | N cars in the race, 1 to `MAX_PLAYERS`. |
+| `--smoke-fixed-fps N` | Step the simulation at a fixed N Hz (9–1000) instead of the measured frame time. |
+| `--smoke-seed N` | Seed the synced RNG with N (0–2147483647) instead of the clock. |
+| `--smoke-until-finish` | End the run as soon as player 1 finishes. |
+| `--smoke-metrics` | At the end of the race, log a `METRICS race` line and one `METRICS car` line per car. |
+
+With a pinned seed and a fixed timestep a race repeats exactly; vary the timestep
+for independent samples. The metric fields are documented in
+`Source/Headers/race_metrics.h`. Metrics are collected only with
+`--smoke-metrics`; otherwise each gameplay hook costs one untaken branch.

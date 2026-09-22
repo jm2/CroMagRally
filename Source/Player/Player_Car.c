@@ -13,6 +13,7 @@
 #include "cpu_driver.h"
 #include "finite_guard.h"
 #include "car_count_tuning.h"
+#include "race_metrics.h"
 
 /****************************/
 /*    PROTOTYPES            */
@@ -1992,6 +1993,8 @@ short		p2 = car2->PlayerNum;
 	relD1.y = gDelta.y - car2->Delta.y;
 	relD1.z = gDelta.z - car2->Delta.z;
 	VectorLength3D(relSpeed, relD1.x, relD1.y, relD1.z);					// relative speed of car 1 (same for both cars, so just calc it once)
+	if (gRaceMetricsEnabled)
+		RaceMetricsCarHit(p1, p2, relSpeed);
 
 	relD2.x = car2->Delta.x - gDelta.x;
 	relD2.y = car2->Delta.y - gDelta.y;
@@ -3216,6 +3219,8 @@ ObjNode	*obj;
 		if (d <= radius)
 		{
 			d2 = radius - d;												// determine blast force
+			if (gRaceMetricsEnabled)
+				RaceMetricsBlast(i, whoThrew);
 
 			obj = gPlayerInfo[i].objNode;								// get the car object
 

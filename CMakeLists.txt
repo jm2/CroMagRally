@@ -635,6 +635,7 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 		Source/Player/CarCountTuning.c)
 	cmr_add_gameplay_test(CroMagRallyStartSlotTests start_slots Tests/StartSlotTests.c
 		Source/Terrain/StartSlots.c Source/Terrain/StartSlotTable.c)
+	cmr_add_gameplay_test(CroMagRallyRaceMetricsTests race_metrics Tests/RaceMetricsTests.c Source/System/RaceMetrics.c)
 	add_executable(CroMagRallyValidationTests
 		Tests/ValidationTests.c
 		Source/Network/NetValidation.c
