@@ -1,7 +1,7 @@
 # Cro-Mag Rally Changelog
 
 - **Unreleased**
-    - Restore six-player LAN and Wi-Fi games (host plus five clients), as in the original game. The network protocol is now CMR9, so older builds can't join newer hosts and vice versa.
+    - Restore six-player LAN and Wi-Fi games (host plus five clients), as in the original game.
     - Fix HUD, POW-timer and gamepad-hint state being indexed by network player number. In four-player LAN games the third and fourth players' HUD icons were laid out from split-screen pane data the renderer never refreshes; with six players, players 5 and 6 would have read and written out of bounds.
     - CPU cars no longer get stuck floating after being knocked into deep water, which stranded them for the rest of the race on Egypt and the Jungle river.
     - Fix an intermittent NaN when a submarine was pushed into a fence while barely moving, which froze it and broke terrain streaming around its camera.

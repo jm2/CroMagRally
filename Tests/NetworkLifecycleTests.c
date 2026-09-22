@@ -110,9 +110,8 @@ static void Session(void)
     CHECK(NSpGame_GetActivePlayersIDMask(host) == 1);
 
     // Refuse older peers at the handshake instead of accepting them and disconnecting
-    // later: CMR7 left readiness fields uninitialized during level preparation, and
-    // CMR8 rejects the config and host control messages of a lobby above four players.
-    const uint32_t legacyVersions[] = {'CMR7', 'CMR8'};
+    // later: CMR7 left readiness fields uninitialized during level preparation.
+    const uint32_t legacyVersions[] = {'CMR7'};
     for (size_t v = 0; v < sizeof(legacyVersions) / sizeof(legacyVersions[0]); v++)
     {
         int legacy = socket(AF_INET, SOCK_STREAM, 0);

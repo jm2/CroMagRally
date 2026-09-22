@@ -12,15 +12,15 @@ play-test verification under the redesign).
 > implementation process, not the current state of the shipping code. See the current
 > source and `CHANGELOG.md` for implemented behavior.
 >
-> Current builds use the **CMR9** protocol cookie. CMR8 made readiness messages
-> initialize their FPS and padding fields. Older peers are rejected during the
-> handshake, before entering vehicle selection or level loading.
+> Current builds use the **CMR8** protocol cookie: readiness messages must initialize
+> their FPS and padding fields. Older peers are rejected during the handshake,
+> before entering vehicle selection or level loading.
 >
-> **2026-09-22 (CMR9): six network players again.** `MAX_CLIENTS` is `MAX_PLAYERS` (6):
-> the host plus up to five clients, as in the original game. This plan was written while
-> commit `197f1f2` capped `MAX_CLIENTS` at `MAX_LOCAL_PLAYERS` (4), so its `MAX_CLIENTS=4`
-> figures describe that cap, not current builds. CMR8 peers are refused because they
-> validate at most four network players.
+> **2026-09-22: six network players again.** `MAX_CLIENTS` is `MAX_PLAYERS` (6): the host
+> plus up to five clients, as in the original game. This plan was written while commit
+> `197f1f2` capped `MAX_CLIENTS` at `MAX_LOCAL_PLAYERS` (4), so its `MAX_CLIENTS=4` figures
+> describe that cap, not current builds. CMR8 has not shipped yet, so the raised cap keeps
+> the CMR8 cookie.
 >
 > **The protocol-specification numbers below are NOT authoritative for the wire format.**
 > `Source/Headers/network.h` is the single source of truth, and it differs from this plan in
@@ -342,7 +342,7 @@ typedef struct SendRing
 //     SendRing  clientSendRing;      // client-side outbound queue for clientToHostSocket
 //                                    // (zero-init by AllocPtrClear in NSpGame_Alloc)
 
-// Note: sizeof(NSpGame) grows by MAX_CLIENTS(4 at the time; 6 since CMR9)*32KB (peer rings) + 32KB (client ring)
+// Note: sizeof(NSpGame) grows by MAX_CLIENTS(4 at the time; 6 since 2026-09-22)*32KB (peer rings) + 32KB (client ring)
 // = ~160 KB (~224 KB at 6), heap-allocated once per session via AllocPtrClear and freed in
 // NSpGame_Dispose -> rings can never carry state across consecutive games
 // (unlike the static sHostInputQueues bug).
@@ -1062,7 +1062,7 @@ After MulticastLock acquire:
 **Edge cases:**
 - Tagged ('it') player leaves: ChooseTaggedPlayer() must run at effectiveFrame on every machine with identical gNumTotalPlayers and isEliminated state. ApplyBecomeBot sets the leaver isEliminated=true before the ChooseTaggedPlayer draw and all machines do it at the same frameCounter, so the RandomRange draw selects the same new 'it' everywhere — the exact desync G3 targets. Add a gWhoIsIt parity assertion test.
 - Leave while paused: gSimulationFrame is frozen but gHostSendCounter keeps advancing (pause menu burns net frames). effectiveFrame is in gHostSendCounter units, so the event still fires. After ApplyBecomeBot forces isComputer=true, IsNetGamePaused() (ignores isComputer) may flip false on all machines at the same frameCounter — deterministic unpause; kEvUnpauseForce is the belt-and-suspenders.
-- Double-leave / drop+leave race on the same player: ScheduleFrameEvent dedupes by (type,playerNum); ApplyBecomeBot is idempotent. Two DIFFERENT players leaving same frame: events[2] holds both; >2 simultaneous (up to 5 clients since CMR9) dribble out 2/broadcast across frames — EV_BECOME_BOT_LEAD (~12 frames) gives slack.
+- Double-leave / drop+leave race on the same player: ScheduleFrameEvent dedupes by (type,playerNum); ApplyBecomeBot is idempotent. Two DIFFERENT players leaving same frame: events[2] holds both; >2 simultaneous (up to 5 clients since 2026-09-22) dribble out 2/broadcast across frames — EV_BECOME_BOT_LEAD (~12 frames) gives slack.
 - Leave during loading barrier or lobby (not GameLoop): no running lockstep sim and ChooseTaggedPlayer not yet frame-coupled, so convert immediately (existing path); the frame-aligned path engages only in kNetSequence_GameLoop.
 - Host keeps substituting the leaver between TCP-leave arrival and effectiveFrame: Stage 2 substitution fires because the queue is empty; host fills the broadcast slot from held gPlayerInfo[]. Verify the kicked/closed slot is not pruned from the broadcast loop before effectiveFrame.
 - Backlogged client still applies at the correct frameCounter (not wall-clock): the event rides every broadcast until effectiveFrame and TCP is ordered, so the client records it before consuming frameCounter==effectiveFrame.
@@ -1138,7 +1138,7 @@ typedef struct
     uint32_t spuriousFatalCount;                 /* any other NetGameFatalError                       */
     uint32_t simFramesTotal;                     /* gSimulationFrame span of the race                 */
     double   wallSecondsTotal;                   /* race wall-clock duration                          */
-    /* UDP-swap exit-criterion inputs, per client (MAX_CLIENTS=4 at the time; 6 since CMR9) */
+    /* UDP-swap exit-criterion inputs, per client (MAX_CLIENTS=4 at the time; 6 since 2026-09-22) */
     uint32_t multiFrameSubstEvents[MAX_CLIENTS]; /* runs of >1 consecutive substituted host frames    */
     uint32_t rtoShapedGaps[MAX_CLIENTS];         /* uplink delivery gaps > 150 ms                     */
     uint32_t substFramesTotal[MAX_CLIENTS];

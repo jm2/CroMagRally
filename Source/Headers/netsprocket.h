@@ -23,7 +23,7 @@ typedef int sockfd_t;
 #define kNSpMaxPayloadLength 512			// CMR7: bumped 256->512 to fit the wider host control msg (must change with the 4CC)
 #define kNSpMaxMessageLength (kNSpMaxPayloadLength + sizeof(NSpMessageHeader))
 
-#define kNSpCMRProtocol4CC 'CMR9'			// CMR9 accepts MAX_CLIENTS network players (CMR8 validated at most 4); reject older peers at handshake
+#define kNSpCMRProtocol4CC 'CMR8'			// CMR8 (unreleased) requires initialized readiness fields; reject older peers at handshake
 
 typedef enum
 {
