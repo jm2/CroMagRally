@@ -24,6 +24,13 @@ Boolean CPUFillAppliesToMode(int gameMode);
 // (Pangea's had none); battle modes never seat CPU cars.
 short CountPlayersInGame(int gameMode, short numRealPlayers, Boolean cpuFill);
 
+// Keeps CPU drivers from looking like the humans or each other, while looks (sex and
+// skin) are left. Humans keep what they picked, and so does every CPU whose look is
+// still unworn. Each other CPU (in slot order) takes the other sex in its own skin if
+// that is unworn, else the first unworn look. With more players than looks, the
+// leftover CPUs keep theirs. numPlayers must not exceed 32.
+void MakeCPULooksDistinct(PlayerInfoType players[], short numPlayers);
+
 // finisher just completed a multiplayer race. Returns true if that ends the race,
 // and then sets results[p] for each of the numPlayers players.
 // Without CPU fill the first car home wins and everyone else loses, as always (that

@@ -872,7 +872,10 @@ static void LocalSplitScreenSeats(void)
                 CHECK(gPlayerInfo[i].onThisMachine == human);
                 CHECK(gPlayerInfo[i].splitPaneNum == (human ? i : -1));
                 if (human)
+                {
                     gPlayerInfo[i].vehicleType = CAR_TYPE_ROCK - i;    // the best starter cars
+                    gPlayerInfo[i].sex = 1;                             // every human picks the same driver
+                }
             }
 
             unlockedAges = 0;
@@ -880,7 +883,11 @@ static void LocalSplitScreenSeats(void)
             InitPlayersAtStartOfLevel();
             const int numFreeCars = CAR_TYPE_ROCK + 1 - humans;      // the starter cars no human drives
             for (int i = humans; i < gNumTotalPlayers; i++)          // best first, one each, then again
+            {
                 CHECK(gPlayerInfo[i].vehicleType == CAR_TYPE_ROCK - humans - (i - humans) % numFreeCars);
+                for (int human = 0; human < humans; human++)         // and no CPU driver looks like a human
+                    CHECK(gPlayerInfo[i].sex != gPlayerInfo[human].sex || gPlayerInfo[i].skin != gPlayerInfo[human].skin);
+            }
         }
     }
     gCPUFillThisRace = false;

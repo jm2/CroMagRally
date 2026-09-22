@@ -75,6 +75,125 @@ static void TestPlayerCounts(void)
 	}
 }
 
+#define NUM_LOOKS			(2 * NUM_CAVEMAN_SKINS)
+#define MAX_LOOK_PLAYERS	16								// beyond MAX_PLAYERS and the number of looks
+
+static PlayerInfoType lookPlayers[MAX_LOOK_PLAYERS];
+
+static int LookOf(const PlayerInfoType* player)
+{
+	CHECK(player->sex >= 0 && player->sex <= 1 && player->skin >= 0 && player->skin < NUM_CAVEMAN_SKINS);
+	return player->sex * NUM_CAVEMAN_SKINS + player->skin;
+}
+
+static int CountBits(uint32_t bits)
+{
+	int n = 0;
+	for (; bits; bits &= bits - 1)
+		n++;
+	return n;
+}
+
+// Runs MakeCPULooksDistinct and checks its promises. Returns how many CPUs changed look.
+static int CheckDistinctLooks(short total)
+{
+	PlayerInfoType before[MAX_LOOK_PLAYERS];
+	memcpy(before, lookPlayers, sizeof(before));
+	MakeCPULooksDistinct(lookPlayers, total);
+
+	int changed = 0, cpus = 0;
+	uint32_t humansWear = 0, cpusWear = 0;
+	for (short p = 0; p < total; p++)
+	{
+		int look = LookOf(&lookPlayers[p]);							// every look is a valid one
+		if (!lookPlayers[p].isComputer)
+		{
+			CHECK(lookPlayers[p].sex == before[p].sex && lookPlayers[p].skin == before[p].skin);	// humans keep theirs
+			humansWear |= 1u << look;
+		}
+		else
+		{
+			cpus++;
+			cpusWear |= 1u << look;
+			if (lookPlayers[p].sex != before[p].sex || lookPlayers[p].skin != before[p].skin)
+				changed++;
+		}
+	}
+	if (CountBits(humansWear) + cpus <= NUM_LOOKS)					// enough looks: every CPU has its own,
+		CHECK(CountBits(cpusWear) == cpus && !(cpusWear & humansWear));	// and none looks like a human
+	for (short p = total; p < MAX_LOOK_PLAYERS; p++)				// players past the count are untouched
+		CHECK(memcmp(&lookPlayers[p], &before[p], sizeof(before[p])) == 0);
+	return changed;
+}
+
+static void TestDriverLooks(void)
+{
+	// Up to one player per skin, as InitPlayerInfo_Game and CycleSkin keep them today,
+	// every look is already distinct whatever sex each player picked: nothing changes.
+	for (short total = 1; total <= NUM_CAVEMAN_SKINS; total++)
+		for (short humans = 1; humans <= total && humans <= MAX_LOCAL_PLAYERS; humans++)
+			for (int rotation = 0; rotation < NUM_CAVEMAN_SKINS; rotation++)
+				for (uint32_t sexes = 0; sexes < (1u << total); sexes++)
+				{
+					memset(lookPlayers, 0, sizeof(lookPlayers));
+					for (short p = 0; p < total; p++)
+					{
+						lookPlayers[p].isComputer = p >= humans;
+						lookPlayers[p].sex = (sexes >> p) & 1;
+						lookPlayers[p].skin = (p + rotation) % NUM_CAVEMAN_SKINS;
+					}
+					CHECK(CheckDistinctLooks(total) == 0);
+				}
+
+	// A 12-car grid starting from all 12 looks: a human picking a CPU's look pushes that
+	// CPU to the other sex in its skin, or to another free look.
+	memset(lookPlayers, 0, sizeof(lookPlayers));
+	for (short p = 0; p < NUM_LOOKS; p++)
+	{
+		lookPlayers[p].isComputer = p >= 2;
+		lookPlayers[p].sex = (p & 1) ^ ((p / NUM_CAVEMAN_SKINS) & 1);
+		lookPlayers[p].skin = p % NUM_CAVEMAN_SKINS;
+	}
+	lookPlayers[0].sex = 1;											// player 0 now looks like player 6
+	lookPlayers[1].skin = 2;										// and player 1 like player 8
+	CHECK(CheckDistinctLooks(NUM_LOOKS) == 2);						// no other CPU moves
+	CHECK(lookPlayers[6].sex == 0 && lookPlayers[6].skin == 0);		// the other sex in its skin
+	CHECK(lookPlayers[8].sex == 1 && lookPlayers[8].skin == 1);		// the one look left
+
+	// With looks to spare, a CPU keeps its skin (its minimap colour) if it can.
+	memset(lookPlayers, 0, sizeof(lookPlayers));
+	for (short p = 0; p < 8; p++)
+	{
+		lookPlayers[p].isComputer = p >= 2;
+		lookPlayers[p].sex = (p & 1) ^ ((p / NUM_CAVEMAN_SKINS) & 1);
+		lookPlayers[p].skin = p % NUM_CAVEMAN_SKINS;
+	}
+	lookPlayers[1].sex = 0;											// player 1 now looks like player 7
+	CHECK(CheckDistinctLooks(8) == 1);
+	CHECK(lookPlayers[7].sex == 1 && lookPlayers[7].skin == 1);
+
+	// Pseudo-random grids up to more players than looks, including humans wearing the
+	// same look (network players may) and CPUs with no valid look yet.
+	uint32_t seed = 12345;
+	for (int round = 0; round < 20000; round++)
+	{
+		memset(lookPlayers, 0, sizeof(lookPlayers));
+		seed = seed * 1664525u + 1013904223u;
+		short total = 1 + (seed >> 8) % MAX_LOOK_PLAYERS;
+		short humans = 1 + (seed >> 16) % total;
+		for (short p = 0; p < total; p++)
+		{
+			seed = seed * 1664525u + 1013904223u;
+			lookPlayers[p].isComputer = p >= humans;
+			lookPlayers[p].sex = (seed >> 8) & 1;
+			lookPlayers[p].skin = (seed >> 9) % NUM_CAVEMAN_SKINS;
+		}
+		if (total > humans && (seed >> 20) % 4 == 0)
+			lookPlayers[total - 1].skin = NUM_CAVEMAN_SKINS;		// no such skin
+		CheckDistinctLooks(total);
+	}
+}
+
 static void TestHumansOnlyRace(void)
 {
 	// Without fill, the first car home wins and everyone else loses, as before.
@@ -165,6 +284,7 @@ int main(void)
 {
 	TestModes();
 	TestPlayerCounts();
+	TestDriverLooks();
 	TestHumansOnlyRace();
 	TestFilledRace();
 	puts("CPU fill tests passed");

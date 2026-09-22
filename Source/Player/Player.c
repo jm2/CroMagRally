@@ -186,6 +186,16 @@ CPUVehiclePickRules	cpuVehicleRules = { .randomRange = SyncedCPUVehicleRandom };
 	cpuVehicleRules.difficulty = gDifficulty;
 
 
+		/* KEEP CPU DRIVERS FROM LOOKING LIKE THE HUMANS */
+		//
+		// Humans picked their looks after InitPlayerInfo_Game dealt them out. Local
+		// games only: a network bot keeps the look its peer picked.
+		//
+
+	if (!gNetGameInProgress)
+		MakeCPULooksDistinct(gPlayerInfo, gNumTotalPlayers);
+
+
 			/* SET SOME GLOBALS */
 
 	for (i = 0; i < gNumTotalPlayers; i++)
