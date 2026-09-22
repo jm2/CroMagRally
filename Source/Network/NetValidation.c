@@ -113,7 +113,9 @@ Boolean NetValidateConfigPayload(const NetConfigMessage* message)
 		&& message->playerNum < message->numPlayers
 		&& message->difficulty < NUM_DIFFICULTIES
 		&& message->targetFPS >= NET_MIN_FPS
-		&& message->targetFPS <= MAX_GAME_FPS;
+		&& message->targetFPS <= MAX_GAME_FPS
+		&& message->cpuFill <= 1
+		&& (!message->cpuFill || message->gameMode == GAME_MODE_MULTIPLAYERRACE);	// arenas have no AI paths
 }
 
 Boolean NetValidateSyncPayload(NetInboundRole role, const NetSyncMessage* message)

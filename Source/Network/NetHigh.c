@@ -13,6 +13,7 @@
 #include "game.h"
 #include "network.h"
 #include "net_validation.h"
+#include "cpu_fill.h"
 #include "miscscreens.h"
 #include <stdlib.h>
 #include <stdio.h>
@@ -68,6 +69,7 @@ Boolean		gNetSprocketInitialized = false;
 Boolean		gIsNetworkHost = false;
 Boolean		gIsNetworkClient = false;
 Boolean		gNetGameInProgress = false;
+Boolean		gNetGameCPUFill = false;
 
 NSpGameReference	gNetGame = nil;
 NSpSearchReference	gNetSearch = nil;
@@ -320,6 +322,7 @@ void ResetNetGameTransientState(void)
 	gLastNetSendMs = 0;
 	gPlayerSyncMask = 0;
 	gReadinessStartedMs = 0;
+	gNetGameCPUFill = false;				// until the host's game config decides it
 	ResetClientHostRing();					// CMR7 Stage 3: empty the client host-packet ring + reset hold timers
 }
 
@@ -1255,6 +1258,8 @@ NetConfigMessage		message;
 
 	int p = 1;														// start assigning player nums at 1 since Host is always #0
 
+	gNetGameCPUFill = gGamePrefs.cpuFill && CPUFillAppliesToMode(gGameMode);	// the host decides for every peer
+
 	for (int i = 0; i < gNumRealPlayers; i++)
 	{
 		NSpPlayerID clientID = NSpGame_GetNthActivePlayerID(gNetGame, i);
@@ -1279,7 +1284,7 @@ NetConfigMessage		message;
 			message.difficulty		= gDifficulty;			// set difficulty
 			message.tagDuration		= gTagDuration;					// set tag duration
 			message.targetFPS		= gTargetFPS;					// Set the global target FPS
-			message.reserved		= 0;							// CMR7: was useRedundancy (retired)
+			message.cpuFill			= gNetGameCPUFill;				// CPU cars in the empty race slots
 
 			status = NSpMessage_Send(gNetGame, &message.h, kNSpSendFlag_Registered);	// send message
 			if (status)
@@ -1320,6 +1325,7 @@ static Boolean HandleGameConfigMessage(NetConfigMessage* inMessage)
 	gDifficulty			= inMessage->difficulty;
 	gTagDuration		= inMessage->tagDuration;
 	gTargetFPS			= inMessage->targetFPS;
+	gNetGameCPUFill		= inMessage->cpuFill;				// never this machine's own pref: every peer seats the same cars
 
 	printf("Join Config Received. TargetFPS: %d\n", gTargetFPS);
 

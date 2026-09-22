@@ -19,6 +19,11 @@ enum
 // battle arenas have no AI paths, and the CPU driver knows no battle rules.
 Boolean CPUFillAppliesToMode(int gameMode);
 
+// Whether CPU cars fill this game's empty slots. A local game takes this machine's pref.
+// A network game takes the host's choice from its game config (the host sends its own
+// pref) on every peer, so a client's own pref never changes which cars race.
+Boolean DecideCPUFillThisRace(int gameMode, Boolean netGame, Boolean hostConfigCPUFill, Boolean prefCPUFill);
+
 // How many cars race in a game. Humans take slots 0..numRealPlayers-1 and CPU cars
 // the rest. Single-player races use every slot; multiplayer races only with CPU fill
 // (Pangea's had none); battle modes never seat CPU cars.

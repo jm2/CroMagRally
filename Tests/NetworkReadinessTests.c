@@ -993,6 +993,125 @@ static void NetworkFillLooks(void)
     gMyNetworkPlayerNum = 0;
 }
 
+// Seat one peer's view of a network race from its game config, as PlayGame and the
+// level start do; record the cars and looks it seats.
+static void SeatNetworkRace(short cars[MAX_PLAYERS], short looks[MAX_PLAYERS])
+{
+    static const short humanCars[SMALL_SESSION] = {CAR_TYPE_GEODE, CAR_TYPE_ROCK, CAR_TYPE_GEODE};
+    gCPUFillThisRace = DecideCPUFillThisRace(gGameMode, gNetGameInProgress, gNetGameCPUFill, gGamePrefs.cpuFill);
+    InitPlayerInfo_Game();
+    for (int i = 0; i < gNumRealPlayers; i++)
+    {
+        gPlayerInfo[i].vehicleType = humanCars[i];
+        gPlayerInfo[i].sex = 0;
+        gPlayerInfo[i].skin = 1;
+    }
+    randomRangeCalls = 0;
+    InitPlayersAtStartOfLevel();
+    CHECK(randomRangeCalls == 0);
+    for (int i = 0; i < MAX_PLAYERS; i++)
+    {
+        cars[i] = i < gNumTotalPlayers ? gPlayerInfo[i].vehicleType : -1;
+        looks[i] = i < gNumTotalPlayers ? gPlayerInfo[i].sex * NUM_CAVEMAN_SKINS + gPlayerInfo[i].skin : -1;
+    }
+}
+
+// The host's CPU fill choice travels in its game config: race mode only, and whatever
+// each client's own pref says. Host and client then seat the same cars in the same looks,
+// and a client leaving mid-race becomes a bot in its own slot beside the fill CPUs.
+static void NetworkFillRace(void)
+{
+    const Boolean savedPref = gGamePrefs.cpuFill;
+    for (int hostPref = 0; hostPref <= 1; hostPref++)
+    {
+        for (int battle = 0; battle <= 1; battle++)
+        {
+            NSpGame* peers[MAX_CLIENTS];
+            BeginSession(SMALL_SESSION, peers);
+            gGameMode = battle ? GAME_MODE_TAG1 : GAME_MODE_MULTIPLAYERRACE;
+            gTheAge = 0;
+            gTrackNum = battle ? NUM_RACE_TRACKS : 3;
+            gTargetFPS = 60;
+            gGamePrefs.cpuFill = hostPref;
+            CHECK(HostSendGameConfigInfo() == noErr);
+            const Boolean fill = hostPref && !battle;
+            CHECK(gNetGameCPUFill == fill);
+
+            NetConfigMessage configs[SMALL_SESSION];
+            for (int id = 1; id < SMALL_SESSION; id++)
+            {
+                NSpMessageHeader* message = WaitMessage(peers[id]);
+                CHECK(message->what == kNetConfigureMessage);
+                const NetConfigMessage* config = (const NetConfigMessage*) message;
+                CHECK(NetValidateConfigPayload(config) && config->cpuFill == fill);
+                configs[config->playerNum] = *config;
+                NSpMessage_Release(peers[id], message);
+            }
+            if (battle)
+            {
+                EndSession(peers);
+                continue;
+            }
+
+            short hostCars[MAX_PLAYERS], hostLooks[MAX_PLAYERS];
+            SeatNetworkRace(hostCars, hostLooks);
+            CHECK(gNumTotalPlayers == (fill ? MAX_PLAYERS : SMALL_SESSION));
+            for (int view = 1; view < SMALL_SESSION; view++)            // each client, with the other pref
+            {
+                short cars[MAX_PLAYERS], looks[MAX_PLAYERS];
+                gGamePrefs.cpuFill = !hostPref;
+                gNetGameCPUFill = !fill;
+                CHECK(HandleGameConfigMessage(&configs[view]));
+                CHECK(gMyNetworkPlayerNum == view && gNetGameCPUFill == fill);
+                SeatNetworkRace(cars, looks);
+                CHECK(gNumTotalPlayers == (fill ? MAX_PLAYERS : SMALL_SESSION));
+                CHECK(!memcmp(cars, hostCars, sizeof(cars)) && !memcmp(looks, hostLooks, sizeof(looks)));
+                for (int i = 0; i < gNumTotalPlayers; i++)
+                {
+                    CHECK(gPlayerInfo[i].isComputer == (i >= SMALL_SESSION));
+                    CHECK(gPlayerInfo[i].onThisMachine == (i == view));
+                    CHECK(!gPlayerInfo[i].isComputer || gPlayerInfo[i].splitPaneNum < 0);
+                }
+            }
+
+            // Back to the host's view: the client with NSp ID 1 leaves mid-race.
+            gGamePrefs.cpuFill = hostPref;
+            gNetGameCPUFill = fill;
+            gMyNetworkPlayerNum = 0;
+            SeatNetworkRace(hostCars, hostLooks);
+            gNetSequenceState = kNetSequence_GameLoop;
+            gHostSendCounter = 10;
+            const int leaver = FindHumanByNSpPlayerID(1), stayer = FindHumanByNSpPlayerID(2);
+            CHECK(leaver > 0 && stayer > 0 && leaver != stayer);
+            NSpGame_Dispose(peers[1], 0);
+            peers[1] = NULL;
+            PumpHostUntilScheduled(1);
+            NetHostControlInfoMessageType wire;
+            memset(&wire, 0, sizeof(wire));
+            Host_FillOutgoingEvents(&wire, gHostSendCounter);
+            CHECK(wire.eventCount == 1 && wire.events[0].type == kEvBecomeBot && wire.events[0].playerNum == leaver);
+            gHostSendCounter = wire.events[0].effectiveFrame + 1;
+            ApplyPendingFrameEvents();
+            CHECK(!gGameOver && gNumGatheredPlayers == SMALL_SESSION - 1);
+            CHECK(gNumTotalPlayers == (fill ? MAX_PLAYERS : SMALL_SESSION));
+            for (int i = 0; i < gNumTotalPlayers; i++)
+            {
+                CHECK(gPlayerInfo[i].isComputer == (i == leaver || i >= SMALL_SESSION));
+                CHECK(gPlayerInfo[i].vehicleType == hostCars[i] && !gPlayerInfo[i].isEliminated);
+            }
+            CHECK(FindHumanByNSpPlayerID(1) < 0 && FindHumanByNSpPlayerID(2) == stayer);
+            gNetSequenceState = kNetSequence_Offline;
+            EndSession(peers);
+        }
+    }
+    gGamePrefs.cpuFill = savedPref;
+    gNetGameCPUFill = false;
+    gCPUFillThisRace = false;
+    gGameMode = GAME_MODE_MULTIPLAYERRACE;
+    gNumLocalPlayers = gNumRealPlayers = 1;
+    gMyNetworkPlayerNum = 0;
+}
+
 int main(void)
 {
     Readiness(VEHICLE_READY_TIMEOUT_MS, kNetSequence_WaitingForPlayerVehicles, kNetSequence_GotAllPlayerVehicles);
@@ -1026,6 +1145,7 @@ int main(void)
     LocalSplitScreenSeats();
     NetworkFillVehicles();
     NetworkFillLooks();
+    NetworkFillRace();
     puts("Readiness, paused-leave, full-lobby, local CPU vehicle, start-height, split-screen seat and network fill tests passed");
     return 0;
 }

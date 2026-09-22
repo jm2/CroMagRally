@@ -212,14 +212,11 @@ static Boolean PlayGame(void)
 			/* DECIDE CPU SLOT FILL */
 			//
 			// Once per game, before InitPlayerInfo_Game counts the cars; CleanupLevel clears it.
-			// Local games take the pref. Network games keep it off until the host's game
-			// config carries the host's choice: every peer must seat the same cars, so a
-			// client must never apply its own pref.
+			// Local games take the pref. Network games take the host's choice from its game
+			// config: every peer must seat the same cars, so a client never applies its own pref.
 			//
 
-	gCPUFillThisRace = !gNetGameInProgress
-					&& gGamePrefs.cpuFill
-					&& CPUFillAppliesToMode(gGameMode);
+	gCPUFillThisRace = DecideCPUFillThisRace(gGameMode, gNetGameInProgress, gNetGameCPUFill, gGamePrefs.cpuFill);
 
 	if (!gIsSelfRunningDemo && gNumLocalPlayers > 1)
 	{

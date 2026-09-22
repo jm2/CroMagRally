@@ -46,6 +46,20 @@ static void TestModes(void)
 		CHECK(CPUFillAppliesToMode(mode) == (mode == GAME_MODE_MULTIPLAYERRACE));
 }
 
+// A local game takes this machine's pref; a network game only the host's config.
+static void TestFillDecision(void)
+{
+	for (int mode = 0; mode < NUM_GAME_MODES; mode++)
+	{
+		for (int bits = 0; bits < 8; bits++)
+		{
+			Boolean netGame = bits & 1, hostConfig = (bits >> 1) & 1, pref = (bits >> 2) & 1;
+			Boolean expected = mode == GAME_MODE_MULTIPLAYERRACE && (netGame ? hostConfig : pref);
+			CHECK(DecideCPUFillThisRace(mode, netGame, hostConfig, pref) == expected);
+		}
+	}
+}
+
 static void TestPlayerCounts(void)
 {
 	for (int mode = 0; mode < NUM_GAME_MODES; mode++)
@@ -359,6 +373,7 @@ static void TestFilledRace(void)
 int main(void)
 {
 	TestModes();
+	TestFillDecision();
 	TestPlayerCounts();
 	TestDriverLooks();
 	TestNetworkFillLooks();

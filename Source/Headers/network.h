@@ -37,7 +37,7 @@ typedef struct
 	//	uint8_t				numTracksCompleted;					// pass saved game value to clients so we're all the same here
 	uint8_t				difficulty;							// pass host's difficulty setting so we're in sync
 	uint8_t				tagDuration;						// # minutes in tag game
-	uint8_t				reserved;							// CMR7: was useRedundancy (retired; per-client adaptive depth replaces it)
+	uint8_t				cpuFill;							// host's CPU slot fill choice: 1 only in race mode (CMR7: was useRedundancy)
 	uint16_t			targetFPS;							// The FPS cap for the game (min of all players)
 }NetConfigMessage;
 _Static_assert(sizeof(NetConfigMessage) <= kNSpMaxMessageLength, "config msg fits");
@@ -188,6 +188,8 @@ Boolean GetVehicleSelectionFromNetPlayers(void);
 
 
 void EndNetworkGame(void);
+
+extern Boolean gNetGameCPUFill;					// this network game's CPU slot fill, as the host's config set it
 
 //===============================================================================
 

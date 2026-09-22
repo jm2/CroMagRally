@@ -18,6 +18,14 @@ Boolean CPUFillAppliesToMode(int gameMode)
 }
 
 
+/******************** DECIDE CPU FILL THIS RACE *********************/
+
+Boolean DecideCPUFillThisRace(int gameMode, Boolean netGame, Boolean hostConfigCPUFill, Boolean prefCPUFill)
+{
+	return CPUFillAppliesToMode(gameMode) && (netGame ? hostConfigCPUFill : prefCPUFill);
+}
+
+
 /******************** COUNT PLAYERS IN GAME *********************/
 
 short CountPlayersInGame(int gameMode, short numRealPlayers, Boolean cpuFill)

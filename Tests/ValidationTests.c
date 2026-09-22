@@ -296,6 +296,21 @@ static void TestConfigValidation(void)
 	message.gameMode = GAME_MODE_CAPTUREFLAG;
 	message.trackNum = NUM_TRACKS - 1;
 	assert(NetValidateConfigPayload(&message));
+
+	// CPU fill is 0 or 1, and 1 only for a race: arenas have no AI paths.
+	message.cpuFill = 1;
+	assert(!NetValidateConfigPayload(&message));
+	for (int mode = GAME_MODE_MULTIPLAYERRACE; mode <= GAME_MODE_CAPTUREFLAG; mode++)
+	{
+		message.gameMode = mode;
+		message.trackNum = mode == GAME_MODE_MULTIPLAYERRACE ? NUM_RACE_TRACKS - 1 : NUM_TRACKS - 1;
+		for (int fill = 0; fill <= 255; fill++)
+		{
+			message.cpuFill = fill;
+			assert(NetValidateConfigPayload(&message)
+				== (fill == 0 || (fill == 1 && mode == GAME_MODE_MULTIPLAYERRACE)));
+		}
+	}
 }
 
 static void TestSyncMaskValidation(void)
