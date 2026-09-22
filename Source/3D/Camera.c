@@ -10,6 +10,8 @@
 /****************************/
 
 #include "game.h"
+#include "finite_guard.h"
+#include <math.h>
 
 
 /****************************/
@@ -460,7 +462,17 @@ still:
 
 			/* ROTATE CAM POSITION AROUND RING */
 
-	rotY = playerInfo->cameraRingRot = RotateCameraRingTowardTarget(rotY, &oppositeMotionVec, &oldRingPosVec,priming);	// rotate toward new rotation
+	rotY = RotateCameraRingTowardTarget(rotY, &oppositeMotionVec, &oldRingPosVec,priming);	// rotate toward new rotation
+
+	if (!isfinite(rotY))																		// a NaN ring angle would never recover, so keep the last finite one
+	{
+		static uint32_t reported = 0;
+		if (FirstNonFiniteReport(&reported, playerNum))
+			SDL_Log("Non-finite camera ring rotation for player %d at frame %u (motion %g, %g); kept %g",
+					playerNum, (unsigned) gSimulationFrame, playerObj->Delta.x, playerObj->Delta.z, playerInfo->cameraRingRot);
+		rotY = playerInfo->cameraRingRot;
+	}
+	playerInfo->cameraRingRot = rotY;
 
 
 	from.x = myX - rearViewMultiplier * sin(rotY) * (cameraRadius + (gCameraStartupTimer * 3000.0f));												// calc new from coord
@@ -486,6 +498,19 @@ update:
 				/**********************/
 				/* UPDATE CAMERA INFO */
 				/**********************/
+
+	{
+		const OGLPoint3D badFrom = from, badTo = to;
+		static uint32_t reported = 0;
+
+		if (!KeepCameraPlacementFinite(&from, &to, &playerInfo->camera.cameraLocation, &playerInfo->camera.pointOfInterest)
+			&& FirstNonFiniteReport(&reported, playerNum))
+		{
+			SDL_Log("Non-finite camera for player %d at frame %u: from (%g, %g, %g) to (%g, %g, %g); kept from (%g, %g, %g) to (%g, %g, %g)",
+					playerNum, (unsigned) gSimulationFrame, badFrom.x, badFrom.y, badFrom.z, badTo.x, badTo.y, badTo.z,
+					from.x, from.y, from.z, to.x, to.y, to.z);
+		}
+	}
 
 	if (playerInfo->onThisMachine)										// see if this camera is on this machine
 	{

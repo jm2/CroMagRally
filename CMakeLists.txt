@@ -666,6 +666,7 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 		target_link_options(CroMagRallyGameSimulationTests PRIVATE -fsanitize=address,undefined)
 	endif()
 	add_test(NAME game_simulation COMMAND CroMagRallyGameSimulationTests)
+	cmr_add_gameplay_test(CroMagRallyFiniteGuardTests finite_guard Tests/FiniteGuardTests.c Source/System/FiniteGuard.c)
 	add_executable(CroMagRallyAssetLoaderTests Tests/AssetLoaderTests.c
 		Source/3D/BG3DValidation.c Source/System/LZSSDecode.c)
 	target_include_directories(CroMagRallyAssetLoaderTests PRIVATE ${GAME_GENERATED_INCLUDE_DIR} ${GAME_SRCDIR}/Headers)
