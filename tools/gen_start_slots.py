@@ -85,12 +85,16 @@ MAX_HUMP = 100          # terrain between a slot and its source never rises this
                         # higher end (authored max 19): no hedge, ridge or bank in between
 MAX_STEP_GRADE = 0.35   # nor climbs or drops steeper than this over any 200-unit stretch (authored
                         # neighbours: median 0.07, p95 0.36): no terrace edge or cliff in between
-# The heading must have this much drivable ground ahead: no fence, map edge or obstacle, and no
+# The heading must have this much drivable ground ahead: no fence, map edge or obstacle, no
 # 200-unit stretch anywhere along it climbing steeper than MAX_STEP_GRADE (canyon walls and banks
-# read 40-65%, hedges ~100%). Authored race slots have >= 2000 before the first such stretch
-# (Atlantis 1450); authored arena slots >= 1500, except Maze battle p4 (1350) and four CTF slots
-# that start by a hedge or on a slope (Maze p0, TarPits p1 and p5, Ramps p3).
+# read 40-65%, hedges ~100%), and none dropping steeper than MAX_DROP_GRADE. Authored race slots
+# have >= 2000 before the first such climb (Atlantis 1450); authored arena slots >= 1500, except
+# Maze battle p4 (1350) and four CTF slots that start by a hedge or on a slope (Maze p0, TarPits
+# p1 and p5, Ramps p3).
 CLEAR_RUN = {'race': 2000, 'battle': 1500, 'ctf': 1500}
+MAX_DROP_GRADE = 0.5    # a car rolls down a slope, so drops only matter at a cliff edge: authored
+                        # slots face drops of up to 39% within their clear run (TarPits' pit rims,
+                        # Atlantis p3); cliff and bank edges read 75-100%
 # No generated slot may sit on another car's nose, or have one on its own: within PATH_RANGE ahead
 # and PATH_WIDTH to either side of the heading, unless both face within 2/16 turn of each other
 # (a car following another, as on a race grid), and within HEADON_RANGE when they face each other
@@ -156,8 +160,8 @@ LIQUID_MARGIN = 50      # ground less than this above the surface counts as wet
 
 # Atlantis races submarines (InitPlayer_Submarine): they spawn 500 above the seabed and are held
 # at least 200 above it (Player_Submarine.c), so ground flatness, the height difference from the
-# source slot and the steepness in between do not apply there. Ridges in between and walls
-# ahead still do.
+# source slot, the steepness in between and drops ahead do not apply there. Ridges in between
+# and walls ahead still do.
 SUBMARINE_MAPS = {'IronAge_Atlantis'}
 
 
@@ -358,8 +362,9 @@ class MapData:
             return False
         return all(pf.supertile_id(x + dx, z + dz) > 0 for dx, dz in _FOOTPRINT_CORNERS)
 
-    def ahead_problem(self, x, z, rot16, run, ctf):
-        """Why the first run units ahead of a car at (x, z) are not drivable, or None."""
+    def ahead_problem(self, x, z, rot16, run, ctf, drops=True):
+        """Why the first run units ahead of a car at (x, z) are not drivable, or None. drops:
+        also reject a cliff edge (not for submarines, which float over it)."""
         f = heading(rot16)
         if self.fence_between((x, z), (x + f[0] * run, z + f[1] * run)):
             return 'fence ahead'
@@ -379,6 +384,8 @@ class MapData:
             grade = (hs[i + k] - hs[i]) / stretch
             if grade > MAX_STEP_GRADE:
                 return 'wall %d ahead (%d%% over %d)' % (i * 50, 100 * grade, stretch)
+            if drops and grade < -MAX_DROP_GRADE:
+                return 'drop %d ahead (%d%% over %d)' % (i * 50, -100 * grade, stretch)
         return None
 
 
@@ -494,7 +501,7 @@ def check_site(ctx, slot, full=False):
         if m['step'] > MAX_STEP_GRADE and not sub and \
                 failed('ground between it and its source is %d%% steep' % (100 * m['step'])):
             break
-        m['ahead'] = md.ahead_problem(slot.x, slot.z, slot.rot16, CLEAR_RUN[ctx.set], ctx.set == SET_CTF)
+        m['ahead'] = md.ahead_problem(slot.x, slot.z, slot.rot16, CLEAR_RUN[ctx.set], ctx.set == SET_CTF, drops=not sub)
         if m['ahead']:
             failed(m['ahead'])
         break

@@ -113,6 +113,16 @@ class StartSlotTableTests(unittest.TestCase):
         # the whole run was only 21%.
         self.assertRejected(self.problems_with('BronzeAge_China', gen.SET_RACE, 11, 24350, 71750), 'wall 950 ahead')
 
+    def test_rejects_cliff_edge_ahead(self):
+        # On top of one of Ramps' ramps, facing off its edge: no wall ahead, but a 121% drop.
+        md = self.map('Battle_Ramps')
+        self.assertIsNone(md.ahead_problem(25550, 18300, 8, gen.CLEAR_RUN[gen.SET_BATTLE], False, drops=False))
+        self.assertRejected(self.problems_with('Battle_Ramps', gen.SET_BATTLE, 6, 25550, 18300, 8), 'drop 0 ahead')
+        # A pit rim like the ones authored TarPits slots face (39%) is fine.
+        md = self.map('Battle_TarPits')
+        x, z, r = next(e for e in self.entries if e[0] == 'Battle_TarPits' and e[1] == gen.SET_BATTLE)[2][4]
+        self.assertIsNone(md.ahead_problem(x, z, r, gen.CLEAR_RUN[gen.SET_BATTLE], False))
+
     def test_rejects_slot_inside_the_battle_ring(self):
         # The first table's Spiral p7, where four authored cars' headings converged.
         self.assertRejected(self.problems_with('Battle_Spiral', gen.SET_BATTLE, 7, 27700, 23100, 7),
