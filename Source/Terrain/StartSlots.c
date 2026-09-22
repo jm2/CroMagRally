@@ -6,7 +6,8 @@
 // generated table's slot for this map (StartSlotTable.c, tools/gen_start_slots.py), else one
 // derived from the authored slots by the procedural rule below. These are pure functions of map
 // data and the player setup, so every network peer computes the same slots: table slots are
-// exact integers, and the rule truncates to int like the item coordinates it starts from.
+// exact integers, and the rule uses no libm beyond sqrt (correctly rounded everywhere) and
+// truncates to int like the item coordinates it starts from.
 //
 
 #include "globals.h"
@@ -93,6 +94,31 @@ static const StartSlotTableEntry* FindTableEntry(StartSlotSet set, int mapUnitWi
 			return entry;
 	}
 	return NULL;
+}
+
+
+/********************** RING TURN **************************/
+//
+// cos and sin of the battle rule's half-slot turn, from their Taylor series. Only basic
+// arithmetic (which the build keeps uncontracted), so every platform derives the same bits;
+// libm's cos and sin may differ in the last one. 0 < theta <= pi, where 15 terms are accurate
+// to double precision.
+//
+
+static void RingTurn(double theta, double* c, double* s)
+{
+	const double t2 = theta * theta;
+	double cTerm = 1.0, sTerm = theta;
+
+	*c = cTerm;
+	*s = sTerm;
+	for (int k = 1; k <= 15; k++)
+	{
+		cTerm *= -t2 / ((2 * k - 1) * (2 * k));
+		sTerm *= -t2 / ((2 * k) * (2 * k + 1));
+		*c += cTerm;
+		*s += sTerm;
+	}
 }
 
 
@@ -190,7 +216,8 @@ static void FillByRule(StartSlotSet set, int mapUnitWidth, int mapUnitDepth,
 	else
 	{
 		const float theta = PI2 / (float) (2 * n);										// half a slot
-		const double c = cos(theta), s = sin(theta);
+		double c, s;
+		RingTurn(theta, &c, &s);
 
 		for (int p = n; p < numSlots; p++)
 		{

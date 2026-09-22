@@ -374,6 +374,39 @@ static void TestRuleArena(void)
 			CHECK(Dist2(poses[p].x, poses[p].z, poses[q].x, poses[q].z) >= (int64_t) MIN_SPACING * MIN_SPACING);
 	}
 
+			/* ANY RING SIZE: THE TURN (COMPUTED WITHOUT LIBM) MATCHES cos/sin */
+
+	for (int n = 2; n <= 8; n++)
+	{
+		StartSlot ring[MAX_TEST_SLOTS] = {{0, 0, 0}};
+		bool ringAuthored[MAX_TEST_SLOTS] = {false};
+		StartSlotPose ringPoses[MAX_TEST_SLOTS];
+
+		for (int p = 0; p < n; p++)
+		{
+			const double a = 2.0 * 3.14159265358979323846 * p / n;
+			ring[p] = (StartSlot) { 30000 + (int) lround(1500 * cos(a)), 30000 + (int) lround(1500 * sin(a)), (p * 16 / n) & 15 };
+			ringAuthored[p] = true;
+		}
+		CHECK(StartSlots_Fill(START_SLOT_SET_BATTLE, 64000, 64000, ring, ringAuthored, 2 * n, ringPoses) == NULL);
+
+		double cx = 0, cz = 0;
+		for (int p = 0; p < n; p++)
+		{
+			cx += ring[p].x / (double) n;
+			cz += ring[p].z / (double) n;
+		}
+		const float theta = PI2 / (float) (2 * n);
+		for (int p = n; p < 2 * n; p++)
+		{
+			const double dx = ring[p - n].x - cx, dz = ring[p - n].z - cz;
+			const double k = (sqrt(dx * dx + dz * dz) + 1300) / sqrt(dx * dx + dz * dz);
+			CHECK(fabs(ringPoses[p].x - (cx + k * (dx * cos(theta) + dz * sin(theta)))) <= 1.0);
+			CHECK(fabs(ringPoses[p].z - (cz + k * (dz * cos(theta) - dx * sin(theta)))) <= 1.0);
+			CHECK(ringPoses[p].rotY == StartSlot_RotY(ring[p - n].rot16) + theta);
+		}
+	}
+
 			/* CTF: A COLUMN BESIDE EACH TEAM'S LINE, TOWARDS THE OTHER TEAM */
 
 	for (int p = 0; p < AUTHORED; p++)
