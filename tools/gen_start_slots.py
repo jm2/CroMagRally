@@ -579,6 +579,17 @@ def set_problems(ctx, extra):
 
 # ---- generation --------------------------------------------------------------------------------
 
+def rule_source(set_name, n, p):
+    """The authored slot the rule derives player p's slot from, and its wave (StartSlots.c
+    RuleSource): slot p % n on the grid and the ring; in CTF a teammate, copied in turn."""
+    if set_name == SET_CTF:
+        team = p & 1
+        members = (n - team + 1) // 2
+        k = p // 2
+        return team + 2 * (k % members), k // members
+    return p % n, p // n
+
+
 def rule_slots(ctx):
     """The procedural rule (StartSlots.c, from the 12-player prototype) for players 6-11:
     [(player, x, z, heading in radians, source slot)]."""
@@ -586,21 +597,31 @@ def rule_slots(ctx):
     n = len(a)
     th = 2 * math.pi / (2 * n)                          # battle ring: half a slot
     cos_th, sin_th = (math.sqrt(3) / 2, 0.5) if n == 6 else (math.cos(th), math.sin(th))
+    step = {}
+    if ctx.set == SET_CTF:
+        for t in (0, 1):                                # each team's wave step
+            members = (n - t + 1) // 2
+            if members == 1:
+                step[t] = heading(a[t].rot16) + (RACE_GAP,)
+                continue
+            u, v = a[t + 2 * (members - 2)], a[t + 2 * (members - 1)]
+            sx, sz = v.x - u.x, v.z - u.z
+            ln = max(1.0, dist(v.pos, u.pos))
+            px, pz = -sz / ln, sx / ln
+            if (ctx.cx - a[t].x) * px + (ctx.cz - a[t].z) * pz < 0:
+                px, pz = -px, -pz
+            step[t] = (px, pz, ln)
     out = []
     for p in range(n, AUTHORED + EXTRA):
-        src, wave = a[p % n], p // n
+        i, wave = rule_source(ctx.set, n, p)
+        src = a[i]
         if ctx.set == SET_RACE:
             f = ctx.fwd
             d = [ctx.depth(s.pos) for s in a]
             shift = max(d) - min(d) + RACE_GAP
             x, z, rot = src.x - f[0] * shift * wave, src.z - f[1] * shift * wave, 2 * math.pi * src.rot16 / 16
         elif ctx.set == SET_CTF:
-            t = p & 1
-            sx, sz = a[t + 4].x - a[t + 2].x, a[t + 4].z - a[t + 2].z
-            ln = max(1.0, dist(a[t + 4].pos, a[t + 2].pos))
-            px, pz = -sz / ln, sx / ln
-            if (ctx.cx - a[t].x) * px + (ctx.cz - a[t].z) * pz < 0:
-                px, pz = -px, -pz
+            px, pz, ln = step[p & 1]
             x, z, rot = src.x + px * ln * wave, src.z + pz * ln * wave, 2 * math.pi * src.rot16 / 16
         else:
             dx, dz = src.x - ctx.cx, src.z - ctx.cz

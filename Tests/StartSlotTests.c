@@ -425,6 +425,47 @@ static void TestRuleArena(void)
 }
 
 
+/*************** CTF RULE: ANY NUMBER OF AUTHORED SLOTS ****************/
+//
+// Red (even players) on a line at x = 20000 facing +x, green (odd) at x = 40000 facing -x. With
+// an odd count the teams have different sizes, but every extra player still copies a teammate:
+// it starts on its own team's half, one column towards the other team, facing its team's way.
+//
+
+static void TestRuleCtfTeams(void)
+{
+	for (int n = 2; n <= 7; n++)
+	{
+		StartSlot items[MAX_TEST_SLOTS] = {{0, 0, 0}};
+		bool authored[MAX_TEST_SLOTS] = {false};
+		StartSlotPose poses[MAX_TEST_SLOTS];
+
+		for (int p = 0; p < n; p++)
+		{
+			items[p] = (StartSlot) { (p & 1) ? 40000 : 20000, 29000 + 1000 * (p / 2), (p & 1) ? 4 : 12 };
+			authored[p] = true;
+		}
+		CHECK(StartSlots_Fill(START_SLOT_SET_CTF, 64000, 64000, items, authored, MAX_TEST_SLOTS, poses) == NULL);
+
+		for (int p = n; p < MAX_TEST_SLOTS; p++)
+		{
+			const int team = p & 1;
+			const int members = (n + 1 - team) / 2;
+			const StartSlot* mate = &items[team + 2 * ((p / 2) % members)];		// copied in turn
+			const int wave = (p / 2) / members;
+			const int step = members == 1 ? 1300 : 1000;						// a lone slot: a row gap
+
+			CHECK(poses[p].rotY == StartSlot_RotY(team ? 4 : 12));
+			CHECK(poses[p].x == (team ? 40000 - step * wave : 20000 + step * wave));
+			CHECK(poses[p].z == mate->z);
+			CHECK(team ? poses[p].x > 30000 : poses[p].x < 30000);				// its own half
+			for (int q = 0; q < p; q++)
+				CHECK(poses[q].x != poses[p].x || poses[q].z != poses[p].z);
+		}
+	}
+}
+
+
 /*************** THE TABLE NEEDS THE MAP EXACTLY AS SHIPPED ****************/
 
 static void TestTableNeedsExactMatch(void)
@@ -612,6 +653,7 @@ int main(void)
 	TestHumansAtTheBack();
 	TestRuleRaceGrid();
 	TestRuleArena();
+	TestRuleCtfTeams();
 	TestTableNeedsExactMatch();
 	TestPlace();
 	printf("start slots: %d table entries OK\n", kNumStartSlotTableEntries);

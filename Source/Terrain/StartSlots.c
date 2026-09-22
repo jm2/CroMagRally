@@ -139,13 +139,41 @@ static int RuleCoord(double v, int mapUnitSize)
 }
 
 
+/********************** RULE SOURCE **************************/
+//
+// The authored slot the rule derives player p's slot from, and how many waves out it goes. On
+// the battle ring and the race grid that is slot p % n, one wave per n players. In Capture the
+// Flag it is a teammate (even players red, odd green): p is the (p / 2)th player of its team,
+// which has authored slots team, team + 2, ... below n, and its members are copied in turn.
+//
+
+static void RuleSource(StartSlotSet set, int n, int p, int* src, int* wave)
+{
+	if (set == START_SLOT_SET_CTF)
+	{
+		const int team = p & 1;
+		const int members = (n - team + 1) / 2;			// >= 1: the CTF rule needs n >= 2
+		const int k = p / 2;
+		*src = team + 2 * (k % members);
+		*wave = k / members;
+	}
+	else
+	{
+		*src = p % n;
+		*wave = p / n;
+	}
+}
+
+
 /********************** FILL BY RULE **************************/
 //
 // The procedural rule, for maps the table doesn't know. It derives each missing player's slot
-// from authored slot p % n, one "wave" (p / n) further out per n players:
+// from an authored slot (RuleSource), one "wave" further out each time the authored slots have
+// all been copied:
 //   race:   repeat the authored grid behind itself, one row gap further back per wave, keeping
 //           the lanes and headings, so slot n+k is behind authored slot k
-//   CTF:    a parallel column beside each team's line, on the side facing the arena
+//   CTF:    a parallel column beside each team's line, on the side facing the arena, copying
+//           the team's own slots; a team with a single slot lines up in front of it
 //   battle: a wider ring around the authored cluster, rotated half a slot
 // (From the 12-player prototype.)
 //
@@ -156,6 +184,8 @@ static void FillByRule(StartSlotSet set, int mapUnitWidth, int mapUnitDepth,
 	const int n = StartSlots_CountAuthored(authored, numSlots);
 	if (n == 0)												// nothing to derive from: leave them at (0,0) as always
 		return;
+	if (set == START_SLOT_SET_CTF && n < 2)					// no slot for one team: use the battle rule
+		set = START_SLOT_SET_BATTLE;
 
 	double cx = 0, cz = 0;
 	for (int i = 0; i < n; i++)
@@ -183,35 +213,57 @@ static void FillByRule(StartSlotSet set, int mapUnitWidth, int mapUnitDepth,
 		{
 			if (authored[p])
 				continue;
-			const StartSlot* src = &items[p % n];
-			const int wave = p / n;
+			int from, wave;
+			RuleSource(set, n, p, &from, &wave);
+			const StartSlot* src = &items[from];
 			poses[p].x = RuleCoord(src->x - fx * shift * wave, mapUnitWidth);
 			poses[p].z = RuleCoord(src->z - fz * shift * wave, mapUnitDepth);
 			poses[p].rotY = StartSlot_RotY(src->rot16);
 		}
 	}
-	else if (set == START_SLOT_SET_CTF && n >= 6)
+	else if (set == START_SLOT_SET_CTF)
 	{
+		double stepX[2], stepZ[2], stepLen[2];						// each team's wave step
+
+		for (int team = 0; team < 2; team++)
+		{
+			const int members = (n - team + 1) / 2;
+			const StartSlot* first = &items[team];
+			if (members == 1)										// no line: in front of the lone slot
+			{
+				stepX[team] = kHeading[first->rot16 & 15][0];
+				stepZ[team] = kHeading[first->rot16 & 15][1];
+				stepLen[team] = RULE_ROW_GAP;
+				continue;
+			}
+			const StartSlot* a = &items[team + 2 * (members - 2)];	// the team's last two slots
+			const StartSlot* b = &items[team + 2 * (members - 1)];
+			const double sx = b->x - a->x;							// step along the team's line
+			const double sz = b->z - a->z;
+			double len = sqrt(sx * sx + sz * sz);
+			if (len < 1.0)
+				len = 1.0;
+			double px = -sz / len, pz = sx / len;					// perpendicular to it
+			if ((cx - first->x) * px + (cz - first->z) * pz < 0)	// towards the other team
+			{
+				px = -px;
+				pz = -pz;
+			}
+			stepX[team] = px;
+			stepZ[team] = pz;
+			stepLen[team] = len;
+		}
+
 		for (int p = n; p < numSlots; p++)
 		{
 			if (authored[p])
 				continue;
 			const int team = p & 1;
-			const StartSlot* src = &items[p % n];
-			const double sx = items[team + 4].x - items[team + 2].x;		// step along the team's line
-			const double sz = items[team + 4].z - items[team + 2].z;
-			double len = sqrt(sx * sx + sz * sz);
-			if (len < 1.0)
-				len = 1.0;
-			double px = -sz / len, pz = sx / len;							// perpendicular to it
-			if ((cx - items[team].x) * px + (cz - items[team].z) * pz < 0)	// towards the other team
-			{
-				px = -px;
-				pz = -pz;
-			}
-			const int wave = p / n;
-			poses[p].x = RuleCoord(src->x + px * len * wave, mapUnitWidth);
-			poses[p].z = RuleCoord(src->z + pz * len * wave, mapUnitDepth);
+			int from, wave;
+			RuleSource(set, n, p, &from, &wave);
+			const StartSlot* src = &items[from];
+			poses[p].x = RuleCoord(src->x + stepX[team] * stepLen[team] * wave, mapUnitWidth);
+			poses[p].z = RuleCoord(src->z + stepZ[team] * stepLen[team] * wave, mapUnitDepth);
 			poses[p].rotY = StartSlot_RotY(src->rot16);
 		}
 	}
@@ -225,8 +277,9 @@ static void FillByRule(StartSlotSet set, int mapUnitWidth, int mapUnitDepth,
 		{
 			if (authored[p])
 				continue;
-			const StartSlot* src = &items[p % n];
-			const int wave = p / n;
+			int from, wave;
+			RuleSource(set, n, p, &from, &wave);
+			const StartSlot* src = &items[from];
 			double dx = src->x - cx, dz = src->z - cz;
 			const double r = sqrt(dx * dx + dz * dz);
 			const double scale = r > 1.0 ? (r + RULE_ROW_GAP * wave) / r : 1.0;
