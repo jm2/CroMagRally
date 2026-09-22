@@ -12,6 +12,7 @@
 #include "game.h"
 #include "cpu_driver.h"
 #include "finite_guard.h"
+#include "car_count_tuning.h"
 
 /****************************/
 /*    PROTOTYPES            */
@@ -595,13 +596,14 @@ CarStatsType	*info;
 uint16_t		tileAttribs;
 float		thrust,dx,dz;
 PlayerInfoType	*pinfo;
-float		cpuTweakFactor;
+float		cpuTweakFactor, placeScale;
 Boolean		onWater;
 
 	playerNum = theNode->PlayerNum;
 	info = &gPlayerInfo[playerNum].carStats;
 	pinfo = &gPlayerInfo[playerNum];
 	onWater = pinfo->onWater;
+	placeScale = GetCatchUpPlaceScale(gNumTotalPlayers);					// per-place edges below were tuned for 6 cars
 
 			/* GET CPU TWEAK FACTOR */
 
@@ -612,7 +614,7 @@ Boolean		onWater;
 		if (pinfo->isComputer)												// give cars in back a slight edge
 		{
 			if (pinfo->place > gWorstHumanPlace)							// only give CPU an edge if its behind the worst human
-				cpuTweakFactor = 1.0f + (float)(pinfo->place - gWorstHumanPlace) * 0.3f;
+				cpuTweakFactor = 1.0f + (float)(pinfo->place - gWorstHumanPlace) * (0.3f * placeScale);
 		}
 	}
 
@@ -826,10 +828,10 @@ Boolean		onWater;
 		if (pinfo->isComputer)
 		{
 			if (pinfo->place > gWorstHumanPlace)							// only give CPU an edge if its behind the worst human
-				maxSpeed += (float)(pinfo->place - gWorstHumanPlace) * PLACE_SPEED_TWEAK_CPU;
+				maxSpeed += (float)(pinfo->place - gWorstHumanPlace) * (PLACE_SPEED_TWEAK_CPU * placeScale);
 		}
 		else
-			maxSpeed += (float)(pinfo->place) * PLACE_SPEED_TWEAK;				// give human cars in back a slight edge
+			maxSpeed += (float)(pinfo->place) * (PLACE_SPEED_TWEAK * placeScale);	// give human cars in back a slight edge
 	}
 
 	if (pinfo->flamingTimer > 0.0f)											// half speed if flaming
