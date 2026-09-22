@@ -72,25 +72,33 @@ StartupSmoke PASS lines, MalformedAssetTests PASS. GitHub CI has not run on it y
    for the 628 B host control message, an 80 KB send ring (~2 s of host messages at
    60 fps), and updated README and netcode notes. No 4CC change. CI-equivalent run:
    27/27 ctest normal and sanitizer, 101 StartupSmoke PASS lines, MalformedAssetTests PASS.
-2. **Land-car strandings at 12 cars** (blocks §4.9 "no stranded cars"). The audit
-   found three cases, all with branch 1's afloat fix already applied:
-   - on Scandinavia at 12 cars, the autopilot car was stuck 266 s of 494 s at
-     lap 0, checkpoint 44, at ≈(90100, 3840, 30900), about 3.8k units above the
-     route;
-   - a CPU sat ≈90 s near checkpoint 14;
-   - a ≈90 s strand also occurs at 6 cars at 72 Hz.
+2. **CPU strandings on fences (known issue, deferred by the owner on 2026-09-22).** After a
+   jump or a hard knock, a CPU occasionally lands on or behind a fence. Path-following then
+   steers it into the fence forever, and the 1 s displacement stuck check either never fires
+   (the car slides back and forth) or reversing can't free it (the car is wedged).
+   - Jungle, 12 cars, 60 Hz, seed 12345: CPU 11 lands on the fence near checkpoint 4 at
+     ≈(41500, 3390, 80800) after a 7000 u/s jump, and stays there 246 s of 280.
+   - Scandinavia, prototype measurement build: the autopilot car ends up on the ridge south
+     of the checkpoint-44 fence at ≈(90300, 3800, 30800). It didn't recur on this branch.
 
-   The stuck check measures raw displacement, so fence-sliding stalls (10–24 s)
-   also go unflagged. The investigation unit was stopped before its first commit.
-   Logs are in `/var/tmp/cmr-soak/a6-scan12*` and `/var/tmp/cmr-soak/a6-san12`.
+   Renders and a per-car trace patch are in `/var/tmp/cmr-b2-stuck-evidence/`. The robust
+   fix is a deterministic CPU rescue that returns the car to its last checkpoint after about
+   20 s without progress. That is a visible gameplay change, left for a later decision.
 3. **§4.8 LAN at 12 humans:** not measured (13 processes with
    `Tests/NetworkSmokeTests.py` after the raise; host downlink, packets/s, input
    grace wait).
-4. **§4.9 acceptance:**
-   - 12-car ASan/UBSan soaks on the real branch. So far there are ≈287k clean
-     frames, but on a measurement build with the prototype's procedural slots.
-   - Every CPU completing laps.
-   - 7–12 human LAN in-process tests after the raise.
+4. **§4.9 acceptance, partly done.** A soak on this branch (normal build, `tools/run_race_metrics.sh`)
+   ran 9 tracks × 50/60/72 Hz at 12 and at 6 cars, with autopilot and seed 12345. All 54 races
+   finished; logs are in `/var/tmp/cmr-soak/b2real`.
+   - 6 cars: 0 stranded CPUs, and the sampled rows are identical to branch 1.
+   - 12 cars: 1 stranded CPU in 27 races (Jungle 60 Hz, item 2 above).
+   - 12 vs 6 cars: CPU lap 2 is +0.3%, pickups per car +0.9% (the kit's
+     prototype measured −11% before POW scaling), time to checkpoint 5 +8% (prototype
+     +26%), and hard hits per minute ×2.3.
+   - Narrow China is still +14% on lap 2.
+
+   Still to do: 12-car soaks under ASan/UBSan on this branch (≈287k clean 12-car frames so far,
+   but on the prototype measurement build) and the 7–12 human LAN runs.
 5. **Start-slot CTF balance** (minor, from the last verification). Red and green
    extras on TarPits, Ramps, Celtic and Spiral differ by ≈1.8–2.3k in drivable
    path to their torches. There is a work-in-progress generator change in
