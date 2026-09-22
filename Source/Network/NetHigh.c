@@ -395,7 +395,7 @@ static void RecordFrameEvent(uint32_t effectiveFrame, uint8_t type, int8_t playe
 			return;
 		}
 	}
-	// Table full of un-applied events (>8 concurrent leaves in one ~12-frame window): drop. Extremely
+	// Table full of un-applied events (>NET_MAX_PENDING_EVENTS concurrent leaves in one ~12-frame window): drop. Extremely
 	// rare; the TCP keepalive backstop still converts the peer eventually via a later leave/drop.
 }
 

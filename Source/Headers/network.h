@@ -75,7 +75,7 @@ _Static_assert(sizeof(NetFrameEvent) == 8, "NetFrameEvent ABI");
 // table). The wire MUST carry the same count: NetCheck/leave can schedule one become-bot per
 // in-flight player in a SINGLE host frame, all sharing one effectiveFrame, so a smaller wire cap
 // would silently drop the surplus and desync the host vs clients (seed/state FATAL).
-#define NET_MAX_PENDING_EVENTS	8
+#define NET_MAX_PENDING_EVENTS	12
 
 // Host input buffering and frame-event scheduling limits are wire invariants too: the
 // payload validator must agree with the producer on every accepted telemetry/event value.

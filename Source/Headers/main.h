@@ -6,7 +6,7 @@
 
 #include "Pomme.h"
 
-#define	MAX_PLAYERS			6
+#define	MAX_PLAYERS			12
 #define	MAX_LOCAL_PLAYERS	4
 #define	MAX_GAME_FPS		1000
 

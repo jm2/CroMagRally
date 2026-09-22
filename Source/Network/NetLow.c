@@ -61,10 +61,11 @@ int gNetPort = 49959;
 
 // Per-socket non-blocking send ring (Stage 1). Absorbs whatever the kernel send buffer
 // can't take in one shot so the main thread never blocks retrying a slow/stalled peer.
-// 32 KB ~= 2s of host control msgs (~290B @60pps) or ~10s of client msgs (~52B); a single
-// max message (kNSpMaxMessageLength) always fits an empty ring, so overflow only ever comes
-// from sustained backlog -> the existing kick (host) / terminate (client) path.
-#define SEND_RING_CAPACITY 32768
+// 80 KB ~= 2s of host control msgs (628B @60pps at MAX_PLAYERS 12; ~0.9s at 144pps) or
+// ~25s of client msgs (~52B); a single max message (kNSpMaxMessageLength) always fits an
+// empty ring, so overflow only ever comes from sustained backlog -> the existing kick (host)
+// / terminate (client) path. One ring per client slot plus the client's own: ~1 MB per host.
+#define SEND_RING_CAPACITY 81920
 #define MAX_APPLE_ADVERTISE_FAILURES 30
 
 typedef struct SendRing

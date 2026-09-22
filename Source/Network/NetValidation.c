@@ -8,6 +8,12 @@
 _Static_assert(MAX_CLIENTS <= MAX_PLAYERS, "every network player needs a player slot");
 _Static_assert(MAX_CLIENTS <= 32, "NSp player-ID masks are uint32_t");
 _Static_assert(NET_MAX_PENDING_EVENTS >= MAX_CLIENTS - 1, "one pending become-bot event per client");
+// The host control message is the per-frame wire cost of a player slot: 40 B per player plus
+// 8 B per event slot on a 52 B base (628 B at 12 players and 12 events). Changing its layout is
+// a wire change; update this and the payload limit together.
+_Static_assert(sizeof(NetHostControlInfoMessageType)
+	== sizeof(NSpMessageHeader) + 24 + 40 * MAX_PLAYERS + (int) sizeof(NetFrameEvent) * NET_MAX_PENDING_EVENTS,
+	"host control message layout");
 
 int NetNormalizeRefreshRate(int refreshRate)
 {
