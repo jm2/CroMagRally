@@ -6,22 +6,60 @@
 #include "game.h"
 
 
-// Raising MAX_PLAYERS past a table must come with a deliberate choice for the
-// extra places; until then the lookups below keep every place inside its table.
-_Static_assert(NUM_PLACE_SPRITES >= MAX_PLAYERS, "no big place number for 7th+: add art/font support first");
-_Static_assert(NUM_ANNOUNCER_PLACE_LINES >= MAX_PLAYERS, "no announcer line for 7th+: decide what to say (silence is safe)");
+// Places past the number sprites are drawn with font digits, and the
+// announcer stays silent past its last line (see below).
+_Static_assert(MAX_PLAYERS <= 999 && MAX_PLACE_DIGITS >= 3, "MAX_PLACE_DIGITS can't spell every place");
 
 
-/********************* GET PLACE NUMBER SPRITE ***********************/
+/********************* GET PLACE NUMBER ***********************/
 //
-// Returns the big place number sprite (INFOBAR_SObjType_Place1..Place6).
-// A place past the table shows the last number instead of whichever
-// unrelated sprite follows Place6 in the atlas.
+// Returns how to draw a place's big number: its hand-drawn sprite for 1st-6th,
+// or past those, the digits to draw with the wall font, whose tan carved
+// stone matches the sprites.
 //
 
-int GetPlaceNumberSprite(int place)
+PlaceNumber GetPlaceNumber(int place)
 {
-	return INFOBAR_SObjType_Place1 + GAME_CLAMP(place, 0, NUM_PLACE_SPRITES - 1);
+	PlaceNumber number = {0};
+
+	place = GAME_MAX(place, 0);
+
+	if (place < NUM_PLACE_SPRITES)
+	{
+		number.sprite = INFOBAR_SObjType_Place1 + place;
+		return number;
+	}
+
+	int largest = 0;										// largest number that fits in MAX_PLACE_DIGITS
+	for (int i = 0; i < MAX_PLACE_DIGITS; i++)
+		largest = largest * 10 + 9;
+
+	int value = GAME_MIN(place + 1, largest);
+
+	for (int v = value; v > 0; v /= 10)
+		number.numDigits++;
+
+	for (int i = number.numDigits - 1; i >= 0; i--, value /= 10)
+		number.digits[i] = (char) ('0' + value % 10);
+
+	return number;
+}
+
+
+/********************* GET PLACE ORDINAL X ***********************/
+//
+// Where the ordinal sprite goes, in place sprite units right of where it
+// sits after a number sprite. A sprite's number fills the left half of its
+// cell and the ordinal the right half, so they meet at the cell's center.
+// Font digits, scaled to the sprites' height, end where the ordinal begins
+// and start where the sprites' numbers start: one digit fills the left half
+// like a sprite, and each further digit pushes the ordinal right by one
+// (the font's digits all have the same advance).
+//
+
+float GetPlaceOrdinalX(int numDigits, float digitAdvance)
+{
+	return (float) GAME_MAX(numDigits - 1, 0) * digitAdvance * PLACE_DIGIT_SCALE;
 }
 
 

@@ -24,6 +24,8 @@ static void DrawInfobar(ObjNode* theNode);
 
 static void Infobar_DrawMap(Byte whichPane);
 static void Infobar_MovePlace(ObjNode* objNode);
+static void Infobar_DrawPlaceDigits(ObjNode* objNode);
+static void LoadPlaceDigitFont(void);
 static void Infobar_MoveInventoryPOW(ObjNode* objNode);
 static void Infobar_MoveWrongWay(ObjNode* objNode);
 static void Infobar_DrawStartingLight(Byte whichPane);
@@ -38,6 +40,7 @@ static void Infobar_DrawHealth(Byte whichPane);
 static void Infobar_DrawNetBadge(Byte whichPane);
 
 static void MoveFinalPlace(ObjNode *theNode);
+static void DrawFinalPlaceDigits(ObjNode *theNode);
 static void MovePressAnyKey(ObjNode *theNode);
 
 
@@ -54,6 +57,12 @@ static void MovePressAnyKey(ObjNode *theNode);
 #define MAX_PANEDIVIDER_QUADS		4
 
 #define MAX_SUBICONS				12
+
+#define PLACE_SUB_NUMBER			0		// big number sprite (1st-6th)
+#define PLACE_SUB_ORDINAL			1		// "st", "nd", "rd", "th"...
+#define PLACE_SUB_DIGITS			2		// past the number sprites: the number in wall font digits
+
+#define ICONFLAG_PLACEDIGITS		0x40	// Infobar_MakeIcon: draws the place number in wall font digits
 
 #define MAX_POWTIMERS 6
 
@@ -97,6 +106,7 @@ typedef struct
 	int displayedValue;
 	int state;
 	int pane;				// split-screen pane that shows this icon (node->PlayerNum is the player it tracks)
+	bool hiddenForGood;		// hidden by ShowFinalPlace: a move call that sets its own visibility must not show it again
 } InfobarIconData;
 CheckSpecialDataStruct(InfobarIconData);
 #define GetInfobarIconData(node) GetSpecialData(node, InfobarIconData)
@@ -234,6 +244,7 @@ static void HideIconObjects(int playerNum, int iconType)
 		if (icon)
 		{
 			SetObjectVisible(icon, false);
+			GetInfobarIconData(icon)->hiddenForGood = true;
 		}
 	}
 }
@@ -415,6 +426,12 @@ static const char*	maps[] =
 	gInfobarMasterObj = MakeNewObject(&masterObjDef);
 
 
+			/* LOAD DIGITS FOR PLACES PAST THE PLACE SPRITES */
+
+	if (IsRaceMode() && GetPlaceNumber(gNumTotalPlayers - 1).numDigits > 0)
+		LoadPlaceDigitFont();
+
+
 	MakeInfobar();
 
 	
@@ -515,8 +532,9 @@ static void Infobar_MakeIcon(uint8_t type, uint8_t flags)
 		[ICON_FLAG]				= Infobar_MoveFlag,
 	};
 
-	uint8_t sub = flags & 0x7f;
+	uint8_t sub = flags & 0x3f;
 	bool isText = !!(flags & 0x80);
+	bool isPlaceDigits = !!(flags & ICONFLAG_PLACEDIGITS);
 
 	GAME_ASSERT(type < NUM_INFOBAR_ICONTYPES);
 	GAME_ASSERT(sub < MAX_SUBICONS);
@@ -531,7 +549,12 @@ static void Infobar_MakeIcon(uint8_t type, uint8_t flags)
 		.projection = kProjectionType2DOrthoFullRect,
 	};
 
-	if (!isText)
+	if (isPlaceDigits)
+	{
+		def.genre = CUSTOM_GENRE;
+		def.drawCall = Infobar_DrawPlaceDigits;
+	}
+	else if (!isText)
 	{
 		def.group = SPRITE_GROUP_INFOBAR;
 		def.type = INFOBAR_SObjType_WrongWay;
@@ -546,9 +569,18 @@ static void Infobar_MakeIcon(uint8_t type, uint8_t flags)
 		def.player = GetPlayerNum(pane);		// player shown in this pane (a net game's only pane shows gMyNetworkPlayerNum)
 
 		if (isText)
+		{
 			obj = TextMesh_New("?", kTextMeshAlignLeft, &def);
+		}
+		else if (isPlaceDigits)
+		{
+			obj = MakeNewObject(&def);
+			UpdateObjectTransforms(obj);
+		}
 		else
+		{
 			obj = MakeSpriteObject(&def);
+		}
 
 		InfobarIconData* special = GetInfobarIconData(obj);
 		special->type = type;
@@ -614,8 +646,10 @@ static void MakeInfobar(void)
 
 	if (IsRaceMode())
 	{
-		Infobar_MakeIcon(ICON_PLACE, 0);		// big number
-		Infobar_MakeIcon(ICON_PLACE, 1);		// ordinal
+		Infobar_MakeIcon(ICON_PLACE, PLACE_SUB_NUMBER);		// big number
+		Infobar_MakeIcon(ICON_PLACE, PLACE_SUB_ORDINAL);	// ordinal
+		if (GetPlaceNumber(gNumTotalPlayers - 1).numDigits > 0)
+			Infobar_MakeIcon(ICON_PLACE, ICONFLAG_PLACEDIGITS | PLACE_SUB_DIGITS);	// number past 6th
 		Infobar_MakeIcon(ICON_WRONGWAY, 0);
 		Infobar_MakeIcon(ICON_LAP, 0);
 
@@ -870,6 +904,45 @@ static void Infobar_DrawMap(Byte whichPane)
 
 /********************** DRAW PLACE *************************/
 
+static void LoadPlaceDigitFont(void)
+{
+	LoadSpriteGroup(SPRITE_GROUP_PLACEDIGITS, "wallfont", kAtlasLoadFont);		// does nothing once loaded
+}
+
+// How far right the ordinal sprite goes for this number (see GetPlaceOrdinalX)
+static float GetOrdinalOffset(const PlaceNumber* number)
+{
+	if (number->numDigits == 0)								// a number sprite: the wall font may not be loaded
+		return 0;
+
+	LoadPlaceDigitFont();									// InitInfobar preloads it, but never draw without it
+
+	const AtlasGlyph* glyph = GetSpriteInfo(SPRITE_GROUP_PLACEDIGITS, '0');	// the font's digits are monospaced
+	GAME_ASSERT(glyph);
+	return GetPlaceOrdinalX(number->numDigits, glyph->xadv);
+}
+
+// Draws a place number past the number sprites in wall font digits, ending at
+// the node's origin, where the ordinal sprite begins. Heartbeat twitches then
+// grow the number and its ordinal from the same point, like a number sprite.
+static void DrawPlaceDigits(ObjNode* node, int place)
+{
+	PlaceNumber number = GetPlaceNumber(place);
+	if (number.numDigits == 0)
+		return;
+
+	OGL_PushState();
+	glMultMatrixf(node->BaseTransformMatrix.value);
+	glScalef(PLACE_DIGIT_SCALE, PLACE_DIGIT_SCALE, 1);
+	Atlas_ImmediateDraw(SPRITE_GROUP_PLACEDIGITS, number.digits, kTextMeshAlignRight | kTextMeshAlignMiddle | kTextMeshKeepCurrentProjection);
+	OGL_PopState();
+}
+
+static void Infobar_DrawPlaceDigits(ObjNode* node)
+{
+	DrawPlaceDigits(node, GetInfobarIconData(node)->displayedValue);
+}
+
 static void Infobar_MovePlace(ObjNode* node)
 {
 	int playerNum = node->PlayerNum;
@@ -877,6 +950,9 @@ static void Infobar_MovePlace(ObjNode* node)
 	int sex = gPlayerInfo[playerNum].sex;
 
 	InfobarIconData* special = GetInfobarIconData(node);
+
+	if (special->hiddenForGood)							// ShowFinalPlace took over
+		return;
 
 	if (special->displayedValue != place)
 	{
@@ -889,21 +965,29 @@ static void Infobar_MovePlace(ObjNode* node)
 		special->displayedValue = place;
 	}
 
-	switch (GetInfobarIconData(node)->sub)
+	PlaceNumber number = GetPlaceNumber(place);
+
+	Infobar_RepositionIconTemp(node);
+
+	switch (special->sub)
 	{
-		case 0:
-			ModifySpriteObjectFrame(node, GetPlaceNumberSprite(place));
+		case PLACE_SUB_NUMBER:
+			if (SetObjectVisible(node, number.sprite != INFOBAR_SObjType_NULL))
+				ModifySpriteObjectFrame(node, number.sprite);
 			break;
 
-		case 1:
+		case PLACE_SUB_ORDINAL:
 			ModifySpriteObjectFrame(node, GetPlaceOrdinalSprite(place, gGamePrefs.language, sex));
+			node->Coord.x += GetOrdinalOffset(&number) * node->Scale.x;
 			break;
 
-		default:
-			ModifySpriteObjectFrame(node, INFOBAR_SObjType_WrongWay);
+		case PLACE_SUB_DIGITS:							// past the number sprites (drawn by Infobar_DrawPlaceDigits)
+			SetObjectVisible(node, number.numDigits > 0);
+			node->Coord.x += GetOrdinalOffset(&number) * node->Scale.x;
+			break;
 	}
 
-	Infobar_RepositionIcon(node);
+	UpdateObjectTransforms(node);
 }
 
 /********************** DRAW WEAPON TYPE *************************/
@@ -1714,10 +1798,13 @@ short	sex;
 
 			/* MAKE NUMBER SPRITE */
 
+	PlaceNumber number = GetPlaceNumber(place);
+	float ordinalX = GetOrdinalOffset(&number);
+
 	NewObjectDefinitionType spriteDef =
 	{
 		.group 		= SPRITE_GROUP_INFOBAR,
-		.type		= GetPlaceNumberSprite(place),
+		.type		= number.sprite,
 		.coord		= {0,0,0},
 		.flags		= STATUS_BIT_ONLYSHOWTHISPLAYER,
 		.slot		= SPRITE_SLOT,
@@ -1735,12 +1822,31 @@ short	sex;
 			break;
 	}
 
-	gFinalPlaceObj = MakeSpriteObject(&spriteDef);
+	// Keep a number with more digits centered too
+	spriteDef.coord.x -= ordinalX * spriteDef.scale * 0.5f;
+
+	if (number.sprite != INFOBAR_SObjType_NULL)
+	{
+		gFinalPlaceObj = MakeSpriteObject(&spriteDef);
+	}
+	else													// past the number sprites, spell it out in wall font digits
+	{
+		NewObjectDefinitionType digitsDef = spriteDef;
+		digitsDef.genre = CUSTOM_GENRE;
+		digitsDef.flags |= STATUS_BITS_FOR_2D;
+		digitsDef.projection = kProjectionType2DOrthoCentered;
+		digitsDef.drawCall = DrawFinalPlaceDigits;
+		digitsDef.coord.x += ordinalX * spriteDef.scale;		// the digits end where the ordinal begins
+		gFinalPlaceObj = MakeNewObject(&digitsDef);
+		gFinalPlaceObj->Special[0] = place;
+		UpdateObjectTransforms(gFinalPlaceObj);
+	}
 
 			/* MAKE ORDINAL SPRITE ON TOP OF NUMBER */
 
 	spriteDef.slot++;
 	spriteDef.type = GetPlaceOrdinalSprite(place, gGamePrefs.language, sex);
+	spriteDef.coord.x += ordinalX * spriteDef.scale;
 	ObjNode* ordinalObj = MakeSpriteObject(&spriteDef);
 	ordinalObj->PlayerNum = playerNum;
 
@@ -1790,6 +1896,11 @@ static void MoveFinalPlace(ObjNode *theNode)
 //	theNode->Rot.z = sin(theNode->SpecialF[0]) * .2f;
 	theNode->SpecialF[0] += gFramesPerSecondFrac * 5.0f;
 //	UpdateObjectTransforms(theNode);
+}
+
+static void DrawFinalPlaceDigits(ObjNode *theNode)
+{
+	DrawPlaceDigits(theNode, (int) theNode->Special[0]);		// the place when the player finished
 }
 
 #pragma mark -
