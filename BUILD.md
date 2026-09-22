@@ -165,9 +165,9 @@ binds a fixed UDP port. These developer options let them meet directly:
   already names a port.
 - `--smoke-net-players N` (with `--host`, `--track` and `--smoke-test-frames`)
   keeps the lobby open until N players, the host included, have joined, then
-  starts the race. `--smoke-net-refusals N` (only with N equal to the most
-  players a game seats) also waits until N further joins were turned away
-  because the game is full. Clients started with
+  starts the race. `--smoke-net-refusals N` (only when `--smoke-net-players`
+  equals the most players a game seats) also waits until N further joins were
+  turned away because the game is full. Clients started with
   `--join-address` and `--smoke-test-frames` accept the default character and
   vehicle. Each instance races that many simulated frames and exits 0.
 - `--print-max-net-players` prints how many players one LAN game seats, then
