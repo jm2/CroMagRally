@@ -11,9 +11,11 @@
 #pragma once
 
 #include <stdbool.h>
+#include "structs.h"							// TerrainItemEntryType
 
 #define	START_SLOT_TABLE_AUTHORED	6			// authored slots per set on the shipped maps (players 0-5)
 #define	START_SLOT_TABLE_EXTRA		6			// table slots per set (players 6-11)
+#define	START_SLOTS_MAX				32			// most slots StartSlots_Place fills (>= MAX_PLAYERS)
 
 typedef enum
 {
@@ -52,3 +54,7 @@ const StartSlotTableEntry* StartSlots_Fill(StartSlotSet set, int mapUnitWidth, i
 										const StartSlot items[], const bool authored[], int numSlots,
 										StartSlotPose poses[]);
 void StartSlots_KeepHumansAtBack(StartSlotPose poses[], const bool isComputer[], int numPlayers, int authoredCount);
+StartSlotSet StartSlots_SetForGameMode(int gameMode);
+int StartSlots_Place(const TerrainItemEntryType itemList[], long numItems, int gameMode,
+					int mapUnitWidth, int mapUnitDepth, const bool isComputer[], int numPlayers,
+					int numSlots, StartSlotPose poses[]);

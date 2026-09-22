@@ -10,8 +10,10 @@
 // truncates to int like the item coordinates it starts from.
 //
 
-#include "globals.h"
+#include "game.h"
 #include "startslots.h"
+
+_Static_assert(MAX_PLAYERS <= START_SLOTS_MAX, "StartSlots_Place fills at most START_SLOTS_MAX slots");
 
 
 /****************************/
@@ -306,4 +308,89 @@ void StartSlots_KeepHumansAtBack(StartSlotPose poses[], const bool isComputer[],
 		poses[p] = poses[q];
 		poses[q] = human;
 	}
+}
+
+
+/********************** SLOT SET FOR A GAME MODE **************************/
+//
+// Capture the Flag uses the arena's CTF slots (MyStartCoord parm[3] bit 0), Tag and Survival its
+// other slots (the battle ring); every other mode races on the track's grid.
+//
+
+StartSlotSet StartSlots_SetForGameMode(int gameMode)
+{
+	switch (gameMode)
+	{
+		case	GAME_MODE_CAPTUREFLAG:
+				return START_SLOT_SET_CTF;
+
+		case	GAME_MODE_TAG1:
+		case	GAME_MODE_TAG2:
+		case	GAME_MODE_SURVIVAL:
+				return START_SLOT_SET_BATTLE;
+
+		default:
+				return START_SLOT_SET_RACE;
+	}
+}
+
+
+/********************** PLACE PLAYERS **************************/
+//
+// FindPlayerStartCoordItems (Terrain2.c) without the globals. Scans the playfield's items for
+// this mode's MyStartCoord items (parm[0] player, parm[1] heading in 1/16 turns, parm[3] bit 0
+// set only in Capture the Flag; players numSlots and up are skipped), gives every slot a pose
+// (StartSlots_Fill), and on a race grid moves the humans among players 0 .. numPlayers-1 to the
+// back (StartSlots_KeepHumansAtBack). Returns -1, or the player number of a duplicate item, in
+// which case poses are not filled.
+//
+
+int StartSlots_Place(const TerrainItemEntryType itemList[], long numItems, int gameMode,
+					int mapUnitWidth, int mapUnitDepth, const bool isComputer[], int numPlayers,
+					int numSlots, StartSlotPose poses[])
+{
+	StartSlot	items[START_SLOTS_MAX];
+	bool		authored[START_SLOTS_MAX];
+	const bool	ctf = gameMode == GAME_MODE_CAPTUREFLAG;
+
+	if (numSlots > START_SLOTS_MAX)
+		numSlots = START_SLOTS_MAX;
+	if (numPlayers > numSlots)
+		numPlayers = numSlots;
+
+	for (int p = 0; p < numSlots; p++)
+	{
+		items[p] = (StartSlot) { 0, 0, 0 };
+		authored[p] = false;
+	}
+
+			/* SCAN FOR THIS MODE'S "START COORD" ITEMS */
+
+	for (long i = 0; i < numItems; i++)
+	{
+		const TerrainItemEntryType* item = &itemList[i];
+
+		if (item->type != MAP_ITEM_MYSTARTCOORD)
+			continue;
+		if (((item->parm[3] & 1) != 0) != ctf)							// CTF slots only in CTF, the others otherwise
+			continue;
+
+		const int p = item->parm[0];										// player # is in parm 0
+		if (p >= numSlots)													// skip illegal player #'s
+			continue;
+		if (authored[p])
+			return p;
+
+		items[p] = (StartSlot) { (int) item->x, (int) item->y, item->parm[1] };
+		authored[p] = true;
+	}
+
+			/* EVERY SLOT, AND HUMANS AT THE BACK OF A RACE GRID */
+
+	const StartSlotSet set = StartSlots_SetForGameMode(gameMode);
+
+	StartSlots_Fill(set, mapUnitWidth, mapUnitDepth, items, authored, numSlots, poses);
+	if (set == START_SLOT_SET_RACE)
+		StartSlots_KeepHumansAtBack(poses, isComputer, numPlayers, StartSlots_CountAuthored(authored, numSlots));
+	return -1;
 }

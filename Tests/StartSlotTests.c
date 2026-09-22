@@ -1,12 +1,14 @@
 // Start slots for players without an authored MyStartCoord item (StartSlots.c): the generated
-// table for the shipped maps, the procedural rule for other maps, and keeping humans at the back
-// of a race grid. Tests/StartSlotTableTests.py checks the table against the map data itself.
+// table for the shipped maps, the procedural rule for other maps, keeping humans at the back of
+// a race grid, and picking each game mode's items. Tests/StartSlotTableTests.py checks the table
+// against the map data itself.
 
-#include "globals.h"
+#include "game.h"
 #include "startslots.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define CHECK(condition) do { if (!(condition)) { \
 	fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, #condition); \
@@ -25,6 +27,8 @@ enum
 	RACE_BEHIND		= 900,						// ...RACE_BEHIND
 	ROW_TOL			= 400,						// ...ROW_TOL
 };
+
+_Static_assert(MAX_PLAYERS <= MAX_TEST_SLOTS, "the tests' pose arrays hold MAX_PLAYERS slots");
 
 static int64_t Dist2(int x0, int z0, int x1, int z1)
 {
@@ -466,6 +470,141 @@ static void TestTableNeedsExactMatch(void)
 }
 
 
+/*************** PLACING PLAYERS FROM A PLAYFIELD'S ITEMS ****************/
+//
+// StartSlots_Place is FindPlayerStartCoordItems without the globals: which items each game mode
+// reads, the slot set it uses, and the humans-to-back swap only on race grids.
+//
+
+static int AddStart(TerrainItemEntryType items[], int n, int player, StartSlot slot, bool ctf)
+{
+	items[n] = (TerrainItemEntryType) { (uint32_t) slot.x, (uint32_t) slot.z, MAP_ITEM_MYSTARTCOORD,
+										{ (Byte) player, (Byte) slot.rot16, 0, ctf ? 1 : 0 }, 0 };
+	return n + 1;
+}
+
+static const StartSlotTableEntry* FindEntry(const char* map, StartSlotSet set)
+{
+	for (int e = 0; e < kNumStartSlotTableEntries; e++)
+		if (kStartSlotTable[e].set == set && strcmp(kStartSlotTable[e].map, map) == 0)
+			return &kStartSlotTable[e];
+	CHECK(false);
+	return NULL;
+}
+
+// poses == the entry's slots 0-11, with players 0 .. humans-1 swapped into the rear wave if swapped.
+static void CheckPlaced(const StartSlotTableEntry* entry, const StartSlotPose poses[], int humans, bool swapped)
+{
+	for (int p = 0; p < TABLE_SLOTS; p++)
+	{
+		int from = p;
+		if (swapped && p < humans)
+			from = AUTHORED + p;
+		else if (swapped && p >= AUTHORED && p < AUTHORED + humans)
+			from = p - AUTHORED;
+		CHECK_ENTRY(SamePose(poses[p], from < AUTHORED ? entry->authored[from] : entry->extra[from - AUTHORED]), entry);
+	}
+}
+
+static void TestPlace(void)
+{
+	bool twoHumans[MAX_TEST_SLOTS];
+	for (int p = 0; p < MAX_TEST_SLOTS; p++)
+		twoHumans[p] = p >= 2;
+
+			/* WHICH SET EACH GAME MODE USES */
+
+	for (int mode = 0; mode < NUM_GAME_MODES; mode++)
+	{
+		const StartSlotSet expect = mode == GAME_MODE_CAPTUREFLAG ? START_SLOT_SET_CTF
+								: (mode == GAME_MODE_TAG1 || mode == GAME_MODE_TAG2 || mode == GAME_MODE_SURVIVAL)
+								? START_SLOT_SET_BATTLE : START_SLOT_SET_RACE;
+		CHECK(StartSlots_SetForGameMode(mode) == expect);
+	}
+	CHECK(StartSlots_SetForGameMode(GAME_MODE_PRACTICE) == START_SLOT_SET_RACE);
+	CHECK(StartSlots_SetForGameMode(GAME_MODE_TOURNAMENT) == START_SLOT_SET_RACE);
+	CHECK(StartSlots_SetForGameMode(GAME_MODE_MULTIPLAYERRACE) == START_SLOT_SET_RACE);
+
+			/* A TRACK: THE GRID, HUMANS TO THE BACK, WHATEVER ELSE THE ITEM LIST HOLDS */
+
+	{
+		const StartSlotTableEntry* race = FindEntry("BronzeAge_Egypt", START_SLOT_SET_RACE);
+		TerrainItemEntryType items[16];
+		int n = 0;
+		items[n++] = (TerrainItemEntryType) { 1000, 1000, 5, { 2, 0, 0, 0 }, 0 };		// not a start coord
+		for (int p = AUTHORED - 1; p >= 0; p--)												// any order
+			n = AddStart(items, n, p, race->authored[p], false);
+		n = AddStart(items, n, 0, (StartSlot) { 5000, 5000, 3 }, true);					// a CTF slot: not for racing
+		n = AddStart(items, n, 40, (StartSlot) { 6000, 6000, 3 }, false);				// no such player
+
+		for (int mode = GAME_MODE_PRACTICE; mode <= GAME_MODE_MULTIPLAYERRACE; mode++)
+		{
+			StartSlotPose poses[MAX_TEST_SLOTS];
+			CHECK(StartSlots_Place(items, n, mode, race->mapUnitWidth, race->mapUnitDepth, twoHumans, TABLE_SLOTS, TABLE_SLOTS, poses) == -1);
+			CheckPlaced(race, poses, 2, true);
+		}
+
+				/* 7 CARS: ONLY SLOT 6 IS FILLED BEHIND THE GRID, SO ONLY PLAYER 0 MOVES THERE */
+
+		{
+			StartSlotPose poses[MAX_TEST_SLOTS];
+			CHECK(StartSlots_Place(items, n, GAME_MODE_MULTIPLAYERRACE, race->mapUnitWidth, race->mapUnitDepth, twoHumans, 7, TABLE_SLOTS, poses) == -1);
+			CHECK_ENTRY(SamePose(poses[0], race->extra[0]) && SamePose(poses[6], race->authored[0]), race);
+			CHECK_ENTRY(SamePose(poses[1], race->authored[1]) && SamePose(poses[7], race->extra[1]), race);
+		}
+
+				/* THE GAME'S MAX_PLAYERS: AT 6, THE AUTHORED GRID UNCHANGED */
+
+		StartSlotPose poses[MAX_TEST_SLOTS], expect[MAX_TEST_SLOTS];
+		CHECK(StartSlots_Place(items, n, GAME_MODE_PRACTICE, race->mapUnitWidth, race->mapUnitDepth, twoHumans, MAX_PLAYERS, MAX_PLAYERS, poses) == -1);
+		Fill(race, MAX_PLAYERS, expect);
+		StartSlots_KeepHumansAtBack(expect, twoHumans, MAX_PLAYERS, AUTHORED);
+		for (int p = 0; p < MAX_PLAYERS; p++)
+		{
+			CHECK_ENTRY(PosesEqual(poses[p], expect[p]), race);
+			if (MAX_PLAYERS <= AUTHORED)
+				CHECK_ENTRY(SamePose(poses[p], race->authored[p]), race);
+		}
+
+				/* A DUPLICATE GRID SLOT IS REPORTED */
+
+		n = AddStart(items, n, 3, (StartSlot) { 7000, 7000, 0 }, false);
+		CHECK(StartSlots_Place(items, n, GAME_MODE_TOURNAMENT, race->mapUnitWidth, race->mapUnitDepth, twoHumans, TABLE_SLOTS, TABLE_SLOTS, poses) == 3);
+	}
+
+			/* AN ARENA: TAG AND SURVIVAL USE THE BATTLE RING, CTF ITS OWN SLOTS; NO SWAPS */
+
+	{
+		const StartSlotTableEntry* battle = FindEntry("Battle_Coliseum", START_SLOT_SET_BATTLE);
+		const StartSlotTableEntry* ctf = FindEntry("Battle_Coliseum", START_SLOT_SET_CTF);
+		TerrainItemEntryType items[16];
+		int n = 0;
+		for (int p = 0; p < AUTHORED; p++)
+		{
+			n = AddStart(items, n, p, ctf->authored[p], true);
+			n = AddStart(items, n, p, battle->authored[p], false);
+		}
+
+		for (int mode = 0; mode < NUM_GAME_MODES; mode++)
+		{
+			if (StartSlots_SetForGameMode(mode) == START_SLOT_SET_RACE)
+				continue;
+			const StartSlotTableEntry* entry = mode == GAME_MODE_CAPTUREFLAG ? ctf : battle;
+			StartSlotPose poses[MAX_TEST_SLOTS];
+			CHECK(StartSlots_Place(items, n, mode, entry->mapUnitWidth, entry->mapUnitDepth, twoHumans, TABLE_SLOTS, TABLE_SLOTS, poses) == -1);
+			CheckPlaced(entry, poses, 2, false);
+		}
+
+				/* A DUPLICATE CTF SLOT MATTERS ONLY TO CTF */
+
+		n = AddStart(items, n, 4, (StartSlot) { 7000, 7000, 0 }, true);
+		StartSlotPose poses[MAX_TEST_SLOTS];
+		CHECK(StartSlots_Place(items, n, GAME_MODE_CAPTUREFLAG, ctf->mapUnitWidth, ctf->mapUnitDepth, twoHumans, TABLE_SLOTS, TABLE_SLOTS, poses) == 4);
+		CHECK(StartSlots_Place(items, n, GAME_MODE_SURVIVAL, battle->mapUnitWidth, battle->mapUnitDepth, twoHumans, TABLE_SLOTS, TABLE_SLOTS, poses) == -1);
+	}
+}
+
+
 int main(void)
 {
 	TestTableEntries();
@@ -474,6 +613,7 @@ int main(void)
 	TestRuleRaceGrid();
 	TestRuleArena();
 	TestTableNeedsExactMatch();
+	TestPlace();
 	printf("start slots: %d table entries OK\n", kNumStartSlotTableEntries);
 	return 0;
 }
