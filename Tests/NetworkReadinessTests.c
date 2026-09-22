@@ -955,6 +955,44 @@ static void NetworkFillVehicles(void)
     gNumLocalPlayers = gNumRealPlayers = 1;
 }
 
+// Network fill CPUs look the same on every peer, whatever each peer's character screen
+// swapped into their slots, and unlike any human while looks are left.
+static void NetworkFillLooks(void)
+{
+    short looks[2][MAX_PLAYERS][2];
+    for (int view = 0; view < 2; view++)
+    {
+        NSpGame* peers[MAX_CLIENTS];
+        BeginSession(SMALL_SESSION, peers);
+        gCPUFillThisRace = true;
+        gMyNetworkPlayerNum = view; // the host, or the client in slot 1
+        InitPlayerInfo_Game();
+        for (int i = 0; i < SMALL_SESSION; i++)
+        {
+            gPlayerInfo[i].vehicleType = CAR_TYPE_MAMMOTH;
+            gPlayerInfo[i].sex = 0; // network players may all pick the same driver
+            gPlayerInfo[i].skin = 3;
+        }
+        for (int i = SMALL_SESSION; i < MAX_PLAYERS; i++)
+            gPlayerInfo[i].skin = (i + view) % NUM_CAVEMAN_SKINS; // this peer's screen swapped outfits
+        InitPlayersAtStartOfLevel();
+        for (int i = 0; i < MAX_PLAYERS; i++)
+        {
+            looks[view][i][0] = gPlayerInfo[i].sex;
+            looks[view][i][1] = gPlayerInfo[i].skin;
+            if (i < SMALL_SESSION)
+                CHECK(gPlayerInfo[i].sex == 0 && gPlayerInfo[i].skin == 3);
+            else if (MAX_PLAYERS - SMALL_SESSION + 1 <= 2 * NUM_CAVEMAN_SKINS) // looks are left
+                CHECK(gPlayerInfo[i].sex != 0 || gPlayerInfo[i].skin != 3);
+        }
+        EndSession(peers);
+    }
+    CHECK(!memcmp(looks[0], looks[1], sizeof(looks[0])));
+    gCPUFillThisRace = false;
+    gNumLocalPlayers = gNumRealPlayers = 1;
+    gMyNetworkPlayerNum = 0;
+}
+
 int main(void)
 {
     Readiness(VEHICLE_READY_TIMEOUT_MS, kNetSequence_WaitingForPlayerVehicles, kNetSequence_GotAllPlayerVehicles);
@@ -987,6 +1025,7 @@ int main(void)
     StartHeightSampling();
     LocalSplitScreenSeats();
     NetworkFillVehicles();
+    NetworkFillLooks();
     puts("Readiness, paused-leave, full-lobby, local CPU vehicle, start-height, split-screen seat and network fill tests passed");
     return 0;
 }

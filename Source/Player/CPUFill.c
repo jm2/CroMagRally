@@ -45,7 +45,8 @@ static int GetDriverLook(const PlayerInfoType* player)
 	return player->sex * NUM_CAVEMAN_SKINS + player->skin;
 }
 
-void MakeCPULooksDistinct(PlayerInfoType players[], short numPlayers)
+// keep: bit p set for each player whose look is fixed (a human's).
+static void MakeLooksDistinct(PlayerInfoType players[], short numPlayers, uint32_t keep)
 {
 uint32_t	taken = 0;
 uint32_t	needNewLook = 0;
@@ -53,14 +54,14 @@ uint32_t	needNewLook = 0;
 	for (short p = 0; p < numPlayers; p++)							// humans wear what they picked
 	{
 		int look = GetDriverLook(&players[p]);
-		if (!players[p].isComputer && look >= 0)
+		if ((keep & (1u << p)) && look >= 0)
 			taken |= 1u << look;
 	}
 
 	for (short p = 0; p < numPlayers; p++)							// CPUs keep any look nobody wears yet
 	{
 		int look = GetDriverLook(&players[p]);
-		if (!players[p].isComputer)
+		if (keep & (1u << p))
 			continue;
 		else if (look >= 0 && !(taken & (1u << look)))
 			taken |= 1u << look;
@@ -96,6 +97,39 @@ uint32_t	needNewLook = 0;
 		players[p].skin = look % NUM_CAVEMAN_SKINS;
 		taken |= 1u << look;
 	}
+}
+
+void MakeCPULooksDistinct(PlayerInfoType players[], short numPlayers)
+{
+uint32_t	humans = 0;
+
+	for (short p = 0; p < numPlayers; p++)
+	{
+		if (!players[p].isComputer)
+			humans |= 1u << p;
+	}
+
+	MakeLooksDistinct(players, numPlayers, humans);
+}
+
+
+/******************** DRESS NETWORK FILL CPUS *********************/
+//
+// A character screen swaps outfits between the local player and whoever wears the one
+// it wants, CPU slots included, and only on that machine. Starting every fill CPU from
+// its dealt look again undoes that, and the rest reads only the humans' choices, which
+// every peer received.
+//
+
+void DressNetworkFillCPUs(PlayerInfoType players[], short numHumans, short numPlayers)
+{
+	for (short p = numHumans; p < numPlayers; p++)					// the look InitPlayerInfo_Game dealt the slot
+	{
+		players[p].sex = p & 1;
+		players[p].skin = p % NUM_CAVEMAN_SKINS;
+	}
+
+	MakeLooksDistinct(players, numPlayers, numHumans >= 32 ? ~0u : (1u << numHumans) - 1u);
 }
 
 

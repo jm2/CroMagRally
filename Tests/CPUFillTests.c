@@ -194,6 +194,82 @@ static void TestDriverLooks(void)
 	}
 }
 
+// Network fill CPUs: whatever a character screen left in their slots on this machine,
+// every peer dresses them alike. Human slots keep their looks, including players who
+// left since (bots), and the rest follows MakeCPULooksDistinct from the dealt looks.
+static void TestNetworkFillLooks(void)
+{
+	uint32_t rng = 12345;
+	#define NEXT_RANDOM()	(rng = rng * 1664525u + 1013904223u, rng >> 8)
+
+	for (short humans = 1; humans < MAX_LOOK_PLAYERS; humans++)
+	{
+		for (int trial = 0; trial < 200; trial++)
+		{
+			PlayerInfoType peer[2][MAX_LOOK_PLAYERS], expected[MAX_LOOK_PLAYERS];
+			memset(peer, 0, sizeof(peer));
+			for (short p = 0; p < humans; p++)								// network humans may repeat looks
+			{
+				peer[0][p].sex = (short) (NEXT_RANDOM() & 1);
+				peer[0][p].skin = (short) (NEXT_RANDOM() % NUM_CAVEMAN_SKINS);
+				peer[0][p].isComputer = (NEXT_RANDOM() % 4) == 0;			// left since, maybe seen on one peer only
+				peer[1][p] = peer[0][p];
+				peer[1][p].isComputer = !peer[0][p].isComputer;
+			}
+			for (int view = 0; view < 2; view++)							// each peer's screen swapped differently
+			{
+				for (short p = humans; p < MAX_LOOK_PLAYERS; p++)
+				{
+					peer[view][p].isComputer = true;
+					peer[view][p].sex = (short) (NEXT_RANDOM() & 1);
+					peer[view][p].skin = (short) (NEXT_RANDOM() % NUM_CAVEMAN_SKINS);
+				}
+			}
+
+			memcpy(expected, peer[0], sizeof(expected));					// the rule from the dealt looks
+			for (short p = 0; p < MAX_LOOK_PLAYERS; p++)
+			{
+				expected[p].isComputer = p >= humans;
+				if (p >= humans)
+				{
+					expected[p].sex = p & 1;
+					expected[p].skin = p % NUM_CAVEMAN_SKINS;
+				}
+			}
+			MakeCPULooksDistinct(expected, MAX_LOOK_PLAYERS);
+
+			for (int view = 0; view < 2; view++)
+			{
+				PlayerInfoType before[MAX_LOOK_PLAYERS];
+				memcpy(before, peer[view], sizeof(before));
+				DressNetworkFillCPUs(peer[view], humans, MAX_LOOK_PLAYERS);
+				for (short p = 0; p < MAX_LOOK_PLAYERS; p++)
+				{
+					CHECK(peer[view][p].sex == expected[p].sex && peer[view][p].skin == expected[p].skin);
+					CHECK(peer[view][p].isComputer == before[p].isComputer);
+					if (p < humans)
+						CHECK(peer[view][p].sex == before[p].sex && peer[view][p].skin == before[p].skin);
+				}
+			}
+		}
+	}
+
+	// Humans in the looks they were dealt leave every fill CPU in its own dealt look, up to
+	// one player per skin (the deal repeats after that).
+	memset(lookPlayers, 0, sizeof(lookPlayers));
+	for (short p = 0; p < MAX_PLAYERS; p++)
+	{
+		lookPlayers[p].isComputer = p >= 2;
+		lookPlayers[p].sex = p & 1;
+		lookPlayers[p].skin = p < 2 ? p : (p + 3) % NUM_CAVEMAN_SKINS;		// swapped around on this screen
+	}
+	DressNetworkFillCPUs(lookPlayers, 2, MAX_PLAYERS);
+	for (short p = 0; p < MAX_PLAYERS && p < NUM_CAVEMAN_SKINS; p++)
+		CHECK(lookPlayers[p].sex == (p & 1) && lookPlayers[p].skin == p % NUM_CAVEMAN_SKINS);
+
+	#undef NEXT_RANDOM
+}
+
 static void TestHumansOnlyRace(void)
 {
 	// Without fill, the first car home wins and everyone else loses, as before.
@@ -285,6 +361,7 @@ int main(void)
 	TestModes();
 	TestPlayerCounts();
 	TestDriverLooks();
+	TestNetworkFillLooks();
 	TestHumansOnlyRace();
 	TestFilledRace();
 	puts("CPU fill tests passed");

@@ -208,12 +208,15 @@ SharedCPUVehicleSeed	sharedCPUVehicleSeed;
 
 		/* KEEP CPU DRIVERS FROM LOOKING LIKE THE HUMANS */
 		//
-		// Humans picked their looks after InitPlayerInfo_Game dealt them out. Local
-		// games only: a network bot keeps the look its peer picked.
+		// Humans picked their looks after InitPlayerInfo_Game dealt them out. A network
+		// bot keeps the look its peer picked; network fill CPUs are dressed from what every
+		// peer shares, so they look the same on every screen.
 		//
 
 	if (!gNetGameInProgress)
 		MakeCPULooksDistinct(gPlayerInfo, gNumTotalPlayers);
+	else if (gCPUFillThisRace)
+		DressNetworkFillCPUs(gPlayerInfo, gNumRealPlayers, gNumTotalPlayers);
 
 
 			/* SET SOME GLOBALS */
