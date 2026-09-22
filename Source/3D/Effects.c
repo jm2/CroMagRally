@@ -10,6 +10,7 @@
 /****************************/
 
 #include "game.h"
+#include "localplayers.h"
 
 /****************************/
 /*    PROTOTYPES            */
@@ -1160,6 +1161,8 @@ short				p;
 
 	for (p = 0; p < gNumTotalPlayers; p++)
 	{
+		if (GetLocalSlotForPlayer(p) < 0)							// flakes fall around a camera, so only for panes this machine draws
+			continue;
 
 			/* CHECK IF SNOW NOW */
 

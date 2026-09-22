@@ -621,6 +621,11 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 		cmr_add_gameplay_test(CroMagRallyRacePlaceTests race_places Tests/RacePlaceTests.c Source/Terrain/Checkpoints.c)
 		target_compile_options(CroMagRallyRacePlaceTests PRIVATE -ffunction-sections -fdata-sections)
 		target_link_options(CroMagRallyRacePlaceTests PRIVATE -Wl,--gc-sections)
+		# Likewise only snowfall and its particle groups from Effects.c.
+		cmr_add_gameplay_test(CroMagRallySnowTests snow Tests/SnowTests.c Source/3D/Effects.c
+			Source/System/LocalPlayers.c)
+		target_compile_options(CroMagRallySnowTests PRIVATE -ffunction-sections -fdata-sections)
+		target_link_options(CroMagRallySnowTests PRIVATE -Wl,--gc-sections)
 	endif()
 	cmr_add_gameplay_test(CroMagRallyCheckpointTests checkpoints Tests/CheckpointTests.c Source/Terrain/CheckpointProgress.c)
 	cmr_add_gameplay_test(CroMagRallyCPUDriverTests cpu_driver Tests/CPUDriverTests.c Source/Player/CPUDriver.c)
