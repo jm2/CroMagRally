@@ -12,6 +12,7 @@ void DisposeInfobar(void);
 void ShowLapNum(short playerNum);
 void ShowFinalPlace(short playerNum, int rankInScoreboard);
 int GetPlaceNumberSprite(int place);
+int GetPlaceOrdinalSprite(int place, int language, int sex);
 int GetPlaceAnnouncerEffect(int place);
 void DecCurrentPOWQuantity(short playerNum);
 void ShowWinLose(short playerNum, Byte mode, short winner);

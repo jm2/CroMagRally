@@ -25,6 +25,43 @@ int GetPlaceNumberSprite(int place)
 }
 
 
+/********************* GET PLACE ORDINAL SPRITE ***********************/
+//
+// Returns the ordinal suffix sprite drawn after a place number, e.g. the
+// "th" of "12th". German, Spanish and Swedish use the English suffixes.
+//
+
+int GetPlaceOrdinalSprite(int place, int language, int sex)
+{
+	int number = GAME_MAX(place, 0) + 1;
+
+	switch (language)
+	{
+		case LANGUAGE_ENGLISH:
+		default:
+			if (number % 100 >= 11 && number % 100 <= 13)		// 11th, 12th, 13th (not 11st)
+				return INFOBAR_SObjType_PlaceTH;
+
+			switch (number % 10)
+			{
+				case 1: return INFOBAR_SObjType_PlaceST;
+				case 2: return INFOBAR_SObjType_PlaceND;
+				case 3: return INFOBAR_SObjType_PlaceRD;
+				default: return INFOBAR_SObjType_PlaceTH;
+			}
+
+		case LANGUAGE_FRENCH:									// 1er/1re, then 2e, 3e... 12e
+			if (number == 1)
+				return sex==1? INFOBAR_SObjType_PlaceRE: INFOBAR_SObjType_PlaceER;
+			else
+				return INFOBAR_SObjType_PlaceE;
+
+		case LANGUAGE_ITALIAN:									// 1º/1ª... 12º/12ª
+			return sex==1? INFOBAR_SObjType_PlaceA: INFOBAR_SObjType_PlaceO;
+	}
+}
+
+
 /********************* GET PLACE ANNOUNCER EFFECT ***********************/
 //
 // Returns the announcer line for a final place (EFFECT_1st..EFFECT_6th),

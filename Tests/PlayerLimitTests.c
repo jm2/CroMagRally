@@ -54,6 +54,47 @@ static void TestPlaceTables(void)
 	CHECK(GetPlaceAnnouncerEffect(-1) == -1);
 }
 
+static void TestPlaceOrdinals(void)
+{
+	enum { ST = INFOBAR_SObjType_PlaceST, ND = INFOBAR_SObjType_PlaceND, RD = INFOBAR_SObjType_PlaceRD,
+		TH = INFOBAR_SObjType_PlaceTH, ER = INFOBAR_SObjType_PlaceER, RE = INFOBAR_SObjType_PlaceRE,
+		E = INFOBAR_SObjType_PlaceE, O = INFOBAR_SObjType_PlaceO, A = INFOBAR_SObjType_PlaceA };
+
+	// 1st-12th for [language][sex]; 1st-6th are the suffixes the game has always shown.
+	// German, Spanish and Swedish use the English suffixes.
+	static const int kExpected[NUM_LANGUAGES][2][12] =
+	{
+		[LANGUAGE_ENGLISH]	= { {ST,ND,RD,TH,TH,TH, TH,TH,TH,TH,TH,TH}, {ST,ND,RD,TH,TH,TH, TH,TH,TH,TH,TH,TH} },
+		[LANGUAGE_FRENCH]	= { {ER,E,E,E,E,E, E,E,E,E,E,E},             {RE,E,E,E,E,E, E,E,E,E,E,E} },
+		[LANGUAGE_GERMAN]	= { {ST,ND,RD,TH,TH,TH, TH,TH,TH,TH,TH,TH}, {ST,ND,RD,TH,TH,TH, TH,TH,TH,TH,TH,TH} },
+		[LANGUAGE_SPANISH]	= { {ST,ND,RD,TH,TH,TH, TH,TH,TH,TH,TH,TH}, {ST,ND,RD,TH,TH,TH, TH,TH,TH,TH,TH,TH} },
+		[LANGUAGE_ITALIAN]	= { {O,O,O,O,O,O, O,O,O,O,O,O},             {A,A,A,A,A,A, A,A,A,A,A,A} },
+		[LANGUAGE_SWEDISH]	= { {ST,ND,RD,TH,TH,TH, TH,TH,TH,TH,TH,TH}, {ST,ND,RD,TH,TH,TH, TH,TH,TH,TH,TH,TH} },
+	};
+
+	for (int language = 0; language < NUM_LANGUAGES; language++)
+		for (int sex = 0; sex < 2; sex++)
+			for (int place = 0; place < 12; place++)
+				CHECK(GetPlaceOrdinalSprite(place, language, sex) == kExpected[language][sex][place]);
+
+	// Every place any MAX_PLAYERS can produce gets a suffix sprite, in every language.
+	for (int language = 0; language < NUM_LANGUAGES; language++)
+		for (int sex = 0; sex < 2; sex++)
+			for (int place = 0; place < GAME_MAX(MAX_PLAYERS, 1000); place++)
+			{
+				int sprite = GetPlaceOrdinalSprite(place, language, sex);
+				CHECK(sprite >= INFOBAR_SObjType_PlaceST && sprite <= INFOBAR_SObjType_PlaceA);
+			}
+
+	// English follows the number's last digits past 12th.
+	CHECK(GetPlaceOrdinalSprite(12, LANGUAGE_ENGLISH, 0) == TH);		// 13th
+	CHECK(GetPlaceOrdinalSprite(20, LANGUAGE_ENGLISH, 0) == ST);		// 21st
+	CHECK(GetPlaceOrdinalSprite(21, LANGUAGE_ENGLISH, 0) == ND);		// 22nd
+	CHECK(GetPlaceOrdinalSprite(22, LANGUAGE_ENGLISH, 0) == RD);		// 23rd
+	CHECK(GetPlaceOrdinalSprite(110, LANGUAGE_ENGLISH, 0) == TH);		// 111th
+	CHECK(GetPlaceOrdinalSprite(-1, LANGUAGE_ENGLISH, 0) == ST);
+}
+
 static void TestCollisionListBudget(void)
 {
 	// A full list refuses new entries instead of writing past its end (an exact-size
@@ -86,6 +127,7 @@ int main(void)
 {
 	TestSuperTilePlayerFlags();
 	TestPlaceTables();
+	TestPlaceOrdinals();
 	TestCollisionListBudget();
 	puts("Player limit tests passed");
 	return EXIT_SUCCESS;

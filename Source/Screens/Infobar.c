@@ -870,33 +870,6 @@ static void Infobar_DrawMap(Byte whichPane)
 
 /********************** DRAW PLACE *************************/
 
-static int LocalizeOrdinalSprite(int place, int sex)
-{
-	switch (gGamePrefs.language)
-	{
-		case LANGUAGE_ENGLISH:
-		default:
-			switch (place)
-			{
-				case 0: return INFOBAR_SObjType_PlaceST;
-				case 1: return INFOBAR_SObjType_PlaceND;
-				case 2: return INFOBAR_SObjType_PlaceRD;
-				default: return INFOBAR_SObjType_PlaceTH;
-			}
-			break;
-
-		case LANGUAGE_FRENCH:
-			if (place == 0)
-				return sex==1? INFOBAR_SObjType_PlaceRE: INFOBAR_SObjType_PlaceER;
-			else
-				return INFOBAR_SObjType_PlaceE;
-			break;
-
-		case LANGUAGE_ITALIAN:
-			return sex==1? INFOBAR_SObjType_PlaceA: INFOBAR_SObjType_PlaceO;
-	}
-}
-
 static void Infobar_MovePlace(ObjNode* node)
 {
 	int playerNum = node->PlayerNum;
@@ -923,7 +896,7 @@ static void Infobar_MovePlace(ObjNode* node)
 			break;
 
 		case 1:
-			ModifySpriteObjectFrame(node, LocalizeOrdinalSprite(place, sex));
+			ModifySpriteObjectFrame(node, GetPlaceOrdinalSprite(place, gGamePrefs.language, sex));
 			break;
 
 		default:
@@ -1767,7 +1740,7 @@ short	sex;
 			/* MAKE ORDINAL SPRITE ON TOP OF NUMBER */
 
 	spriteDef.slot++;
-	spriteDef.type = LocalizeOrdinalSprite(place, sex);
+	spriteDef.type = GetPlaceOrdinalSprite(place, gGamePrefs.language, sex);
 	ObjNode* ordinalObj = MakeSpriteObject(&spriteDef);
 	ordinalObj->PlayerNum = playerNum;
 
