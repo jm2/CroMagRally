@@ -511,6 +511,24 @@ fail:
 	return NULL;
 }
 
+// Dev/test direct join (--join-address): connect straight to the host's TCP listener at
+// this IPv4 address and gNetPort, skipping UDP lobby discovery. The join handshake is the
+// same as for a discovered lobby.
+NSpGameReference NSpGame_JoinAddress(uint32_t ipv4Address)
+{
+	LobbyInfo lobby =
+	{
+		.hostAddr =
+		{
+			.sin_family = AF_INET,
+			.sin_port = htons(gNetPort),
+			.sin_addr.s_addr = htonl(ipv4Address),
+		},
+	};
+
+	return JoinLobby(&lobby);
+}
+
 #pragma mark - Host lobby
 
 static void NSpGame_ExpireHandshakes(NSpGame* game)

@@ -1181,20 +1181,35 @@ Boolean SetupNetworkJoin(void)
 {
 	ResetNetGameTransientState();			// start from a clean slate
 	SDL_strlcpy(gNetJoinDeniedReason, "THE HOST DENIED THE JOIN REQUEST.", sizeof(gNetJoinDeniedReason));
-	SetNetworkDiscoveryMode(true);
+
+	// --join-address is a one-shot boot action: a later join from the menu searches the LAN.
+	const Boolean joinDirect = gCommandLine.netJoinDirect;
+	gCommandLine.netJoinDirect = false;
+
+	SetNetworkDiscoveryMode(!joinDirect);
 	SetNetworkPowerMode(true);
 
 	gNetSequenceState = kNetSequence_ClientOffline;
 
-	gNetSearch = NSpSearch_StartSearchingForGameHosts();
-
-	if (gNetSearch)
+	if (joinDirect)
 	{
-		gNetSequenceState = kNetSequence_ClientSearchingForGames;
+		// Dev/test (--join-address): connect straight to the host instead of searching the LAN,
+		// so several instances on one machine don't contend for the discovery port.
+		gNetGame = NSpGame_JoinAddress(gCommandLine.netJoinAddress);
+		gNetSequenceState = gNetGame ? kNetSequence_ClientJoiningGame : kNetSequence_ClientOfflineBecauseHostUnreachable;
 	}
 	else
 	{
-		gNetSequenceState = kNetSequence_Error;
+		gNetSearch = NSpSearch_StartSearchingForGameHosts();
+
+		if (gNetSearch)
+		{
+			gNetSequenceState = kNetSequence_ClientSearchingForGames;
+		}
+		else
+		{
+			gNetSequenceState = kNetSequence_Error;
+		}
 	}
 
 	Boolean cancelled = DoNetGatherScreen();

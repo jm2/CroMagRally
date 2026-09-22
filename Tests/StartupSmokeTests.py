@@ -8,7 +8,8 @@ import sys
 import tempfile
 
 
-def run(binary: Path, args: list[str], marker: str | None) -> None:
+def run(binary: Path, args: list[str], marker: str | None = None,
+        rejection: str | None = None) -> None:
     with tempfile.TemporaryDirectory(prefix="cmr-smoke-", dir=os.environ.get("TMPDIR") or "/var/tmp") as scratch:
         env = os.environ.copy()
         env.update(
@@ -27,8 +28,8 @@ def run(binary: Path, args: list[str], marker: str | None) -> None:
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, timeout=45)
         output = result.stdout
-        if marker is None:
-            passed = result.returncode != 0 and "Invalid --track" in output
+        if rejection is not None:
+            passed = result.returncode != 0 and rejection in output
         else:
             passed = result.returncode == 0 and marker in output
         if (not passed or "ERROR: AddressSanitizer" in output
@@ -43,12 +44,26 @@ def main() -> None:
     for host in (False, True):
         prefix = ["--host"] if host else []
         for track in ("0", "10", "17", "18", "-1", "garbage"):
-            run(binary, [*prefix, "--track", track], None)
+            run(binary, [*prefix, "--track", track], rejection="Invalid --track")
         for track in range(1, 10):
             mode = "host lobby" if host else "practice"
             run(binary, [*prefix, "--track", str(track), "--no-vsync",
                          "--smoke-test-frames", "3"],
                 f"SMOKE: {mode} track {track} rendered 3 frames")
+
+    # Dev/test direct join takes a strict IPv4[:PORT] and conflicts with other modes.
+    run(binary, ["--join-address"], rejection="--join-address requires a value")
+    for address in ("", "localhost", "127.0.0", "127.0.0.1.1", "127..0.1", "256.0.0.1",
+                    "127.0.0.01", " 127.0.0.1", "127.0.0.1 ", "+127.0.0.1", "127.0.0.1:",
+                    "127.0.0.1:0", "127.0.0.1:65536", "127.0.0.1:-1", "127.0.0.1:+80",
+                    "127.0.0.1:80x", "127.0.0.1:80:80", ":80"):
+        run(binary, ["--join-address", address], rejection="Invalid --join-address")
+    for args, message in (
+            (["--host", "--join-address", "127.0.0.1"], "--host and --join-address are mutually exclusive"),
+            (["--join", "--join-address", "127.0.0.1"], "--join and --join-address are mutually exclusive"),
+            (["--port", "5000", "--join-address", "127.0.0.1:5001"], "--port cannot be combined"),
+            (["--join-address", "127.0.0.1", "--track", "1"], "--track cannot be used with --join-address")):
+        run(binary, args, rejection=message)
 
 
 if __name__ == "__main__":

@@ -120,6 +120,8 @@ typedef struct
 	int		car;
 	bool	netHost;
 	bool	netJoin;
+	bool	netJoinDirect;			// dev/test: --join-address connects straight to a host, skipping LAN discovery
+	uint32_t	netJoinAddress;			// IPv4 host address for --join-address (host byte order)
 	int		display;
 	int		windowedWidth;
 	int		windowedHeight;

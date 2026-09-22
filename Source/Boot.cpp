@@ -13,6 +13,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 extern "C" {
 #include "game.h"
@@ -109,9 +110,75 @@ static int ParseIntegerArgument(const char *option, int argc, char **argv,
   return value;
 }
 
+// Dev/test direct join: HOST is a dotted-quad IPv4 address, optionally
+// followed by :PORT. Returns the address in host byte order.
+static uint32_t ParseJoinAddress(int argc, char **argv, int *argumentIndex,
+                                 int *port) {
+  if (*argumentIndex + 1 >= argc) {
+    throw std::invalid_argument("--join-address requires a value");
+  }
+
+  const char *text = argv[++*argumentIndex];
+  const auto invalid = [text]() {
+    return std::invalid_argument(
+        std::string("Invalid --join-address value '") + text +
+        "' (expected IPv4 address a.b.c.d with optional :PORT 1..65535)");
+  };
+  const auto isDecimal = [](std::string_view digits) {
+    return !digits.empty() &&
+           digits.find_first_not_of("0123456789") == std::string_view::npos;
+  };
+
+  std::string_view value(text);
+  size_t colon = value.find(':');
+  std::string_view host = value.substr(0, colon);
+
+  *port = 0;
+  if (colon != std::string_view::npos) {
+    std::string_view portText = value.substr(colon + 1);
+    const char *portEnd = portText.data() + portText.size();
+    auto [parseEnd, error] = std::from_chars(portText.data(), portEnd, *port);
+    if (!isDecimal(portText) || error != std::errc() || parseEnd != portEnd ||
+        *port < 1 || *port > 65535) {
+      throw invalid();
+    }
+  }
+
+  uint32_t address = 0;
+  int octets = 0;
+  for (size_t start = 0;;) {
+    size_t dot = host.find('.', start);
+    std::string_view octet = host.substr(
+        start, dot == std::string_view::npos ? dot : dot - start);
+    int octetValue = 256;
+    // Reject leading zeros: some resolvers read them as octal.
+    if (++octets > 4 || !isDecimal(octet) || octet.size() > 3 ||
+        (octet.size() > 1 && octet[0] == '0')) {
+      throw invalid();
+    }
+    std::from_chars(octet.data(), octet.data() + octet.size(), octetValue);
+    if (octetValue > 255) {
+      throw invalid();
+    }
+    address = (address << 8) | (uint32_t)octetValue;
+    if (dot == std::string_view::npos) {
+      break;
+    }
+    start = dot + 1;
+  }
+  if (octets != 4) {
+    throw invalid();
+  }
+
+  return address;
+}
+
 static void ParseCommandLine(int argc, char **argv) {
   SDL_memset(&gCommandLine, 0, sizeof(gCommandLine));
   gCommandLine.vsync = 1;
+  bool discoveryJoin = false;
+  bool portOption = false;
+  int joinPort = 0;
 
   for (int i = 1; i < argc; i++) {
     std::string argument = argv[i];
@@ -136,9 +203,15 @@ static void ParseCommandLine(int argc, char **argv) {
     else if (argument == "--host")
       gCommandLine.netHost = true;					// host a net game from the command line (consumed in Main.c)
     else if (argument == "--join")
-      gCommandLine.netJoin = true;					// join a net game via lobby discovery
+      gCommandLine.netJoin = discoveryJoin = true;	// join a net game via lobby discovery
+    else if (argument == "--join-address") {
+      // dev/test: join the host at this address directly, skipping discovery
+      gCommandLine.netJoinAddress = ParseJoinAddress(argc, argv, &i, &joinPort);
+      gCommandLine.netJoin = gCommandLine.netJoinDirect = true;
+    }
     else if (argument == "--port") {
       gNetPort = ParseIntegerArgument("--port", argc, argv, &i, 1, 65535);
+      portOption = true;
     }
 #if 0
 		else if (argument == "--fullscreen-resolution")
@@ -157,8 +230,22 @@ static void ParseCommandLine(int argc, char **argv) {
 #endif
   }
 
+  if (discoveryJoin && gCommandLine.netJoinDirect) {
+    throw std::invalid_argument("--join and --join-address are mutually exclusive");
+  }
   if (gCommandLine.netHost && gCommandLine.netJoin) {
-    throw std::invalid_argument("--host and --join are mutually exclusive");
+    throw std::invalid_argument(gCommandLine.netJoinDirect
+                                    ? "--host and --join-address are mutually exclusive"
+                                    : "--host and --join are mutually exclusive");
+  }
+  if (joinPort) {
+    if (portOption) {
+      throw std::invalid_argument("--port cannot be combined with a --join-address port");
+    }
+    gNetPort = joinPort;
+  }
+  if (gCommandLine.netJoinDirect && gCommandLine.bootToTrack) {
+    throw std::invalid_argument("--track cannot be used with --join-address; the host chooses the track");
   }
   if (gCommandLine.smokeTestFrames &&
       (!gCommandLine.bootToTrack || gCommandLine.netJoin)) {

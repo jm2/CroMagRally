@@ -180,6 +180,7 @@ int NSpSearch_Dispose(NSpSearchReference searchRef);
 int NSpSearch_GetNumGamesFound(NSpSearchReference searchRef);
 int NSpSearch_Tick(NSpSearchReference searchRef);
 NSpGameReference NSpSearch_JoinGame(NSpSearchReference searchRef, int gameNum);
+NSpGameReference NSpGame_JoinAddress(uint32_t ipv4Address);	// dev/test: skip discovery (host byte order, port gNetPort)
 const char* NSpSearch_GetHostAddress(NSpSearchReference searchRef, int gameNum);
 
 int NSpPlayer_Kick(NSpGameReference gameRef, NSpPlayerID kickedPlayerID);

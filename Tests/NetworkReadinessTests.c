@@ -13,6 +13,7 @@ static Boolean TestGatherScreen(void);
 #include "../Source/Screens/NetGather.c"
 
 Boolean gSimulationPaused;
+CommandLineOptions gCommandLine;
 float gFramesPerSecondFrac, gStartingLightTimer;
 long gNumCheckpoints = 1;
 short gWorstHumanPlace;
@@ -726,6 +727,44 @@ static void CapacityInGameDepartures(void)
     EndSession(peers);
 }
 
+// --join-address connects straight to the host's listener instead of searching the
+// LAN, then performs the ordinary join handshake; a missing host is reported as such.
+static void DirectJoin(void)
+{
+    ResetNetGameTransientState();
+    gNetPort = 0;
+    NSpGame* host = NSpGame_Host();
+    CHECK(host);
+    gNetPort = ntohs(Address(host->hostListenSocket).sin_port);
+    gCommandLine.netJoin = gCommandLine.netJoinDirect = true;
+    gCommandLine.netJoinAddress = INADDR_LOOPBACK;
+    expectedGatherState = kNetSequence_ClientJoiningGame;
+    gatherScreenCalls = 0;
+    CHECK(SetupNetworkJoin()); // the stub gather screen cancels after one call
+    CHECK(gatherScreenCalls == 1 && gNetGame && !gNetSearch);
+    CHECK(!gCommandLine.netJoinDirect); // consumed: a later menu join searches the LAN
+    NSpGame* client = gNetGame;
+    CHECK(AcceptClient(host) == 1);
+    NSpMessageHeader* request = WaitMessage(host);
+    CHECK(request->what == kNSpJoinRequest);
+    CHECK(NSpGame_AckJoinRequest(host, request) == kNSpRC_OK);
+    NSpMessage_Release(host, request);
+    NSpMessageHeader* approved = WaitMessage(client);
+    CHECK(approved->what == kNSpJoinApproved && client->myID == 1);
+    NSpMessage_Release(client, approved);
+    NSpGame_Dispose(client, 0);
+    CHECK(ExpectLeave(host) == 1);
+    NSpGame_Dispose(host, 0); // nothing listens on this port any more
+
+    expectedGatherState = kNetSequence_ClientOfflineBecauseHostUnreachable;
+    gatherScreenCalls = 0;
+    gNetGame = NULL;
+    gCommandLine.netJoinDirect = true;
+    CHECK(SetupNetworkJoin());
+    CHECK(gatherScreenCalls == 1 && !gNetGame && !gNetSearch);
+    memset(&gCommandLine, 0, sizeof(gCommandLine));
+}
+
 int main(void)
 {
     Readiness(VEHICLE_READY_TIMEOUT_MS, kNetSequence_WaitingForPlayerVehicles, kNetSequence_GotAllPlayerVehicles);
@@ -752,6 +791,7 @@ int main(void)
     CapacityReadiness(false);
     CapacityReadiness(true);
     CapacityInGameDepartures();
+    DirectJoin();
     puts("Readiness, paused-leave and full-lobby tests passed");
     return 0;
 }
