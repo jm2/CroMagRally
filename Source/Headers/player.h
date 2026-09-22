@@ -280,6 +280,8 @@ typedef struct
 
 void InitPlayerInfo_Game(void);
 void InitPlayersAtStartOfLevel(void);
+short CyclePlayerOutfit(short whichPlayer, int delta, uint32_t playersDone, Boolean dressOthers);
+void SetPlayerBody(short whichPlayer, short sex, uint32_t playersDone, Boolean dressOthers);
 void SetPlayerParmsFromTileAttributes(short playerNum, uint16_t flags);
 void ChooseTaggedPlayer(void);
 void ChooseTaggedPlayerWithIndex(short startIndex);

@@ -20,6 +20,8 @@
 static void SetupCharacterSelectScreen(short whichPlayer);
 static Boolean DoCharacterSelectControls(short whichPlayer, Boolean allowAborting);
 static void FreeCharacterSelectArt(void);
+static void SetCharacterSex(short whichPlayer, short sex);
+static uint32_t GetPlayersDoneChoosing(short whichPlayer);
 
 
 
@@ -94,9 +96,38 @@ Boolean DoCharacterSelectScreen(short whichPlayer, Boolean allowAborting)
 
 		/* SET CHARACTER TYPE SELECTED */
 
-	gPlayerInfo[whichPlayer].sex = gSelectedCharacterIndex;
+	SetCharacterSex(whichPlayer, gSelectedCharacterIndex);
 
 	return(false);
+}
+
+
+/********************** SET CHARACTER SEX **************************/
+//
+// Whoever already wore my new look takes my old one, so nobody ends up identical. In net
+// games everyone chooses on their own machine, and CTF outfits are team colours.
+//
+
+static void SetCharacterSex(short whichPlayer, short sex)
+{
+	const Boolean dressOthers = !gNetGameInProgress && gGameMode != GAME_MODE_CAPTUREFLAG;
+
+	SetPlayerBody(whichPlayer, sex, GetPlayersDoneChoosing(whichPlayer), dressOthers);
+}
+
+
+/********************** GET PLAYERS DONE CHOOSING **************************/
+//
+// Local players choose in order, so the ones before whichPlayer keep their looks.
+// In net games nobody else's choice is made here.
+//
+
+static uint32_t GetPlayersDoneChoosing(short whichPlayer)
+{
+	if (gNetGameInProgress)
+		return 0;
+
+	return (1u << whichPlayer) - 1u;
 }
 
 
@@ -233,6 +264,9 @@ ObjNode	*multiplayerText = NULL;
 
 	LoadCavemanSkins();
 
+	if (gGameMode != GAME_MODE_CAPTUREFLAG)			// start on an outfit nobody before me took (CTF outfits are teams)
+		CyclePlayerOutfit(whichPlayer, 0, GetPlayersDoneChoosing(whichPlayer), !gNetGameInProgress);
+
 	int skinID = gPlayerInfo[whichPlayer].skin;
 
 	if ((gGameMode == GAME_MODE_PRACTICE || gGameMode == GAME_MODE_TOURNAMENT)
@@ -280,48 +314,22 @@ static void FreeCharacterSelectArt(void)
 
 static void CycleSkin(short whichPlayer, int delta)
 {
-	GAME_ASSERT(whichPlayer < MAX_PLAYERS);
-
-			/* FIND OUT WHICH SKINS ARE ALREADY TAKEN */
-
-	uint32_t skinsTaken = 0;
-
-	if (!gNetGameInProgress)		// in net games, let user pick any skin
-	{
-		for (int prevPlayer = 0; prevPlayer < whichPlayer; prevPlayer++)
-		{
-			skinsTaken |= (1 << gPlayerInfo[prevPlayer].skin);
-		}
-	}
+	GAME_ASSERT(whichPlayer >= 0 && whichPlayer < MAX_PLAYERS);
 
 			/* CYCLE TO NEXT AVAILABLE SKIN */
+			//
+			// Local players skip the skins of the players who chose before them, and whoever
+			// wore my new look takes my old one. Net games let the user pick any skin and leave
+			// the other slots alone: humans choose on their own machines, and every peer must
+			// dress the CPUs the same way.
+			//
 
-	short oldSkin = gPlayerInfo[whichPlayer].skin;
-	short newSkin = oldSkin;
-
-	do
-	{
-		newSkin += delta;
-		newSkin = PositiveModulo(newSkin, NUM_CAVEMAN_SKINS);
-	} while (skinsTaken & (1 << newSkin));
-
-	gPlayerInfo[whichPlayer].skin = newSkin;
+	const short newSkin = CyclePlayerOutfit(whichPlayer, delta, GetPlayersDoneChoosing(whichPlayer), !gNetGameInProgress);
 
 			/* SET TEXTURES */
 
 	gSex[0]->Skeleton->overrideTexture = gCavemanSkins[0][newSkin];
 	gSex[1]->Skeleton->overrideTexture = gCavemanSkins[1][newSkin];
-
-			/* SWAP MY OLD SKIN W/ PLAYER THAT USES THE ONE I WANT */
-
-	for (int i = 0; i < MAX_PLAYERS; i++)
-	{
-		if (i != whichPlayer && gPlayerInfo[i].skin == newSkin)
-		{
-			gPlayerInfo[i].skin = oldSkin;
-			break;
-		}
-	}
 }
 
 

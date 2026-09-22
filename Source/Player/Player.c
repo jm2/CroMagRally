@@ -425,6 +425,44 @@ static void SetPlayerDriverLooks(const DriverLook looks[MAX_PLAYERS])
 }
 
 
+/******************** CYCLE PLAYER OUTFIT ***********************/
+//
+// Character select: steps whichPlayer to the next outfit. Players in playersDone keep their
+// looks; with dressOthers, whoever wore the new look takes the old one so drivers who looked
+// different still do. Returns the new outfit.
+//
+
+short CyclePlayerOutfit(short whichPlayer, int delta, uint32_t playersDone, Boolean dressOthers)
+{
+DriverLook	looks[MAX_PLAYERS];
+
+	GAME_ASSERT(whichPlayer >= 0 && whichPlayer < MAX_PLAYERS);
+
+	GetPlayerDriverLooks(looks);
+	const short newSkin = CycleDriverOutfit(looks, MAX_PLAYERS, whichPlayer, delta, playersDone, dressOthers);
+	SetPlayerDriverLooks(looks);
+
+	return newSkin;
+}
+
+
+/******************** SET PLAYER BODY ***********************/
+//
+// Character select: the body whichPlayer chose, with the same rules as CyclePlayerOutfit.
+//
+
+void SetPlayerBody(short whichPlayer, short sex, uint32_t playersDone, Boolean dressOthers)
+{
+DriverLook	looks[MAX_PLAYERS];
+
+	GAME_ASSERT(whichPlayer >= 0 && whichPlayer < MAX_PLAYERS);
+
+	GetPlayerDriverLooks(looks);
+	ChangeDriverBody(looks, MAX_PLAYERS, whichPlayer, sex, playersDone, dressOthers);
+	SetPlayerDriverLooks(looks);
+}
+
+
 #pragma mark -
 
 /********* SET PLAYER PARMS FROM TILE ATTRIBUTES *****************/

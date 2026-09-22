@@ -1,4 +1,5 @@
-// Driver looks: default body/outfit per slot and CPU re-dressing.
+// Driver looks: default body/outfit per slot, the character screen's outfit and body
+// changes, and CPU re-dressing.
 #include "game.h"
 #include "driver_looks.h"
 #include <stdio.h>
@@ -210,10 +211,282 @@ static void TestResolveCPUDriverLooks(void)
 }
 
 
+/********************* CHARACTER SCREEN CHANGES ************************/
+
+int PositiveModulo(int value, unsigned int m)
+{
+	int mod = value % (int) m;
+	if (mod < 0)
+		mod += m;
+	return mod;
+}
+
+// CycleSkin from SelectCharacter.c at f72596a, verbatim apart from reading test state
+// and the six-slot table it was written for.
+static void OldCycleSkin(DriverLook gPlayerInfo[ORIGINAL_NUM_PLAYERS], short whichPlayer, int delta, Boolean gNetGameInProgress)
+{
+			/* FIND OUT WHICH SKINS ARE ALREADY TAKEN */
+
+	uint32_t skinsTaken = 0;
+
+	if (!gNetGameInProgress)		// in net games, let user pick any skin
+	{
+		for (int prevPlayer = 0; prevPlayer < whichPlayer; prevPlayer++)
+		{
+			skinsTaken |= (1 << gPlayerInfo[prevPlayer].skin);
+		}
+	}
+
+			/* CYCLE TO NEXT AVAILABLE SKIN */
+
+	short oldSkin = gPlayerInfo[whichPlayer].skin;
+	short newSkin = oldSkin;
+
+	do
+	{
+		newSkin += delta;
+		newSkin = PositiveModulo(newSkin, NUM_CAVEMAN_SKINS);
+	} while (skinsTaken & (1 << newSkin));
+
+	gPlayerInfo[whichPlayer].skin = newSkin;
+
+			/* SWAP MY OLD SKIN W/ PLAYER THAT USES THE ONE I WANT */
+
+	for (int i = 0; i < ORIGINAL_NUM_PLAYERS; i++)
+	{
+		if (i != whichPlayer && gPlayerInfo[i].skin == newSkin)
+		{
+			gPlayerInfo[i].skin = oldSkin;
+			break;
+		}
+	}
+}
+
+static uint32_t PlayersBefore(int whichPlayer)
+{
+	return (1u << whichPlayer) - 1u;
+}
+
+static int EncodeSixSlotState(const DriverLook looks[ORIGINAL_NUM_PLAYERS])
+{
+	int code = 0;
+	for (int i = 0; i < ORIGINAL_NUM_PLAYERS; i++)
+		code = code * NUM_LOOKS + LookIndex(looks[i]);
+	return code;
+}
+
+static void TestCycleDriverSkin(void)
+{
+	// Same answer as the old do/while whenever a skin is free; bounded when none is.
+	for (int skin = 0; skin < NUM_CAVEMAN_SKINS; skin++)
+	{
+		for (uint32_t taken = 0; taken < (1u << NUM_CAVEMAN_SKINS); taken++)
+		{
+			for (int delta = -1; delta <= 1; delta += 2)
+			{
+				short expected = (short) skin;
+				if (taken != (1u << NUM_CAVEMAN_SKINS) - 1)
+				{
+					do
+						expected = (short) PositiveModulo(expected + delta, NUM_CAVEMAN_SKINS);
+					while (taken & (1u << expected));
+				}
+				else
+				{
+					expected = (short) PositiveModulo(skin + delta, NUM_CAVEMAN_SKINS);
+				}
+				CHECK(CycleDriverSkin((short) skin, delta, taken) == expected);
+			}
+		}
+	}
+}
+
+// Every six-car state the character screens can reach: local players 0...3 cycle
+// outfits and pick bodies, in any order (the screens allow going back).
+static void TestSixCarScreensMatchOriginal(void)
+{
+	enum { NUM_STATES = NUM_LOOKS * NUM_LOOKS * NUM_LOOKS * NUM_LOOKS * NUM_LOOKS * NUM_LOOKS };
+	unsigned char* seen = calloc(NUM_STATES, 1);
+	DriverLook* queue = malloc(sizeof(DriverLook) * ORIGINAL_NUM_PLAYERS * 200000);
+	int head = 0, tail = 0, numStates = 0;
+	CHECK(seen && queue);
+
+	DriverLook start[ORIGINAL_NUM_PLAYERS];
+	GetDefaultLooks(start, ORIGINAL_NUM_PLAYERS);
+	seen[EncodeSixSlotState(start)] = 1;
+	memcpy(&queue[tail++ * ORIGINAL_NUM_PLAYERS], start, sizeof(start));
+
+	while (head < tail)
+	{
+		const DriverLook* state = &queue[head++ * ORIGINAL_NUM_PLAYERS];
+		numStates++;
+		CHECK(AllSkinsDistinct(state, ORIGINAL_NUM_PLAYERS));
+
+		for (int who = 0; who < MAX_TEST_HUMANS; who++)
+		{
+			for (int op = 0; op < 5; op++)				// cycle up, cycle down, pick Brog, pick Grag, enter screen
+			{
+				DriverLook oldRules[ORIGINAL_NUM_PLAYERS], newRules[ORIGINAL_NUM_PLAYERS];
+				memcpy(oldRules, state, sizeof(oldRules));
+				memcpy(newRules, state, sizeof(newRules));
+
+				if (op < 2)
+				{
+					const int delta = op == 0 ? 1 : -1;
+					OldCycleSkin(oldRules, (short) who, delta, false);
+					CHECK(CycleDriverOutfit(newRules, ORIGINAL_NUM_PLAYERS, who, delta, PlayersBefore(who), true)
+						== oldRules[who].skin);
+				}
+				else if (op < 4)
+				{
+					oldRules[who].sex = (short) (op - 2);		// the old screen just stored the body
+					ChangeDriverBody(newRules, ORIGINAL_NUM_PLAYERS, who, (short) (op - 2), PlayersBefore(who), true);
+				}
+				else											// the old screen kept whatever outfit it found
+				{
+					CHECK(CycleDriverOutfit(newRules, ORIGINAL_NUM_PLAYERS, who, 0, PlayersBefore(who), true)
+						== oldRules[who].skin);
+				}
+				CHECK(memcmp(oldRules, newRules, sizeof(oldRules)) == 0);
+
+				const int code = EncodeSixSlotState(newRules);
+				if (!seen[code])
+				{
+					seen[code] = 1;
+					CHECK(tail < 200000);
+					memcpy(&queue[tail++ * ORIGINAL_NUM_PLAYERS], newRules, sizeof(newRules));
+				}
+
+					/* NETWORK: SAME OUTFIT FOR ME, NOBODY ELSE TOUCHED */
+
+				if (op < 2)
+				{
+					DriverLook oldNet[ORIGINAL_NUM_PLAYERS], newNet[ORIGINAL_NUM_PLAYERS];
+					memcpy(oldNet, state, sizeof(oldNet));
+					memcpy(newNet, state, sizeof(newNet));
+					OldCycleSkin(oldNet, (short) who, op == 0 ? 1 : -1, true);
+					CycleDriverOutfit(newNet, ORIGINAL_NUM_PLAYERS, who, op == 0 ? 1 : -1, 0, false);
+					for (int i = 0; i < ORIGINAL_NUM_PLAYERS; i++)
+					{
+						CHECK(newNet[i].sex == state[i].sex);
+						CHECK(newNet[i].skin == (i == who ? oldNet[who].skin : state[i].skin));
+					}
+				}
+			}
+		}
+	}
+
+	CHECK(numStates > 1000);
+	free(queue);
+	free(seen);
+}
+
+static void TestTwelveCarScreens(void)
+{
+	// The old swap handed my outfit to the first match only, so the second wave's copy
+	// of that outfit now repeats a look.
+	DriverLook looks[NUM_LOOKS];
+	GetDefaultLooks(looks, NUM_LOOKS);
+	{
+		DriverLook sixSlots[ORIGINAL_NUM_PLAYERS];
+		memcpy(sixSlots, looks, sizeof(sixSlots));
+		OldCycleSkin(sixSlots, 0, 1, false);		// first six: player 1 takes brown as a Grag
+		memcpy(looks, sixSlots, sizeof(sixSlots));
+		CHECK(!AllLooksDistinct(looks, NUM_LOOKS));	// ...which slot 6 already wears
+	}
+
+	// With the new rules every look stays distinct through any sequence of local changes,
+	// and players who chose earlier never change.
+	for (int trial = 0; trial < 2000; trial++)
+	{
+		GetDefaultLooks(looks, NUM_LOOKS);
+		for (int step = 0; step < 40; step++)
+		{
+			const int who = NextRandom(MAX_TEST_HUMANS);
+			DriverLook before[NUM_LOOKS];
+
+			CycleDriverOutfit(looks, NUM_LOOKS, who, 0, PlayersBefore(who), true);	// entering the screen
+			CHECK(AllLooksDistinct(looks, NUM_LOOKS));
+			for (int prev = 0; prev < who; prev++)
+				CHECK(looks[who].skin != looks[prev].skin);
+			memcpy(before, looks, sizeof(looks));
+
+			if (NextRandom(2))
+			{
+				const short newSkin = CycleDriverOutfit(looks, NUM_LOOKS, who, NextRandom(2) ? 1 : -1, PlayersBefore(who), true);
+				CHECK(looks[who].skin == newSkin);
+				CHECK(looks[who].sex == before[who].sex);
+				for (int prev = 0; prev < who; prev++)
+					CHECK(newSkin != before[prev].skin);			// earlier players' outfits are skipped
+			}
+			else
+			{
+				const short sex = (short) NextRandom(2);
+				ChangeDriverBody(looks, NUM_LOOKS, who, sex, PlayersBefore(who), true);
+				CHECK(looks[who].sex == sex && looks[who].skin == before[who].skin);
+			}
+
+			CHECK(AllLooksDistinct(looks, NUM_LOOKS));
+			for (int prev = 0; prev < who; prev++)
+				CHECK(LookIndex(looks[prev]) == LookIndex(before[prev]));
+		}
+	}
+
+	// Seven players who chose already hold every outfit between them: cycling still moves
+	// on (it used to spin forever), skips only their looks with my body, and never changes them.
+	GetDefaultLooks(looks, NUM_LOOKS);
+	const short next = CycleDriverOutfit(looks, NUM_LOOKS, 7, 1, PlayersBefore(7), true);
+	CHECK(next == 3);												// Brog in outfit 2 is player 2's look
+	CHECK(looks[7].sex == 0 && looks[7].skin == 3);
+	CHECK(AllLooksDistinct(looks, NUM_LOOKS));
+	for (int prev = 0; prev < 7; prev++)
+		CHECK(LookIndex(looks[prev]) == LookIndex(GetDefaultDriverLook(prev)));
+	CHECK(CycleDriverSkin(2, 1, (1u << NUM_CAVEMAN_SKINS) - 1) == 3);	// everything taken: bounded
+
+	// Entering the screen (delta 0) keeps a free outfit, and moves off one a player
+	// before me took since I was dressed.
+	GetDefaultLooks(looks, NUM_LOOKS);
+	CHECK(CycleDriverOutfit(looks, NUM_LOOKS, 3, 0, PlayersBefore(3), true) == 3);
+	CHECK(LookIndex(looks[3]) == LookIndex(GetDefaultDriverLook(3)));
+	CycleDriverOutfit(looks, NUM_LOOKS, 0, 1, 0, true);				// player 0 cycles Brog 0 -> 1
+	CycleDriverOutfit(looks, NUM_LOOKS, 0, 1, 0, true);				// ...-> 2
+	CycleDriverOutfit(looks, NUM_LOOKS, 0, 1, 0, true);				// ...-> 3, which player 3 wears as Grag
+	CHECK(looks[0].skin == 3 && looks[3].skin == 3);
+	CHECK(CycleDriverOutfit(looks, NUM_LOOKS, 3, 0, PlayersBefore(3), true) == 4);
+	CHECK(AllLooksDistinct(looks, NUM_LOOKS));
+	ChangeDriverBody(looks, NUM_LOOKS, 3, 0, PlayersBefore(3), true);	// so a later body change can't copy player 0
+	CHECK(AllLooksDistinct(looks, NUM_LOOKS));
+
+	// A network player changes only its own look, whatever the others wear.
+	GetDefaultLooks(looks, NUM_LOOKS);
+	for (int step = 0; step < 100; step++)
+	{
+		DriverLook before[NUM_LOOKS];
+		memcpy(before, looks, sizeof(looks));
+		const int who = NextRandom(NUM_LOOKS);
+		if (step & 1)
+			CycleDriverOutfit(looks, NUM_LOOKS, who, 1, 0, false);
+		else
+			ChangeDriverBody(looks, NUM_LOOKS, who, (short) NextRandom(2), 0, false);
+		for (int i = 0; i < NUM_LOOKS; i++)
+			CHECK(i == who || LookIndex(looks[i]) == LookIndex(before[i]));
+	}
+
+	// Out-of-range players are ignored.
+	GetDefaultLooks(looks, NUM_LOOKS);
+	CHECK(SwapDriverLook(looks, NUM_LOOKS, NUM_LOOKS, looks[0], 0) == -1);
+	ChangeDriverBody(looks, NUM_LOOKS, -1, 1, 0, true);
+	CHECK(AllLooksDistinct(looks, NUM_LOOKS));
+}
+
+
 int main(void)
 {
 	TestDefaultLooks();
 	TestResolveCPUDriverLooks();
+	TestCycleDriverSkin();
+	TestSixCarScreensMatchOriginal();
+	TestTwelveCarScreens();
 	puts("driver looks tests passed");
 	return 0;
 }

@@ -5,6 +5,9 @@
 #include "game.h"
 #include "driver_looks.h"
 
+_Static_assert(NUM_CAVEMAN_SKINS <= 32, "skinsTaken holds one bit per outfit");
+_Static_assert(MAX_PLAYERS <= 32, "lockedMask holds one bit per player");
+
 
 static short WrapSkin(int skin)
 {
@@ -21,6 +24,11 @@ static Boolean IsValidLook(DriverLook look)
 static Boolean SameLook(DriverLook a, DriverLook b)
 {
 	return a.sex == b.sex && a.skin == b.skin;
+}
+
+static Boolean IsLocked(uint32_t lockedMask, int playerNum)
+{
+	return playerNum < 32 && (lockedMask & (1u << playerNum));
 }
 
 
@@ -54,6 +62,123 @@ short GetDefaultHumanDriverSex(int playerNum)
 		playerNum = 0;
 
 	return (short) ((playerNum / NUM_CAVEMAN_SKINS) & 1);
+}
+
+
+/********************* CYCLE DRIVER SKIN ************************/
+
+short CycleDriverSkin(short currentSkin, int delta, uint32_t skinsTaken)
+{
+	const int step = delta < 0 ? -1 : 1;
+	short skin = WrapSkin(currentSkin);
+
+	if (delta == 0 && !(skinsTaken & (1u << skin)))				// just making sure it's free
+		return skin;
+
+	for (int tries = 0; tries < NUM_CAVEMAN_SKINS; tries++)
+	{
+		skin = WrapSkin(skin + step);
+		if (!(skinsTaken & (1u << skin)))
+			return skin;
+	}
+
+	return WrapSkin(currentSkin + step);						// every outfit is taken: a repeat is unavoidable
+}
+
+
+/********************* SWAP DRIVER LOOK ************************/
+
+int SwapDriverLook(DriverLook looks[], int numPlayers, int whichPlayer, DriverLook want, uint32_t lockedMask)
+{
+	if (whichPlayer < 0 || whichPlayer >= numPlayers)
+		return -1;
+
+	const DriverLook oldLook = looks[whichPlayer];
+	int partner = -1;
+
+	if (SameLook(oldLook, want))
+		return -1;
+
+			/* WHOEVER WEARS EXACTLY THIS LOOK TAKES MY OLD ONE */
+
+	for (int i = 0; i < numPlayers && partner < 0; i++)
+	{
+		if (i != whichPlayer && !IsLocked(lockedMask, i) && SameLook(looks[i], want))
+			partner = i;
+	}
+
+	if (partner >= 0)
+	{
+		looks[partner] = oldLook;
+	}
+
+			/* OTHERWISE SWAP OUTFITS WITH THE FIRST ONE WEARING IT */
+
+	else if (want.skin != oldLook.skin)
+	{
+		for (int i = 0; i < numPlayers && partner < 0; i++)
+		{
+			if (i != whichPlayer && !IsLocked(lockedMask, i) && looks[i].skin == want.skin)
+				partner = i;
+		}
+
+		if (partner >= 0)
+			looks[partner].skin = oldLook.skin;
+	}
+
+	looks[whichPlayer] = want;
+	return partner;
+}
+
+
+/********************* CYCLE DRIVER OUTFIT ************************/
+
+short CycleDriverOutfit(DriverLook looks[], int numPlayers, int whichPlayer, int delta,
+						uint32_t playersDone, bool dressOthers)
+{
+uint32_t	skinsTaken = 0;
+uint32_t	looksTaken = 0;											// outfits taken with my body
+const uint32_t allSkins = (1u << NUM_CAVEMAN_SKINS) - 1u;
+
+	if (whichPlayer < 0 || whichPlayer >= numPlayers)
+		return 0;
+
+	for (int i = 0; i < numPlayers; i++)						// find out which skins are already taken
+	{
+		if (i != whichPlayer && IsLocked(playersDone, i) && IsValidLook(looks[i]))
+		{
+			skinsTaken |= 1u << looks[i].skin;
+			if (looks[i].sex == looks[whichPlayer].sex)
+				looksTaken |= 1u << looks[i].skin;
+		}
+	}
+
+	if (skinsTaken == allSkins)									// every outfit chosen: keep whole looks unique instead
+		skinsTaken = looksTaken;
+
+	const short newSkin = CycleDriverSkin(looks[whichPlayer].skin, delta, skinsTaken);
+
+	if (dressOthers)
+		SwapDriverLook(looks, numPlayers, whichPlayer, (DriverLook) { .sex = looks[whichPlayer].sex, .skin = newSkin }, playersDone);
+	else
+		looks[whichPlayer].skin = newSkin;
+
+	return newSkin;
+}
+
+
+/********************* CHANGE DRIVER BODY ************************/
+
+void ChangeDriverBody(DriverLook looks[], int numPlayers, int whichPlayer, short sex,
+						uint32_t playersDone, bool dressOthers)
+{
+	if (whichPlayer < 0 || whichPlayer >= numPlayers)
+		return;
+
+	if (dressOthers)
+		SwapDriverLook(looks, numPlayers, whichPlayer, (DriverLook) { .sex = sex, .skin = looks[whichPlayer].skin }, playersDone);
+	else
+		looks[whichPlayer].sex = sex;
 }
 
 
