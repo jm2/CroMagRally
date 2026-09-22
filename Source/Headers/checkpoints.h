@@ -23,6 +23,7 @@ void UpdatePlayerCheckpoints(short p);
 void PlayerCompletedRace(short playerNum);
 void CalcPlayerPlaces(void);
 void NextLap(short p);
+Boolean CrossCheckpoint(short *checkpointNum, Boolean *checkpointTagged, long numCheckpoints, short c);
 
 
 #endif

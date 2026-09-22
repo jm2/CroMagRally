@@ -54,9 +54,9 @@ void NextLap(short p)
 void UpdatePlayerCheckpoints(short p)
 {
 float	playerFromX, playerFromZ, playerToX, playerToZ;
-short	c,i;
+short	c;
 float	intersectX, intersectZ;
-short	oldCheckpoint,newCheckpoint,nextCheckpoint;
+short	newCheckpoint,nextCheckpoint;
 float	x1,z1,x2,z2,rot;
 OGLVector2D	checkToCheck,aim,deltaVec;
 
@@ -102,106 +102,8 @@ OGLVector2D	checkToCheck,aim,deltaVec;
 
 		if (IntersectLineSegments(playerFromX, playerFromZ, playerToX, playerToZ,x1,z1,x2,z2,&intersectX, &intersectZ))
     	{
-			oldCheckpoint = gPlayerInfo[p].checkpointNum;								// get old checkpoint #
-
-					/* SEE IF CROSSED FINISH LINE */
-					//
-					// This can happen by going forward or backward over it, so
-					// we need to handle it carefully.
-					//
-
-			if (c == 0)
-			{
-						/* SEE IF WENT FORWARD THRU FINISH LINE */
-
-				if (oldCheckpoint == (gNumCheckpoints - 1))
-				{
-					short	count = 0;
-
-					for (i = 0; i < gNumCheckpoints; i++)								// count # of checkpoints tagged
-					{
-						if (gPlayerInfo[p].checkpointTagged[i])
-							count++;
-					}
-
-							/* SEE IF WE DID A NEW LAP */
-
-					if (count > (gNumCheckpoints / 2))									// if crossed at least 50% of the checkpoints then assume we did a full lap
-					{
-						NextLap(p);
-					}
-				}
-						/* RESET ALL CHECKPOINT TAGS WHENEVER WE CROSS THE FINISH LINE*/
-
-				for (i = 0; i < gNumCheckpoints; i++)
-					gPlayerInfo[p].checkpointTagged[i] = false;
-
-				newCheckpoint = c;
-			}
-
-					/* SEE IF FORWARD */
-			else
-			if (c > oldCheckpoint)
-			{
-				newCheckpoint = c;
-				gPlayerInfo[p].checkpointTagged[c] = true;
-			}
-
-					/* SEE IF WENT BACK */
-			else
-			if (c <= oldCheckpoint)
-			{
-				if (c == 0)																// if went back over finish line then dec lap counter
-				{
-					if (gPlayerInfo[p].lapNum >= 0)
-						gPlayerInfo[p].lapNum--;										// just lost a lap
-					newCheckpoint = gNumCheckpoints-1;
-					for (i = 0; i < gNumCheckpoints; i++)								// set all tags so can go back thru finish line for credit
-						gPlayerInfo[p].checkpointTagged[i] = true;
-
-				}
-				else
-				{
-					newCheckpoint = c-1;
-					gPlayerInfo[p].checkpointTagged[c] = false;							// untag the other checkpoint
-				}
-			}
-
-				/* THIS SHOULD ONLY HAPPEN WHEN LAPPED AROUND TO 1ST CHECKPOINT AGAIN */
-				//
-				// This happens anytime the finish line is crossed, but remember that
-				// it does not guarantee that the player did a lap - they could have
-				// just cheated by backing up and re-crossing the finish line.  So,
-				// we have to check that they went all the way around the track and
-				// didnt skip any checkpoints.
-				//
-
-			else
-			{
-				newCheckpoint = c;
-
-				for (i = 0; i < gNumCheckpoints; i++)									// verify that all checkpoints were tagged
-				{
-					if (!gPlayerInfo[p].checkpointTagged[i])							// if this checkpoint was not tagged then they didnt lap
-						goto no_lap;
-				}
-				gPlayerInfo[p].lapNum++;												// yep, we lapped because all the checkpoints were tagged
-
-					/* SEE IF COMPLETED THE RACE */
-
-				if (gPlayerInfo[p].lapNum >= gNumLapsThisRace)
-					PlayerCompletedRace(p);
-				else
-					ShowLapNum(p);
-
-
-no_lap:;
-				for (i = 0; i < gNumCheckpoints; i++)									// reset all tags
-					gPlayerInfo[p].checkpointTagged[i] = false;
-				gPlayerInfo[p].checkpointTagged[c] = true;								// except the one we passed thru
-			}
-
-			gPlayerInfo[p].checkpointNum = newCheckpoint;								// update player's current ckpt #
+			if (CrossCheckpoint(&gPlayerInfo[p].checkpointNum, gPlayerInfo[p].checkpointTagged, gNumCheckpoints, c))
+				NextLap(p);
 			break;
 		}
 	}
