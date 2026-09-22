@@ -111,7 +111,7 @@ StartupSmoke PASS lines, MalformedAssetTests PASS. GitHub CI has not run on it y
    path to their torches. There is a work-in-progress generator change in
    `docs/wip/start-slots-ctf-balance.patch`. It is unverified: the table was not
    regenerated with it.
-6. CHANGELOG entry for branch 2.
+6. ~~CHANGELOG entry for branch 2~~ done (Unreleased section).
 
 ## Open decisions for the owner
 
