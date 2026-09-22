@@ -2,9 +2,9 @@
 
 This branch implements charter §4 (12 players) on top of `fix/player-limit-gaps`
 (PR #42, merged to master as `c92e559`). Work stopped part-way when the session's
-usage quota ran low. **`MAX_PLAYERS` is still 6.** Every change below is written
-for any `MAX_PLAYERS` and is a no-op, or bit-identical, at 6 cars. Raising the
-limit is the main remaining step. Delete this file (and `docs/wip/`) before merging.
+usage quota ran low. **`MAX_PLAYERS` is now 12** (commit "Raise the player limit to
+twelve"); every earlier change is written for any `MAX_PLAYERS` and is a no-op, or
+bit-identical, at 6 cars. Delete this file (and `docs/wip/`) before merging.
 
 The protocol cookie stays `CMR8`: it is unreleased (v3.1.x ship `CMR7`), so
 branch 2 doesn't bump it (owner decision, 2026-09-22).
@@ -67,14 +67,11 @@ StartupSmoke PASS lines, MalformedAssetTests PASS. GitHub CI has not run on it y
 
 ## Not done (charter §4)
 
-1. **§4.1 constants and wire.** `MAX_PLAYERS 12` (`MAX_CLIENTS` follows);
-   `kNSpMaxPayloadLength` 1024; `NET_MAX_PENDING_EVENTS` 12; review
-   `SEND_RING_CAPACITY` (`NetLow.c:67`) and fix the stale comments at
-   `NetLow.c:62-65` and `NetHigh.c:398`; add an explicit `sizeof` assert for the host
-   control message (628 B at 12 players with 12 events); update README.md and
-   `docs/WIFI-NETCODE-CMR7.md`. No 4CC change. Units compiled their static asserts
-   at 12 with the measurement patch; after the raise, `player_limits` was the only
-   failing test, and the place-rendering commits fix it.
+1. ~~§4.1 constants and wire~~ **done**: `MAX_PLAYERS` 12 (`MAX_CLIENTS` follows),
+   `kNSpMaxPayloadLength` 1024, `NET_MAX_PENDING_EVENTS` 12, an exact-size assert
+   for the 628 B host control message, an 80 KB send ring (~2 s of host messages at
+   60 fps), and updated README and netcode notes. No 4CC change. CI-equivalent run:
+   27/27 ctest normal and sanitizer, 101 StartupSmoke PASS lines, MalformedAssetTests PASS.
 2. **Land-car strandings at 12 cars** (blocks §4.9 "no stranded cars"). The audit
    found three cases, all with branch 1's afloat fix already applied:
    - on Scandinavia at 12 cars, the autopilot car was stuck 266 s of 494 s at
