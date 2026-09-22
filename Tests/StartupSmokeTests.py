@@ -52,6 +52,19 @@ def main() -> None:
                          "--smoke-test-frames", "3"],
                 f"SMOKE: {mode} track {track} rendered 3 frames")
 
+    # Smoke-only local split-screen multiplayer races, 2..4 humans (MAX_LOCAL_PLAYERS).
+    for players, track in ((2, 1), (3, 9), (4, 5)):
+        run(binary, ["--track", str(track), "--no-vsync", "--smoke-test-frames", "3",
+                     "--smoke-local-players", str(players)],
+            f"SMOKE: local race track {track} with {players} players and {players} cars rendered 3 frames")
+    for players in ("1", "5", "garbage"):
+        run(binary, ["--track", "1", "--smoke-test-frames", "3", "--smoke-local-players", players],
+            rejection="Invalid --smoke-local-players")
+    for args in (["--smoke-local-players", "2"],
+                 ["--track", "1", "--smoke-local-players", "2"],
+                 ["--host", "--track", "1", "--smoke-test-frames", "3", "--smoke-local-players", "2"]):
+        run(binary, args, rejection="--smoke-local-players requires --track and --smoke-test-frames")
+
     # Dev/test direct join takes a strict IPv4[:PORT] and conflicts with other modes.
     run(binary, ["--join-address"], rejection="--join-address requires a value")
     for address in ("", "localhost", "127.0.0", "127.0.0.1.1", "127..0.1", "256.0.0.1",

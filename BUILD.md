@@ -146,7 +146,9 @@ invalid developer options, and teardown with isolated preferences and a
 
 The developer option `--smoke-test-frames N` (1–600) requires `--track` or
 `--join-address` and exits after that many gameplay frames, or lobby frames when
-combined with `--host`. It cannot be used with `--join`. A smoke run that ends
+combined with `--host`. It cannot be used with `--join`. With
+`--smoke-local-players N` (2–4), the run is a split-screen multiplayer race with
+N local players instead. A smoke run that ends
 before printing its `SMOKE:` completion line exits with status 1. CI builds the
 full game with ASan/UBSan before running these tests; unit tests alone do not
 exercise asset loading. Leak detection remains enabled in the unit suite, but is

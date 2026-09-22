@@ -990,7 +990,11 @@ static Boolean UpdateSmokeTestFrame(void)
 		{
 			if (--gSmokeFramesRemaining > 0)
 				return false;
-			SDL_Log("SMOKE: practice track %d rendered %d frames", gTrackNum + 1, gCommandLine.smokeTestFrames);
+			if (gGameMode == GAME_MODE_MULTIPLAYERRACE)
+				SDL_Log("SMOKE: local race track %d with %d players and %d cars rendered %d frames",
+						gTrackNum + 1, gNumRealPlayers, gNumTotalPlayers, gCommandLine.smokeTestFrames);
+			else
+				SDL_Log("SMOKE: practice track %d rendered %d frames", gTrackNum + 1, gCommandLine.smokeTestFrames);
 			gSmokeTestPassed = true;
 			return true;
 		}
@@ -1994,6 +1998,11 @@ void GameMain(void)
 	{
 		gGameMode = GAME_MODE_PRACTICE;
 		gTrackNum = gCommandLine.bootToTrack - 1;
+		if (gCommandLine.smokeLocalPlayers)						// smoke only: a split-screen multiplayer race
+		{
+			gGameMode = GAME_MODE_MULTIPLAYERRACE;
+			gNumLocalPlayers = gNumRealPlayers = gCommandLine.smokeLocalPlayers;
+		}
 		InitPlayerInfo_Game();
 
 		if (gCommandLine.car)
