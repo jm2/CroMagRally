@@ -77,11 +77,39 @@ typedef struct
 
 	TournamentProgression tournamentProgression;
 	char	playerName[32];
+
+			/* ADDED IN V2 */
+
+	Boolean	cpuFill;					// fill empty multiplayer race slots with CPU cars
 }PrefsType;
+
+// The v1 prefs payload: PrefsType before v2 appended its fields. Frozen so that
+// v1 files can be upgraded (LoadPrefsFile); never edit it.
+typedef struct
+{
+	Byte	difficulty;
+	Byte	splitScreenMode2P;
+	Byte	splitScreenMode3P;
+	Byte	language;
+	Byte	tagDuration;
+	Byte	antialiasingLevel;
+	Boolean	fullscreen;
+	Byte	displayNumMinus1;
+	Byte	musicVolumePercent;
+	Byte	sfxVolumePercent;
+	Byte	raceTimer;
+
+	InputBinding bindings[NUM_CONTROL_NEEDS];
+	Boolean	gamepadRumble;
+
+	TournamentProgression tournamentProgression;
+	char	playerName[32];
+}PrefsTypeV1;
 
 #define PREFS_FOLDER_NAME "CroMagRally"
 
-#define PREFS_MAGIC "CMR Prefs v1   "
+#define PREFS_MAGIC "CMR Prefs v2   "
+#define PREFS_MAGIC_V1 "CMR Prefs v1   "
 #define PREFS_FILENAME "Prefs"
 
 
@@ -136,6 +164,7 @@ SkeletonDefType *LoadSkeletonFile(short skeletonType);
 
 OSErr LoadUserDataFile(const char* path, const char* magic, long payloadLength, Ptr payloadPtr);
 OSErr SaveUserDataFile(const char* path, const char* magic, long payloadLength, Ptr payloadPtr);
+OSErr LoadPrefsFile(const char* path, PrefsType* prefs, const PrefsType* defaults, Boolean* upgraded);
 
 Boolean SanitizePrefs(PrefsType* prefs, const PrefsType* defaults);
 Boolean SanitizeScoreboard(Scoreboard* scoreboard);

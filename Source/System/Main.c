@@ -178,6 +178,7 @@ void InitDefaultPrefs(void)
 	gGamePrefs.fullscreen			= true;
 	gGamePrefs.musicVolumePercent	= 60;			// careful to set these two volumes to one of the
 	gGamePrefs.sfxVolumePercent		= 60;			// the predefined values allowed in the settings menu
+	gGamePrefs.cpuFill				= false;		// multiplayer races are humans only unless asked
 
 	SDL_memcpy(&gGamePrefs.bindings, kDefaultInputBindings, sizeof(kDefaultInputBindings));
 }

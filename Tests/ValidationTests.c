@@ -643,6 +643,7 @@ static PrefsType ValidPrefs(void)
 	prefs.sfxVolumePercent = 60;
 	prefs.raceTimer = 1;
 	prefs.gamepadRumble = true;
+	prefs.cpuFill = true;
 	prefs.bindings[0].key[0] = SDL_SCANCODE_SPACE;
 	prefs.bindings[0].pad[0] = (PadBinding){kInputTypeButton, SDL_GAMEPAD_BUTTON_SOUTH};
 	prefs.bindings[1].pad[0] = (PadBinding){kInputTypeAxisPlus, SDL_GAMEPAD_AXIS_LEFTX};
@@ -677,6 +678,7 @@ static void TestPrefsSanitization(void)
 	CHECK_REPAIR(raceTimer, 3);
 	CHECK_REPAIR(gamepadRumble, 2);
 	CHECK_REPAIR(tournamentProgression.numTracksCompleted, NUM_RACE_TRACKS + 1);
+	CHECK_REPAIR(cpuFill, 2);
 
 #undef CHECK_REPAIR
 
