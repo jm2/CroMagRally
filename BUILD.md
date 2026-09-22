@@ -200,3 +200,10 @@ With a pinned seed and a fixed timestep a race repeats exactly; vary the timeste
 for independent samples. The metric fields are documented in
 `Source/Headers/race_metrics.h`. Metrics are collected only with
 `--smoke-metrics`; otherwise each gameplay hook costs one untaken branch.
+
+`tools/run_race_metrics.sh <build dir> <out dir> [tracks] [car counts] [fps list] [jobs]`
+runs such races in parallel, one per track, car count and timestep, and resumes an
+interrupted soak. `tools/analyze_race_metrics.py <out dir>` summarizes the CPU cars:
+per-race rows, per-track means for two car counts side by side (for example 6 and
+12, or `--compare A B`), or for an earlier soak with `--baseline DIR`, and the number
+of stranded CPU cars (stuck for more than half the race).

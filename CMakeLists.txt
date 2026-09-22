@@ -747,6 +747,11 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 		$<TARGET_FILE:CroMagRallyAssetExtractionTests> ${CMAKE_COMMAND})
 	add_test(NAME release_workflow COMMAND ${Python3_EXECUTABLE}
 		${CMAKE_SOURCE_DIR}/Tests/ReleaseWorkflowTests.py ${CMAKE_SOURCE_DIR})
+	if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+		# The race-metrics soak scripts target Linux (offscreen video, bash, coreutils timeout).
+		add_test(NAME race_metrics_tools COMMAND ${Python3_EXECUTABLE}
+			${CMAKE_SOURCE_DIR}/Tests/RaceMetricsToolsTests.py ${CMAKE_SOURCE_DIR})
+	endif()
 	add_executable(CroMagRallyMigrationTests Tests/UserDataMigrationTests.cpp Source/System/UserDataFiles.c)
 	target_include_directories(CroMagRallyMigrationTests PRIVATE
 		${GAME_GENERATED_INCLUDE_DIR} ${GAME_SRCDIR}/Headers ${GAME_SRCDIR}/System)
