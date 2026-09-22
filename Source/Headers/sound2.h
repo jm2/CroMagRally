@@ -2,7 +2,15 @@
 // Sound2.h
 //
 
-#define		MAX_CHANNELS			20
+// Effect channels. Each car within earshot holds a looping engine channel, plus a
+// skid or crash now and then, on top of the shared sounds (announcer, POWs, level
+// ambience), so the need grows with the grid. Headless full races at 50-72 Hz peak
+// at 22 busy channels with 6 cars and 32 with 12, except Europe, whose catapults
+// reach 36 and 43. Scaling the original 20-for-6 share keeps 6-player builds as
+// they were and gives 40 at 12 players. An idle channel costs ~1.3 KB in Pomme and
+// no mixing time. When every channel is busy a new effect is skipped, logged once
+// (PlayEffect_Parms).
+#define		MAX_CHANNELS			(20 * MAX_PLAYERS / 6)
 
 #define		FULL_CHANNEL_VOLUME		kFullVolume
 #define		NORMAL_CHANNEL_RATE		0x10000
