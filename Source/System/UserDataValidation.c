@@ -179,6 +179,10 @@ static Boolean IsValidScoreboardRecord(const ScoreboardRecord* record, int track
 			|| record->gameMode == GAME_MODE_TOURNAMENT
 			|| record->gameMode == GAME_MODE_MULTIPLAYERRACE)
 		&& record->vehicleType < NUM_CAR_TYPES_TOTAL
+		// The place bound is this build's MAX_PLAYERS, not a fixed file-format limit.
+		// A build with fewer players than the one that wrote the scoreboard (e.g. a
+		// 6-player build reading a 12-player build's 7th-12th place) drops those
+		// records, and LoadScoreboardFile then saves the scoreboard without them.
 		&& record->place < MAX_PLAYERS
 		&& record->sex <= 1
 		&& record->skin < NUM_CAVEMAN_SKINS;
