@@ -289,7 +289,7 @@ short	p,place,i;
 	}
 
 	if (gIsSelfRunningDemo)
-		gWorstHumanPlace = 5;										// no humans in demo, so trick so that CPU cars will all attack each other
+		gWorstHumanPlace = gNumTotalPlayers - 1;					// no humans in demo, so trick so that CPU cars will all attack each other
 	else
 		gWorstHumanPlace = 0;										// also calc which human player is in last place
 
