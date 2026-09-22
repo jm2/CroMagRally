@@ -53,7 +53,8 @@ int StartSlots_CountAuthored(const bool authored[], int numSlots);
 const StartSlotTableEntry* StartSlots_Fill(StartSlotSet set, int mapUnitWidth, int mapUnitDepth,
 										const StartSlot items[], const bool authored[], int numSlots,
 										StartSlotPose poses[]);
-void StartSlots_KeepHumansAtBack(StartSlotPose poses[], const bool isComputer[], int numPlayers, int authoredCount);
+void StartSlots_KeepHumansAtBack(StartSlotPose poses[], const bool isComputer[], int numPlayers, int authoredCount,
+								int gridRot16);
 StartSlotSet StartSlots_SetForGameMode(int gameMode);
 int StartSlots_Place(const TerrainItemEntryType itemList[], long numItems, int gameMode,
 					int mapUnitWidth, int mapUnitDepth, const bool isComputer[], int numPlayers,

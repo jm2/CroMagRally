@@ -391,15 +391,21 @@ const StartSlotTableEntry* StartSlots_Fill(StartSlotSet set, int mapUnitWidth, i
 // The shipped grids put player 0, the human in a one-player race, in the rear row. Once CPU
 // slots exist behind it, swap each human among the first authoredCount players into the
 // matching slot of the rearmost wave, so no CPU starts queued behind a car that hasn't moved
-// yet. Does nothing while everyone fits on the authored grid.
+// yet. Where that is not enough (a rearmost wave only partly filled, or a wave whose rows don't
+// follow the authored grid's), each human, in player order, then swaps with the rearmost CPU
+// that starts behind it along the grid's heading gridRot16, if any. Afterwards no CPU starts
+// behind a human. Does nothing while everyone fits on the authored grid.
 //
 
-void StartSlots_KeepHumansAtBack(StartSlotPose poses[], const bool isComputer[], int numPlayers, int authoredCount)
+void StartSlots_KeepHumansAtBack(StartSlotPose poses[], const bool isComputer[], int numPlayers, int authoredCount,
+								int gridRot16)
 {
 	if (authoredCount <= 0 || numPlayers <= authoredCount)
 		return;
 
 	const int lastWave = ((numPlayers - 1) / authoredCount) * authoredCount;
+
+			/* EACH HUMAN TO ITS SLOT IN THE REARMOST WAVE */
 
 	for (int p = 0; p < authoredCount; p++)
 	{
@@ -410,6 +416,38 @@ void StartSlots_KeepHumansAtBack(StartSlotPose poses[], const bool isComputer[],
 		const StartSlotPose human = poses[p];
 		poses[p] = poses[q];
 		poses[q] = human;
+	}
+
+			/* THEN BEHIND EVERY CPU */
+			//
+			// A human swaps with the rearmost CPU behind it, so no CPU is behind it afterwards.
+			// Every swap moves one CPU forwards and none backwards, so none gets behind it later.
+
+	const double fx = kHeading[gridRot16 & 15][0];
+	const double fz = kHeading[gridRot16 & 15][1];
+
+	for (int p = 0; p < numPlayers; p++)
+	{
+		if (isComputer[p])
+			continue;
+
+		int back = -1;
+		double backDepth = poses[p].x * fx + poses[p].z * fz;
+		for (int c = 0; c < numPlayers; c++)
+		{
+			const double depth = poses[c].x * fx + poses[c].z * fz;
+			if (isComputer[c] && depth < backDepth)
+			{
+				back = c;
+				backDepth = depth;
+			}
+		}
+		if (back >= 0)
+		{
+			const StartSlotPose human = poses[p];
+			poses[p] = poses[back];
+			poses[back] = human;
+		}
 	}
 }
 
@@ -494,6 +532,6 @@ int StartSlots_Place(const TerrainItemEntryType itemList[], long numItems, int g
 
 	StartSlots_Fill(set, mapUnitWidth, mapUnitDepth, items, authored, numSlots, poses);
 	if (set == START_SLOT_SET_RACE)
-		StartSlots_KeepHumansAtBack(poses, isComputer, numPlayers, StartSlots_CountAuthored(authored, numSlots));
+		StartSlots_KeepHumansAtBack(poses, isComputer, numPlayers, StartSlots_CountAuthored(authored, numSlots), items[0].rot16);
 	return -1;
 }

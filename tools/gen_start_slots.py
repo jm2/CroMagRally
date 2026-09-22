@@ -104,9 +104,9 @@ PATH_RANGE, PATH_WIDTH, HEADON_RANGE = 2000, 500, 3000
 RACE_GAP = 1300         # the procedural rule's gap between the authored grid and its copy
 RACE_BEHIND = 900       # race slots stay this far behind the rearmost authored slot, so every
                         # human swapped into them starts behind every CPU on an authored slot
-ROW_TOL = 400           # slot 6 (the lone human's slot) stays in its wave's rear row: no further
-                        # from the wave's back than player 0 is from the authored grid's back,
-                        # plus this tolerance
+ROW_TOL = 400           # slot 6 (where StartSlots_KeepHumansAtBack first puts a lone human) stays
+                        # in its wave's rear row: no further from the wave's back than player 0 is
+                        # from the authored grid's back, plus this tolerance
 CTF_SIDE_MARGIN = 500   # CTF slots stay this far inside their team's half of the arena
 SEARCH_STEP = 100       # candidate grid for slots that have to move
 SEARCH_RADIUS = 6000    # how far a failing slot may move

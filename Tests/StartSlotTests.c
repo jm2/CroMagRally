@@ -86,6 +86,29 @@ static void CheckDistinctAndSpaced(const StartSlotTableEntry* entry, const Start
 }
 
 
+// after holds the poses of before for players 0 .. numPlayers-1, each exactly once, and the
+// others are untouched.
+static void CheckSwapped(const StartSlotTableEntry* entry, const StartSlotPose before[], const StartSlotPose after[], int numPlayers)
+{
+	bool used[MAX_TEST_SLOTS] = {false};
+
+	for (int p = 0; p < MAX_TEST_SLOTS; p++)
+	{
+		if (p >= numPlayers)
+		{
+			CHECK_ENTRY(PosesEqual(after[p], before[p]), entry);
+			continue;
+		}
+		int from = -1;
+		for (int q = 0; q < numPlayers && from < 0; q++)
+			if (!used[q] && PosesEqual(after[p], before[q]))
+				from = q;
+		CHECK_ENTRY(from >= 0, entry);
+		used[from] = true;
+	}
+}
+
+
 /*************** EVERY TABLE ENTRY ****************/
 
 static void TestTableEntries(void)
@@ -187,7 +210,7 @@ static void TestPlayerCounts(void)
 			before[p] = poses[p];
 		}
 		const bool oneHuman[MAX_TEST_SLOTS] = {false, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true};
-		StartSlots_KeepHumansAtBack(poses, oneHuman, AUTHORED, AUTHORED);
+		StartSlots_KeepHumansAtBack(poses, oneHuman, AUTHORED, AUTHORED, entry->authored[0].rot16);
 		for (int p = 0; p < AUTHORED; p++)
 			CHECK_ENTRY(PosesEqual(poses[p], before[p]), entry);
 
@@ -245,25 +268,24 @@ static void TestHumansAtTheBack(void)
 				isComputer[p] = p >= humans;
 
 			CHECK_ENTRY(Fill(entry, TABLE_SLOTS, poses) == entry, entry);
-			StartSlots_KeepHumansAtBack(poses, isComputer, TABLE_SLOTS, AUTHORED);
+			StartSlots_KeepHumansAtBack(poses, isComputer, TABLE_SLOTS, AUTHORED, rot16);
 
-			for (int p = 0; p < TABLE_SLOTS; p++)
-			{
-				if (p < humans)											// humans take the new wave's matching slots...
-					CHECK_ENTRY(SamePose(poses[p], entry->extra[p]), entry);
-				else if (p >= AUTHORED && p < AUTHORED + humans)		// ...and those CPUs the humans' authored slots
-					CHECK_ENTRY(SamePose(poses[p], entry->authored[p - AUTHORED]), entry);
-				else													// everyone else stays put
-					CHECK_ENTRY(SamePose(poses[p], p < AUTHORED ? entry->authored[p] : entry->extra[p - AUTHORED]), entry);
-			}
-
-					/* EVERY HUMAN IS BEHIND EVERY CPU ON THE AUTHORED GRID */
+					/* THE HUMANS TAKE NEW SLOTS; EVERY HUMAN IS BEHIND EVERY CPU ON THE AUTHORED GRID */
 
 			for (int h = 0; h < humans; h++)
 			{
+				bool newSlot = false;
+				for (int k = 0; k < START_SLOT_TABLE_EXTRA; k++)
+					newSlot |= SamePose(poses[h], entry->extra[k]);
+				CHECK_ENTRY(newSlot, entry);
+
 				const double depth = Depth(poses[h].x, poses[h].z, rot16);
-				for (int p = humans; p < AUTHORED + humans; p++)		// the CPUs on authored slots
-					CHECK_ENTRY(Depth(poses[p].x, poses[p].z, rot16) - depth >= (double) RACE_BEHIND - 1, entry);
+				for (int p = humans; p < TABLE_SLOTS; p++)
+				{
+					for (int a = 0; a < AUTHORED; a++)
+						if (SamePose(poses[p], entry->authored[a]))
+							CHECK_ENTRY(Depth(poses[p].x, poses[p].z, rot16) - depth >= (double) RACE_BEHIND - 1, entry);
+				}
 			}
 
 					/* A LONE HUMAN STARTS IN THE REAR ROW, AS ON THE AUTHORED GRID */
@@ -277,16 +299,30 @@ static void TestHumansAtTheBack(void)
 			}
 		}
 
-				/* 7 CARS: ONLY SLOT 6 EXISTS BEHIND THE GRID, SO ONLY PLAYER 0 MOVES THERE */
+				/* ANY FIELD SIZE, 1-6 HUMANS: A PARTLY FILLED REAR WAVE TOO */
 
-		StartSlotPose poses[TABLE_SLOTS];
-		bool isComputer[TABLE_SLOTS];
-		for (int p = 0; p < TABLE_SLOTS; p++)
-			isComputer[p] = p >= 2;
-		Fill(entry, TABLE_SLOTS, poses);
-		StartSlots_KeepHumansAtBack(poses, isComputer, 7, AUTHORED);
-		CHECK_ENTRY(SamePose(poses[0], entry->extra[0]) && SamePose(poses[6], entry->authored[0]), entry);
-		CHECK_ENTRY(SamePose(poses[1], entry->authored[1]), entry);
+		for (int numPlayers = AUTHORED + 1; numPlayers <= MAX_TEST_SLOTS; numPlayers++)
+		{
+			for (int humans = 1; humans <= AUTHORED; humans++)
+			{
+				StartSlotPose poses[MAX_TEST_SLOTS], before[MAX_TEST_SLOTS];
+				bool isComputer[MAX_TEST_SLOTS];
+				for (int p = 0; p < MAX_TEST_SLOTS; p++)
+					isComputer[p] = p >= humans;
+
+				Fill(entry, MAX_TEST_SLOTS, poses);
+				memcpy(before, poses, sizeof(poses));
+				StartSlots_KeepHumansAtBack(poses, isComputer, numPlayers, AUTHORED, rot16);
+
+				CheckSwapped(entry, before, poses, numPlayers);
+
+						/* NO CPU STARTS BEHIND A HUMAN (SO NONE IN ITS LANE, RIGHT BEHIND IT) */
+
+				for (int h = 0; h < humans; h++)
+					for (int c = humans; c < numPlayers; c++)
+						CHECK_ENTRY(Depth(poses[c].x, poses[c].z, rot16) >= Depth(poses[h].x, poses[h].z, rot16) - 1e-6, entry);
+			}
+		}
 	}
 }
 
@@ -343,9 +379,48 @@ static void TestRuleRaceGrid(void)
 	for (int p = 0; p < TABLE_SLOTS; p++)
 		isComputer[p] = p != 0;
 	StartSlots_Fill(START_SLOT_SET_RACE, 64000, 64000, items, authored, TABLE_SLOTS, poses);
-	StartSlots_KeepHumansAtBack(poses, isComputer, TABLE_SLOTS, StartSlots_CountAuthored(authored, TABLE_SLOTS));
+	StartSlots_KeepHumansAtBack(poses, isComputer, TABLE_SLOTS, StartSlots_CountAuthored(authored, TABLE_SLOTS), 0);
 	CHECK(poses[0].x == 10000 && poses[0].z == 22500 + 3800);
 	CHECK(poses[6].x == 10000 && poses[6].z == 22500);
+
+			/* WHERE THE MATCHING SLOTS ARE THE REARMOST, 1-4 HUMANS TAKE EXACTLY THOSE */
+
+	for (int humans = 1; humans <= 4; humans++)
+	{
+		for (int p = 0; p < TABLE_SLOTS; p++)
+			isComputer[p] = p >= humans;
+		StartSlotPose before[TABLE_SLOTS];
+		StartSlots_Fill(START_SLOT_SET_RACE, 64000, 64000, items, authored, TABLE_SLOTS, poses);
+		memcpy(before, poses, sizeof(before));
+		StartSlots_KeepHumansAtBack(poses, isComputer, TABLE_SLOTS, AUTHORED, 0);
+		for (int p = 0; p < TABLE_SLOTS; p++)
+		{
+			const int from = p < humans ? AUTHORED + p : (p >= AUTHORED && p < AUTHORED + humans) ? p - AUTHORED : p;
+			CHECK(PosesEqual(poses[p], before[from]));
+		}
+	}
+
+			/* EACH HUMAN KEEPS ITS LANE: PLAYER 0 TAKES SLOT 6 EVEN WITH SLOT 7 50 FURTHER BACK */
+
+	for (int p = 0; p < TABLE_SLOTS; p++)
+		isComputer[p] = p >= 2;
+	items[1].z += 50;
+	StartSlots_Fill(START_SLOT_SET_RACE, 64000, 64000, items, authored, TABLE_SLOTS, poses);
+	CHECK(poses[7].z == poses[6].z + 50);
+	StartSlots_KeepHumansAtBack(poses, isComputer, TABLE_SLOTS, AUTHORED, 0);
+	CHECK(poses[0].x == 10000 && poses[1].x == 11200 && poses[0].z == poses[1].z - 50);
+	items[1].z -= 50;
+
+			/* 8 CARS, 4 HUMANS: TWO TAKE THE NEW ROW, TWO THE AUTHORED REAR ROW BEHIND EVERY CPU */
+
+	for (int p = 0; p < TABLE_SLOTS; p++)
+		isComputer[p] = p >= 4;
+	StartSlots_Fill(START_SLOT_SET_RACE, 64000, 64000, items, authored, TABLE_SLOTS, poses);
+	StartSlots_KeepHumansAtBack(poses, isComputer, 8, AUTHORED, 0);
+	CHECK(poses[0].z == 26300 && poses[1].z == 26300);							// slots 6 and 7
+	CHECK(poses[2].z == 22500 && poses[3].z == 22500);							// authored 0 and 1
+	for (int p = 4; p < 8; p++)
+		CHECK(poses[p].z <= 21250);													// the CPUs: authored 2-5
 
 			/* A MAP WITH FEWER THAN 6 SLOTS NO LONGER STARTS PLAYERS IN THE CORNER */
 
@@ -603,18 +678,27 @@ static const StartSlotTableEntry* FindEntry(const char* map, StartSlotSet set)
 	return NULL;
 }
 
-// poses == the entry's slots 0-11, with players 0 .. humans-1 swapped into the rear wave if swapped.
-static void CheckPlaced(const StartSlotTableEntry* entry, const StartSlotPose poses[], int humans, bool swapped)
+// poses == the entry's slots 0-11, unswapped.
+static void CheckPlaced(const StartSlotTableEntry* entry, const StartSlotPose poses[])
 {
 	for (int p = 0; p < TABLE_SLOTS; p++)
-	{
-		int from = p;
-		if (swapped && p < humans)
-			from = AUTHORED + p;
-		else if (swapped && p >= AUTHORED && p < AUTHORED + humans)
-			from = p - AUTHORED;
-		CHECK_ENTRY(SamePose(poses[p], from < AUTHORED ? entry->authored[from] : entry->extra[from - AUTHORED]), entry);
-	}
+		CHECK_ENTRY(SamePose(poses[p], p < AUTHORED ? entry->authored[p] : entry->extra[p - AUTHORED]), entry);
+}
+
+// poses == the entry's slots 0-11 with the humans among players 0 .. numPlayers-1 moved to the
+// back (StartSlots_KeepHumansAtBack), and player 0, a human, on a new slot.
+static void CheckPlacedAtBack(const StartSlotTableEntry* entry, const StartSlotPose poses[], const bool isComputer[], int numPlayers)
+{
+	StartSlotPose expect[TABLE_SLOTS];
+	Fill(entry, TABLE_SLOTS, expect);
+	StartSlots_KeepHumansAtBack(expect, isComputer, numPlayers, AUTHORED, entry->authored[0].rot16);
+	for (int p = 0; p < TABLE_SLOTS; p++)
+		CHECK_ENTRY(PosesEqual(poses[p], expect[p]), entry);
+
+	bool newSlot = false;
+	for (int k = 0; k < START_SLOT_TABLE_EXTRA; k++)
+		newSlot |= SamePose(poses[0], entry->extra[k]);
+	CHECK_ENTRY(!isComputer[0] && newSlot, entry);
 }
 
 static void TestPlace(void)
@@ -652,16 +736,16 @@ static void TestPlace(void)
 		{
 			StartSlotPose poses[MAX_TEST_SLOTS];
 			CHECK(StartSlots_Place(items, n, mode, race->mapUnitWidth, race->mapUnitDepth, twoHumans, TABLE_SLOTS, TABLE_SLOTS, poses) == -1);
-			CheckPlaced(race, poses, 2, true);
+			CheckPlacedAtBack(race, poses, twoHumans, TABLE_SLOTS);
 		}
 
-				/* 7 CARS: ONLY SLOT 6 IS FILLED BEHIND THE GRID, SO ONLY PLAYER 0 MOVES THERE */
+				/* 7 CARS: ONLY SLOT 6 IS FILLED BEHIND THE GRID, SO PLAYER 0 MOVES THERE */
 
 		{
 			StartSlotPose poses[MAX_TEST_SLOTS];
 			CHECK(StartSlots_Place(items, n, GAME_MODE_MULTIPLAYERRACE, race->mapUnitWidth, race->mapUnitDepth, twoHumans, 7, TABLE_SLOTS, poses) == -1);
-			CHECK_ENTRY(SamePose(poses[0], race->extra[0]) && SamePose(poses[6], race->authored[0]), race);
-			CHECK_ENTRY(SamePose(poses[1], race->authored[1]) && SamePose(poses[7], race->extra[1]), race);
+			CheckPlacedAtBack(race, poses, twoHumans, 7);
+			CHECK_ENTRY(SamePose(poses[0], race->extra[0]) && SamePose(poses[7], race->extra[1]), race);
 		}
 
 				/* THE GAME'S MAX_PLAYERS: AT 6, THE AUTHORED GRID UNCHANGED */
@@ -669,7 +753,7 @@ static void TestPlace(void)
 		StartSlotPose poses[MAX_TEST_SLOTS], expect[MAX_TEST_SLOTS];
 		CHECK(StartSlots_Place(items, n, GAME_MODE_PRACTICE, race->mapUnitWidth, race->mapUnitDepth, twoHumans, MAX_PLAYERS, MAX_PLAYERS, poses) == -1);
 		Fill(race, MAX_PLAYERS, expect);
-		StartSlots_KeepHumansAtBack(expect, twoHumans, MAX_PLAYERS, AUTHORED);
+		StartSlots_KeepHumansAtBack(expect, twoHumans, MAX_PLAYERS, AUTHORED, race->authored[0].rot16);
 		for (int p = 0; p < MAX_PLAYERS; p++)
 		{
 			CHECK_ENTRY(PosesEqual(poses[p], expect[p]), race);
@@ -703,7 +787,7 @@ static void TestPlace(void)
 			const StartSlotTableEntry* entry = mode == GAME_MODE_CAPTUREFLAG ? ctf : battle;
 			StartSlotPose poses[MAX_TEST_SLOTS];
 			CHECK(StartSlots_Place(items, n, mode, entry->mapUnitWidth, entry->mapUnitDepth, twoHumans, TABLE_SLOTS, TABLE_SLOTS, poses) == -1);
-			CheckPlaced(entry, poses, 2, false);
+			CheckPlaced(entry, poses);
 		}
 
 				/* A DUPLICATE CTF SLOT MATTERS ONLY TO CTF */
