@@ -54,10 +54,39 @@ static void TestPlaceTables(void)
 	CHECK(GetPlaceAnnouncerEffect(-1) == -1);
 }
 
+static void TestCollisionListBudget(void)
+{
+	// A full list refuses new entries instead of writing past its end (an exact-size
+	// heap block lets ASan catch any stray write), and keeps the first hits it found.
+	enum { kCapacity = 4 };
+	CollisionRec* list = calloc(kCapacity, sizeof(*list));
+	CHECK(list);
+	short numCollisions = 0;
+	for (short i = 0; i < kCapacity; i++)
+	{
+		CollisionRec* rec = AppendCollisionRec(list, &numCollisions, kCapacity);
+		CHECK(rec == &list[i] && numCollisions == i + 1);
+		rec->targetBox = (Byte)(i + 1);
+	}
+	for (int i = 0; i < 100; i++)
+		CHECK(!AppendCollisionRec(list, &numCollisions, kCapacity));
+	CHECK(numCollisions == kCapacity);
+	for (short i = 0; i < kCapacity; i++)
+		CHECK(list[i].targetBox == i + 1);
+
+	// A count already out of range never yields an entry or moves further.
+	numCollisions = kCapacity + 5;
+	CHECK(!AppendCollisionRec(list, &numCollisions, kCapacity) && numCollisions == kCapacity + 5);
+	numCollisions = -1;
+	CHECK(!AppendCollisionRec(list, &numCollisions, kCapacity) && numCollisions == -1);
+	free(list);
+}
+
 int main(void)
 {
 	TestSuperTilePlayerFlags();
 	TestPlaceTables();
+	TestCollisionListBudget();
 	puts("Player limit tests passed");
 	return EXIT_SUCCESS;
 }

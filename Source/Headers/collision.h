@@ -16,6 +16,7 @@ typedef struct CollisionRec CollisionRec;
 
 //=================================
 
+CollisionRec* AppendCollisionRec(CollisionRec *list, short *numCollisions, short capacity);
 void CollisionDetect(ObjNode *baseNode, uint32_t CType, short startNumCollisions);
 
 Byte HandleCollisions(ObjNode *theNode, uint32_t cType, float deltaBounce);

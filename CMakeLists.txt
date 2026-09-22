@@ -613,7 +613,7 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 	cmr_add_gameplay_test(CroMagRallyVehiclePickerTests vehicle_picker Tests/VehiclePickerTests.c
 		Source/Player/VehiclePicker.c)
 	cmr_add_gameplay_test(CroMagRallyPlayerLimitTests player_limits Tests/PlayerLimitTests.c
-		Source/Terrain/TerrainResidency.c Source/Screens/InfobarPlace.c)
+		Source/Terrain/TerrainResidency.c Source/Screens/InfobarPlace.c Source/System/CollisionList.c)
 	if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 		# Linker section GC keeps only the place calculation from Checkpoints.c.
 		cmr_add_gameplay_test(CroMagRallyRacePlaceTests race_places Tests/RacePlaceTests.c Source/Terrain/Checkpoints.c)
