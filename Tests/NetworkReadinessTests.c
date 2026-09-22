@@ -55,7 +55,8 @@ void DoAlert(const char* format, ...)
 
 // Keep real level player initialization; isolate terrain/model/physics setup.
 int GetNumAgesCompleted(void) { return unlockedAges; }
-uint16_t RandomRange(unsigned short min, unsigned short max) { CHECK(min <= max); return min; }
+static int randomRangeCalls;
+uint16_t RandomRange(unsigned short min, unsigned short max) { CHECK(min <= max); randomRangeCalls++; return min; }
 static OGLPoint2D terrainQueries[MAX_PLAYERS];
 static int numTerrainQueries;
 float GetTerrainY(float x, float z)
@@ -894,6 +895,66 @@ static void LocalSplitScreenSeats(void)
     gNumLocalPlayers = gNumRealPlayers = 1;
 }
 
+// A network race with CPU fill: every peer seats the same CPU cars. They depend only on
+// the humans' choices, the track and the difficulty: not on local unlocks, not on whether
+// this peer saw a departure before level start, and never on the synced RNG.
+static void NetworkFillVehicles(void)
+{
+    static const short humanCars[SMALL_SESSION] = {CAR_TYPE_CHARIOT, CAR_TYPE_ROCK, CAR_TYPE_OBELISK};
+    short picks[2][2][2][MAX_PLAYERS];
+    for (int hard = 0; hard <= 1; hard++)
+    {
+        for (int ages = 0; ages <= 1; ages++)
+        {
+            for (int departed = 0; departed <= 1; departed++)
+            {
+                NSpGame* peers[MAX_CLIENTS];
+                BeginSession(SMALL_SESSION, peers);
+                gCPUFillThisRace = true;
+                gMyNetworkPlayerNum = 0;
+                InitPlayerInfo_Game();
+                CHECK(gNumTotalPlayers == MAX_PLAYERS);
+                for (int i = 0; i < SMALL_SESSION; i++)
+                    gPlayerInfo[i].vehicleType = humanCars[i];
+                if (departed)
+                    ApplyBecomeBot(2); // this peer processed player 2's leave before level start
+                gDifficulty = hard ? DIFFICULTY_HARD : DIFFICULTY_MEDIUM;
+                unlockedAges = ages ? NUM_AGES : 0; // peers may have different tournament saves
+                gTrackNum = 3;
+                randomRangeCalls = 0;
+                InitPlayersAtStartOfLevel();
+                CHECK(randomRangeCalls == 0);
+                for (int i = 0; i < gNumTotalPlayers; i++)
+                {
+                    CHECK(gPlayerInfo[i].isComputer == (i >= SMALL_SESSION || (departed && i == 2)));
+                    if (i < SMALL_SESSION)
+                        CHECK(gPlayerInfo[i].vehicleType == humanCars[i]); // a replacement keeps its car
+                    CHECK(gPlayerInfo[i].vehicleType >= 0 && gPlayerInfo[i].vehicleType < NUM_LAND_CAR_TYPES);
+                    picks[hard][ages][departed][i] = gPlayerInfo[i].vehicleType;
+                }
+                EndSession(peers);
+            }
+        }
+        for (int view = 1; view < 4; view++)
+            CHECK(!memcmp(picks[hard][0][0], picks[hard][view / 2][view % 2], sizeof(picks[hard][0][0])));
+    }
+
+    // Below Hard: the best cars of the whole roster that no human drives, best first,
+    // then the same order again.
+    short bestFree[NUM_LAND_CAR_TYPES];
+    int numFree = 0;
+    for (int type = NUM_LAND_CAR_TYPES - 1; type >= 0; type--)
+    {
+        if (type != humanCars[0] && type != humanCars[1] && type != humanCars[2])
+            bestFree[numFree++] = type;
+    }
+    CHECK(bestFree[0] == CAR_TYPE_CATAPULT && bestFree[1] == CAR_TYPE_TROJANHORSE && bestFree[2] == CAR_TYPE_TURTLE);
+    for (int i = SMALL_SESSION; i < MAX_PLAYERS; i++)
+        CHECK(picks[0][0][0][i] == bestFree[(i - SMALL_SESSION) % numFree]);
+    gCPUFillThisRace = false;
+    gNumLocalPlayers = gNumRealPlayers = 1;
+}
+
 int main(void)
 {
     Readiness(VEHICLE_READY_TIMEOUT_MS, kNetSequence_WaitingForPlayerVehicles, kNetSequence_GotAllPlayerVehicles);
@@ -925,6 +986,7 @@ int main(void)
     LocalCPUVehicles();
     StartHeightSampling();
     LocalSplitScreenSeats();
-    puts("Readiness, paused-leave, full-lobby, local CPU vehicle, start-height and split-screen seat tests passed");
+    NetworkFillVehicles();
+    puts("Readiness, paused-leave, full-lobby, local CPU vehicle, start-height, split-screen seat and network fill tests passed");
     return 0;
 }

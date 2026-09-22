@@ -611,7 +611,7 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 	endfunction()
 	cmr_add_gameplay_test(CroMagRallyPathTests paths Tests/PathTests.c Source/Terrain/Paths.c)
 	cmr_add_gameplay_test(CroMagRallyVehiclePickerTests vehicle_picker Tests/VehiclePickerTests.c
-		Source/Player/VehiclePicker.c)
+		Source/Player/VehiclePicker.c Source/System/DeterministicMath.c)
 	cmr_add_gameplay_test(CroMagRallyPlayerLimitTests player_limits Tests/PlayerLimitTests.c
 		Source/Terrain/TerrainResidency.c Source/Screens/InfobarPlace.c Source/System/CollisionList.c)
 	if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

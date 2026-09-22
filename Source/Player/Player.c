@@ -163,6 +163,7 @@ void InitPlayersAtStartOfLevel(void)
 int		i,j;
 int		numCPUVehiclesPicked = 0;
 CPUVehiclePickRules	cpuVehicleRules = { .randomRange = SyncedCPUVehicleRandom };
+SharedCPUVehicleSeed	sharedCPUVehicleSeed;
 
 	gWorstHumanPlace = 0;
 	gNumPlayersEliminated = 0;
@@ -186,6 +187,25 @@ CPUVehiclePickRules	cpuVehicleRules = { .randomRange = SyncedCPUVehicleRandom };
 	cpuVehicleRules.difficulty = gDifficulty;
 
 
+		/* NETWORK CPU FILL CARS COME FROM SHARED STATE */
+		//
+		// Every peer must seat the same cars, so they depend only on what the peers
+		// share: the humans' choices (including players who left since), the track and
+		// the difficulty. Never on local unlocks or the synced RNG.
+		//
+
+	if (gNetGameInProgress)
+	{
+		short	humanCars[MAX_PLAYERS];
+
+		for (i = 0; i < gNumRealPlayers; i++)
+			humanCars[i] = gPlayerInfo[i].vehicleType;
+
+		InitSharedCPUVehiclePickRules(&cpuVehicleRules, &sharedCPUVehicleSeed,
+				humanCars, gNumRealPlayers, gDifficulty, gTrackNum);
+	}
+
+
 		/* KEEP CPU DRIVERS FROM LOOKING LIKE THE HUMANS */
 		//
 		// Humans picked their looks after InitPlayerInfo_Game dealt them out. Local
@@ -200,10 +220,10 @@ CPUVehiclePickRules	cpuVehicleRules = { .randomRange = SyncedCPUVehicleRandom };
 
 	for (i = 0; i < gNumTotalPlayers; i++)
 	{
-		// Network replacements retain the shared selection (or its default).
-		// Local unlock progress must not change their vehicle or consume synced RNG.
-		// Pick in player order: Hard draws stay interleaved with SetPhysicsForVehicleType's.
-		if (gPlayerInfo[i].isComputer && !gNetGameInProgress)		// set local CPU vehicle type
+		// Network replacements (human slots) retain the shared selection (or its default);
+		// network CPU fill cars (every slot after the humans') get the shared picks above.
+		// Pick in player order: local Hard draws stay interleaved with SetPhysicsForVehicleType's.
+		if (gPlayerInfo[i].isComputer && (!gNetGameInProgress || i >= gNumRealPlayers))	// set CPU vehicle type
 			gPlayerInfo[i].vehicleType = PickCPUVehicle(&cpuVehicleRules, numCPUVehiclesPicked++);
 
 		gPlayerInfo[i].coord.y = GetTerrainY(gPlayerInfo[i].startX,gPlayerInfo[i].startZ);
