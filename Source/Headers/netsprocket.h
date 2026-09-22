@@ -166,6 +166,8 @@ NSpPlayerID NSpGame_AcceptNewClient(NSpGameReference gameRef);
 int NSpGame_StopAcceptingNewClients(NSpGameReference gameRef);
 int NSpGame_AckJoinRequest(NSpGameReference gameRef, NSpMessageHeader* inMessage);
 int NSpGame_GetNumActivePlayers(NSpGameReference gameRef);
+int NSpGame_GetMaxPlayers(void);										// host + clients one game can seat
+int NSpGame_GetNumRefusedClients(NSpGameReference gameRef);				// host: joins refused because the game was full
 uint32_t NSpGame_GetActivePlayersIDMask(NSpGameReference gameRef);
 NSpPlayerID NSpGame_GetNthActivePlayerID(NSpGameReference gameRef, int n);
 int NSpGame_StartAdvertising(NSpGameReference gameRef);

@@ -3,6 +3,7 @@
 
 import os
 from pathlib import Path
+import socket
 import subprocess
 import sys
 import tempfile
@@ -64,6 +65,33 @@ def main() -> None:
             (["--port", "5000", "--join-address", "127.0.0.1:5001"], "--port cannot be combined"),
             (["--join-address", "127.0.0.1", "--track", "1"], "--track cannot be used with --join-address")):
         run(binary, args, rejection=message)
+
+    # Net smoke options (Tests/NetworkSmokeTests.py) are smoke-only and validated strictly.
+    capacity = int(subprocess.run([str(binary), "--print-max-net-players"], stdout=subprocess.PIPE,
+                                  text=True, timeout=45, check=True).stdout)
+    if capacity < 2:
+        raise AssertionError(f"--print-max-net-players reported {capacity}")
+    host = ["--host", "--track", "1", "--smoke-test-frames", "3"]
+    for players in ("1", str(capacity + 1), "garbage"):
+        run(binary, [*host, "--smoke-net-players", players], rejection="Invalid --smoke-net-players")
+    for args, message in (
+            (["--smoke-test-frames", "3"], "--smoke-test-frames requires --track or --join-address"),
+            (["--join", "--smoke-test-frames", "3"], "cannot use --join"),
+            (["--host", "--track", "1", "--smoke-net-players", "2"],
+             "--smoke-net-players requires --host and --smoke-test-frames"),
+            (["--track", "1", "--smoke-test-frames", "3", "--smoke-net-players", "2"],
+             "--smoke-net-players requires --host and --smoke-test-frames"),
+            ([*host, "--smoke-net-refusals", "1"], "--smoke-net-refusals requires --smoke-net-players"),
+            ([*host, "--smoke-net-players", str(capacity - 1), "--smoke-net-refusals", "1"],
+             f"--smoke-net-refusals requires --smoke-net-players {capacity}")):
+        run(binary, args, rejection=message)
+
+    # An unattended client that cannot reach a host ends cleanly, with a nonzero exit.
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    run(binary, ["--join-address", f"127.0.0.1:{port}", "--no-vsync", "--smoke-test-frames", "3"],
+        rejection="SMOKE: net session ended: THE HOST HAS BECOME UNREACHABLE.")
 
 
 if __name__ == "__main__":

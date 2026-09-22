@@ -765,6 +765,36 @@ static void DirectJoin(void)
     memset(&gCommandLine, 0, sizeof(gCommandLine));
 }
 
+// Smoke-only auto-start (--smoke-net-players): the host starts once the expected players
+// joined and the extra join the smoke test sends was refused, and never without the options.
+static void SmokeLobbyAutoStart(void)
+{
+    NSpGame* peers[MAX_CLIENTS];
+    NSpGame* host = BeginSession(FULL_SESSION - 1, peers);
+    gNetSequenceState = kNetSequence_HostLobbyOpen;
+    gCommandLine.smokeTestFrames = 1;
+    gCommandLine.smokeNetPlayers = FULL_SESSION;
+    gCommandLine.smokeNetRefusals = 1;
+    CHECK(DoNetGatherControls() == 0 && gNetSequenceState == kNetSequence_HostLobbyOpen);
+
+    peers[FULL_SESSION - 1] = Join(host); // every seat is taken now
+    for (int id = 1; id < FULL_SESSION; id++)
+        Drain(peers[id]);
+    CHECK(DoNetGatherControls() == 0 && gNetSequenceState == kNetSequence_HostLobbyOpen);
+    CHECK(NSpGame_GetNumRefusedClients(host) == 0);
+    ExpectJoinRefused(host);
+    CHECK(NSpGame_GetNumRefusedClients(host) == 1);
+
+    memset(&gCommandLine, 0, sizeof(gCommandLine)); // normal play waits for the host to confirm
+    CHECK(DoNetGatherControls() == 0 && gNetSequenceState == kNetSequence_HostLobbyOpen);
+    gCommandLine.smokeTestFrames = 1;
+    gCommandLine.smokeNetPlayers = FULL_SESSION;
+    gCommandLine.smokeNetRefusals = 1;
+    CHECK(DoNetGatherControls() == 0 && gNetSequenceState == kNetSequence_HostReadyToStartGame);
+    memset(&gCommandLine, 0, sizeof(gCommandLine));
+    EndSession(peers);
+}
+
 int main(void)
 {
     Readiness(VEHICLE_READY_TIMEOUT_MS, kNetSequence_WaitingForPlayerVehicles, kNetSequence_GotAllPlayerVehicles);
@@ -792,6 +822,7 @@ int main(void)
     CapacityReadiness(true);
     CapacityInGameDepartures();
     DirectJoin();
+    SmokeLobbyAutoStart();
     puts("Readiness, paused-leave and full-lobby tests passed");
     return 0;
 }

@@ -120,6 +120,8 @@ typedef struct NSpGame
 
 	int							nextPollIndex;
 
+	int							numRefusedClients;	// joins turned away because every slot was taken
+
 	SendRing					clientSendRing;	// client-side outbound queue for clientToHostSocket (zero-init by AllocPtrClear in NSpGame_Alloc)
 
 	uint32_t					hostLastHeard;	// CMR7 Stage 4: client tracks last-received-bytes time from host (ms, SDL_GetTicks)
@@ -603,6 +605,7 @@ NSpPlayerID NSpGame_AcceptNewClient(NSpGameReference gameRef)
 	{
 		// All slots used up
 		printf("%s: A new client wants to connect, but the game is full!\n", __func__);
+		game->numRefusedClients++;
 
 		NSpJoinDeniedMessage* deniedMessage = AllocMessage(NSpJoinDenied, kNSpHostID, kNSpUnspecifiedEndpoint);
 		snprintf(deniedMessage->reason, sizeof(deniedMessage->reason), "THE GAME IS FULL.");
@@ -1636,6 +1639,17 @@ int NSpGame_Dispose(NSpGameReference inGame, int disposeFlags)
 	SafeDisposePtr((Ptr) game);
 
 	return kNSpRC_OK;
+}
+
+int NSpGame_GetMaxPlayers(void)
+{
+	return MAX_CLIENTS;
+}
+
+int NSpGame_GetNumRefusedClients(NSpGameReference gameRef)
+{
+	NSpGame* game = NSpGame_Unbox(gameRef);
+	return game ? game->numRefusedClients : 0;
 }
 
 int NSpGame_GetNumActivePlayers(NSpGameReference gameRef)

@@ -10,6 +10,7 @@
 #include "PommeFiles.h"
 #include "PommeInit.h"
 #include <charconv>
+#include <cstdio>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -18,9 +19,13 @@
 extern "C" {
 #include "game.h"
 
+// Declared in netsprocket.h, which pulls in winsock on Windows.
+int NSpGame_GetMaxPlayers(void);
+
 SDL_Window *gSDLWindow = nullptr;
 FSSpec gDataSpec;
 CommandLineOptions gCommandLine;
+Boolean gSmokeTestPassed; // set when a --smoke-test-frames run reaches its marker
 int gCurrentAntialiasingLevel;
 }
 
@@ -189,6 +194,16 @@ static void ParseCommandLine(int argc, char **argv) {
     } else if (argument == "--smoke-test-frames") {
       gCommandLine.smokeTestFrames =
           ParseIntegerArgument("--smoke-test-frames", argc, argv, &i, 1, 600);
+    } else if (argument == "--smoke-net-players") {
+      // smoke only: a --host run starts the race once this many players (itself included) joined
+      gCommandLine.smokeNetPlayers = ParseIntegerArgument(
+          "--smoke-net-players", argc, argv, &i, 2, NSpGame_GetMaxPlayers());
+    } else if (argument == "--smoke-net-refusals") {
+      // smoke only: ...and once this many further joins were refused because the game is full
+      gCommandLine.smokeNetRefusals = ParseIntegerArgument(
+          "--smoke-net-refusals", argc, argv, &i, 1, NSpGame_GetMaxPlayers());
+    } else if (argument == "--print-max-net-players") {
+      gCommandLine.printMaxNetPlayers = true;	// dev/test: report how many players one LAN game seats
     } else if (argument == "--car") {
       gCommandLine.car = ParseIntegerArgument("--car", argc, argv, &i, 1,
                                               NUM_LAND_CAR_TYPES);
@@ -247,9 +262,21 @@ static void ParseCommandLine(int argc, char **argv) {
   if (gCommandLine.netJoinDirect && gCommandLine.bootToTrack) {
     throw std::invalid_argument("--track cannot be used with --join-address; the host chooses the track");
   }
+  // A smoke run is unattended: it needs a track, or a host to direct-join.
   if (gCommandLine.smokeTestFrames &&
-      (!gCommandLine.bootToTrack || gCommandLine.netJoin)) {
-    throw std::invalid_argument("--smoke-test-frames requires --track and cannot use --join");
+      (discoveryJoin || (!gCommandLine.bootToTrack && !gCommandLine.netJoinDirect))) {
+    throw std::invalid_argument(
+        "--smoke-test-frames requires --track or --join-address and cannot use --join");
+  }
+  if (gCommandLine.smokeNetPlayers &&
+      (!gCommandLine.netHost || !gCommandLine.smokeTestFrames)) {
+    throw std::invalid_argument("--smoke-net-players requires --host and --smoke-test-frames");
+  }
+  // Joins are only refused once every seat is taken.
+  if (gCommandLine.smokeNetRefusals &&
+      gCommandLine.smokeNetPlayers != NSpGame_GetMaxPlayers()) {
+    throw std::invalid_argument("--smoke-net-refusals requires --smoke-net-players " +
+                                std::to_string(NSpGame_GetMaxPlayers()));
   }
 }
 
@@ -262,6 +289,12 @@ static void Boot(int argc, char **argv) {
 #endif
 
   ParseCommandLine(argc, argv);
+
+  if (gCommandLine.printMaxNetPlayers) {
+    // For test scripts (Tests/NetworkSmokeTests.py): answer before initializing anything.
+    printf("%d\n", NSpGame_GetMaxPlayers());
+    throw Pomme::QuitRequest();
+  }
 
   SDL_Log("Boot: Starting...");
 
@@ -407,6 +440,14 @@ int main(int argc, char **argv) {
 #endif
 
   Shutdown();
+
+  // A smoke run that quit early (e.g. refused by a full LAN game) must not look
+  // like a pass to scripts. (No "SMOKE:" prefix: tests read that as reaching one.)
+  if (success && gCommandLine.smokeTestFrames && !gSmokeTestPassed) {
+    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                 "Smoke test ended before reaching its completion marker");
+    return 1;
+  }
 
   if (!success) {
     SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Uncaught exception: %s",

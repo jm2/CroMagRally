@@ -953,12 +953,64 @@ static void CheckCheats(void)
 
 
 
+/**************** SMOKE TEST (--smoke-test-frames) ************************/
+//
+// Returns true when the run should leave the game loop after this frame.
+//
+// A net race counts simulated frames, which every peer steps in lockstep with the host.
+// A client stops after its frames. The host keeps racing until every client has left (the
+// last departure ends its game), so no client sees the host quit before its own frames.
+//
+
+#define	SMOKE_NET_HOST_LINGER_MS	30000
+
+static int		gSmokeFramesRemaining;
+static uint64_t	gSmokeHostLingerDeadline;
+
+static Boolean UpdateSmokeTestFrame(void)
+{
+	if (gSmokeFramesRemaining > 0)
+	{
+		if (!gNetGameInProgress)
+		{
+			if (--gSmokeFramesRemaining > 0)
+				return false;
+			SDL_Log("SMOKE: practice track %d rendered %d frames", gTrackNum + 1, gCommandLine.smokeTestFrames);
+			gSmokeTestPassed = true;
+			return true;
+		}
+
+		if (gSimulationFrame < (uint32_t) gCommandLine.smokeTestFrames)
+			return false;
+
+		gSmokeFramesRemaining = 0;
+		SDL_Log("SMOKE: net race track %d player %d/%d simulated %d frames",
+				gTrackNum + 1, gMyNetworkPlayerNum + 1, gNumRealPlayers, gCommandLine.smokeTestFrames);
+		if (gIsNetworkClient)
+		{
+			gSmokeTestPassed = true;
+			return true;
+		}
+		gSmokeHostLingerDeadline = SDL_GetTicks() + SMOKE_NET_HOST_LINGER_MS;
+	}
+	else if (gSmokeHostLingerDeadline && SDL_GetTicks() >= gSmokeHostLingerDeadline)
+	{
+		SDL_Log("SMOKE: net race host gave up waiting for its clients to leave");
+		return true;
+	}
+
+	return false;
+}
+
+
 /**************** PLAY AREA ************************/
 
 static void PlayArea(void)
 {
 	Boolean schedulePause = false;
-	int smokeFramesRemaining = gCommandLine.smokeTestFrames;
+
+	gSmokeFramesRemaining = gCommandLine.smokeTestFrames;
+	gSmokeHostLingerDeadline = 0;
 
 
 	/* IF DOING NET GAME THEN WAIT FOR SYNC */
@@ -1111,11 +1163,8 @@ static void PlayArea(void)
 
 		OGL_DrawScene(DrawTerrain);
 
-		if (smokeFramesRemaining > 0 && --smokeFramesRemaining == 0)
-		{
-			SDL_Log("SMOKE: practice track %d rendered %d frames", gTrackNum + 1, gCommandLine.smokeTestFrames);
+		if (gCommandLine.smokeTestFrames && UpdateSmokeTestFrame())
 			break;
-		}
 
 		//
 		// 5. FPS CAP (LCD SYNC - NETWORK GAMES ONLY)
@@ -1205,6 +1254,12 @@ static void PlayArea(void)
 	}
 
 	gIsInGame = false;
+
+	if (gSmokeHostLingerDeadline && gNetSequenceState == kNetSequence_OfflineEverybodyLeft)	// smoke host: every client left after its frames
+	{
+		SDL_Log("SMOKE: net race host saw all clients leave");
+		gSmokeTestPassed = true;
+	}
 }
 
 

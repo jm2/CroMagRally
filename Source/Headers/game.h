@@ -71,6 +71,7 @@ extern Byte						gDebugMode;
 extern CheckpointDefType		gCheckpointList[MAX_CHECKPOINTS];
 extern CollisionRec				gCollisionList[];
 extern CommandLineOptions		gCommandLine;
+extern Boolean					gSmokeTestPassed;
 extern const float				gWaterHeights[NUM_TRACKS][6];
 extern const InputBinding		kDefaultInputBindings[NUM_CONTROL_NEEDS];
 extern const OGLColorRGB		kCavemanSkinColors[NUM_CAVEMAN_SKINS];
