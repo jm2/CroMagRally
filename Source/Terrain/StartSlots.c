@@ -21,6 +21,10 @@ _Static_assert(MAX_PLAYERS <= START_SLOTS_MAX, "StartSlots_Place fills at most S
 /****************************/
 
 #define	RULE_ROW_GAP	1300.0				// gap between a wave of slots and the one it copies
+#define	RULE_SPACING	900					// a rule slot starts at least this far from every other slot
+											// (tools/gen_start_slots.py MIN_SPACING)
+#define	RULE_PUSH_STEP	100					// else it moves on in its wave's direction in these steps,
+#define	RULE_PUSH_MAX	300					// at most this many (a lone slot: START_SLOTS_MAX in a line)
 
 		// Car forward (-sin rotY, -cos rotY) for each heading in 1/16 turns (Checkpoints.c aims
 		// the same way). Literals rather than libm, so every platform derives the same slots.
@@ -139,6 +143,39 @@ static int RuleCoord(double v, int mapUnitSize)
 }
 
 
+/********************** PLACE A RULE SLOT **************************/
+//
+// Player p's rule slot is (x, z), moved RULE_PUSH_STEP at a time along (ux, uz) until it is
+// RULE_SPACING from every slot placed so far (authored, from the table, or earlier rule slots),
+// for at most RULE_PUSH_MAX steps. Where the rule's layout doesn't fit the map's (a team line
+// closer than a car length, a single authored battle slot), cars would otherwise start inside
+// each other.
+//
+
+static void PlaceRuleSlot(int p, double x, double z, double ux, double uz, float rotY, int mapUnitWidth, int mapUnitDepth,
+						StartSlotPose poses[], bool placed[], int numSlots)
+{
+	int px = 0, pz = 0;
+
+	for (int k = 0; k <= RULE_PUSH_MAX; k++)
+	{
+		px = RuleCoord(x + ux * (RULE_PUSH_STEP * k), mapUnitWidth);
+		pz = RuleCoord(z + uz * (RULE_PUSH_STEP * k), mapUnitDepth);
+
+		bool clear = true;
+		for (int q = 0; clear && q < numSlots; q++)
+		{
+			const int64_t dx = (int64_t) px - poses[q].x, dz = (int64_t) pz - poses[q].z;
+			clear = !placed[q] || dx * dx + dz * dz >= (int64_t) RULE_SPACING * RULE_SPACING;
+		}
+		if (clear)
+			break;
+	}
+	poses[p] = (StartSlotPose) { px, pz, rotY };
+	placed[p] = true;
+}
+
+
 /********************** RULE SOURCE **************************/
 //
 // The authored slot the rule derives player p's slot from, and how many waves out it goes. On
@@ -175,11 +212,13 @@ static void RuleSource(StartSlotSet set, int n, int p, int* src, int* wave)
 //   CTF:    a parallel column beside each team's line, on the side facing the arena, copying
 //           the team's own slots; a team with a single slot lines up in front of it
 //   battle: a wider ring around the authored cluster, rotated half a slot
-// (From the 12-player prototype.)
+// (From the 12-player prototype.) A slot too close to one placed before it moves on in its
+// wave's direction (PlaceRuleSlot). Fills every slot not yet placed[].
 //
 
 static void FillByRule(StartSlotSet set, int mapUnitWidth, int mapUnitDepth,
-						const StartSlot items[], const bool authored[], int numSlots, StartSlotPose poses[])
+						const StartSlot items[], const bool authored[], int numSlots,
+						StartSlotPose poses[], bool placed[])
 {
 	const int n = StartSlots_CountAuthored(authored, numSlots);
 	if (n == 0)												// nothing to derive from: leave them at (0,0) as always
@@ -211,14 +250,13 @@ static void FillByRule(StartSlotSet set, int mapUnitWidth, int mapUnitDepth,
 
 		for (int p = n; p < numSlots; p++)
 		{
-			if (authored[p])
+			if (placed[p])
 				continue;
 			int from, wave;
 			RuleSource(set, n, p, &from, &wave);
 			const StartSlot* src = &items[from];
-			poses[p].x = RuleCoord(src->x - fx * shift * wave, mapUnitWidth);
-			poses[p].z = RuleCoord(src->z - fz * shift * wave, mapUnitDepth);
-			poses[p].rotY = StartSlot_RotY(src->rot16);
+			PlaceRuleSlot(p, src->x - fx * shift * wave, src->z - fz * shift * wave, -fx, -fz,		// further back
+						StartSlot_RotY(src->rot16), mapUnitWidth, mapUnitDepth, poses, placed, numSlots);
 		}
 	}
 	else if (set == START_SLOT_SET_CTF)
@@ -256,15 +294,14 @@ static void FillByRule(StartSlotSet set, int mapUnitWidth, int mapUnitDepth,
 
 		for (int p = n; p < numSlots; p++)
 		{
-			if (authored[p])
+			if (placed[p])
 				continue;
 			const int team = p & 1;
 			int from, wave;
 			RuleSource(set, n, p, &from, &wave);
 			const StartSlot* src = &items[from];
-			poses[p].x = RuleCoord(src->x + stepX[team] * stepLen[team] * wave, mapUnitWidth);
-			poses[p].z = RuleCoord(src->z + stepZ[team] * stepLen[team] * wave, mapUnitDepth);
-			poses[p].rotY = StartSlot_RotY(src->rot16);
+			PlaceRuleSlot(p, src->x + stepX[team] * stepLen[team] * wave, src->z + stepZ[team] * stepLen[team] * wave,
+						stepX[team], stepZ[team], StartSlot_RotY(src->rot16), mapUnitWidth, mapUnitDepth, poses, placed, numSlots);
 		}
 	}
 	else
@@ -275,7 +312,7 @@ static void FillByRule(StartSlotSet set, int mapUnitWidth, int mapUnitDepth,
 
 		for (int p = n; p < numSlots; p++)
 		{
-			if (authored[p])
+			if (placed[p])
 				continue;
 			int from, wave;
 			RuleSource(set, n, p, &from, &wave);
@@ -285,9 +322,16 @@ static void FillByRule(StartSlotSet set, int mapUnitWidth, int mapUnitDepth,
 			const double scale = r > 1.0 ? (r + RULE_ROW_GAP * wave) / r : 1.0;
 			dx *= scale;
 			dz *= scale;
-			poses[p].x = RuleCoord(cx + dx * c + dz * s, mapUnitWidth);
-			poses[p].z = RuleCoord(cz - dx * s + dz * c, mapUnitDepth);
-			poses[p].rotY = StartSlot_RotY(src->rot16) + theta;
+			const double ox = dx * c + dz * s, oz = dz * c - dx * s;	// the turned offset from the centre
+			const double ro = sqrt(ox * ox + oz * oz);
+			double ux = -kHeading[src->rot16 & 15][0], uz = -kHeading[src->rot16 & 15][1];	// at the centre: backwards
+			if (ro > 1.0)
+			{
+				ux = ox / ro;												// else outwards
+				uz = oz / ro;
+			}
+			PlaceRuleSlot(p, cx + ox, cz + oz, ux, uz, StartSlot_RotY(src->rot16) + theta,
+						mapUnitWidth, mapUnitDepth, poses, placed, numSlots);
 		}
 	}
 }
@@ -306,9 +350,14 @@ const StartSlotTableEntry* StartSlots_Fill(StartSlotSet set, int mapUnitWidth, i
 										StartSlotPose poses[])
 {
 	bool missing = false;
+	bool placed[START_SLOTS_MAX];
+
+	if (numSlots > START_SLOTS_MAX)
+		numSlots = START_SLOTS_MAX;
 
 	for (int p = 0; p < numSlots; p++)
 	{
+		placed[p] = authored[p];
 		if (authored[p])
 			poses[p] = (StartSlotPose) { items[p].x, items[p].z, StartSlot_RotY(items[p].rot16) };
 		else
@@ -331,7 +380,7 @@ const StartSlotTableEntry* StartSlots_Fill(StartSlotSet set, int mapUnitWidth, i
 		return entry;
 	}
 
-	FillByRule(set, mapUnitWidth, mapUnitDepth, items, authored, numSlots, poses);
+	FillByRule(set, mapUnitWidth, mapUnitDepth, items, authored, numSlots, poses, placed);
 	return NULL;
 }
 

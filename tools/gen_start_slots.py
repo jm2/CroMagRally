@@ -590,11 +590,31 @@ def rule_source(set_name, n, p):
     return p % n, p // n
 
 
+RULE_PUSH_STEP, RULE_PUSH_MAX = 100, 300
+
+
+def rule_coord(v, size):
+    """StartSlots.c RuleCoord: truncate toward zero, kept on the playfield."""
+    return 0 if v < 0 else size - 1 if v > size - 1 else math.trunc(v)
+
+
 def rule_slots(ctx):
     """The procedural rule (StartSlots.c, from the 12-player prototype) for players 6-11:
-    [(player, x, z, heading in radians, source slot)]."""
+    [(player, x, z, heading in radians, source slot)]. Like PlaceRuleSlot, a slot within
+    MIN_SPACING of one placed before it moves on in its wave's direction."""
     a = ctx.authored
     n = len(a)
+    placed = [s.pos for s in a]
+    w, d = ctx.md.pf.unitW, ctx.md.pf.unitD
+
+    def place(x, z, ux, uz):
+        for k in range(RULE_PUSH_MAX + 1):
+            px, pz = rule_coord(x + ux * (RULE_PUSH_STEP * k), w), rule_coord(z + uz * (RULE_PUSH_STEP * k), d)
+            if all((px - qx) ** 2 + (pz - qz) ** 2 >= MIN_SPACING ** 2 for qx, qz in placed):
+                break
+        placed.append((px, pz))
+        return px, pz
+
     th = 2 * math.pi / (2 * n)                          # battle ring: half a slot
     cos_th, sin_th = (math.sqrt(3) / 2, 0.5) if n == 6 else (math.cos(th), math.sin(th))
     step = {}
@@ -619,19 +639,23 @@ def rule_slots(ctx):
             f = ctx.fwd
             d = [ctx.depth(s.pos) for s in a]
             shift = max(d) - min(d) + RACE_GAP
-            x, z, rot = src.x - f[0] * shift * wave, src.z - f[1] * shift * wave, 2 * math.pi * src.rot16 / 16
+            x, z = place(src.x - f[0] * shift * wave, src.z - f[1] * shift * wave, -f[0], -f[1])
+            rot = 2 * math.pi * src.rot16 / 16
         elif ctx.set == SET_CTF:
             px, pz, ln = step[p & 1]
-            x, z, rot = src.x + px * ln * wave, src.z + pz * ln * wave, 2 * math.pi * src.rot16 / 16
+            x, z = place(src.x + px * ln * wave, src.z + pz * ln * wave, px, pz)
+            rot = 2 * math.pi * src.rot16 / 16
         else:
             dx, dz = src.x - ctx.cx, src.z - ctx.cz
             r = dist((dx, dz), (0, 0))
             k = (r + RACE_GAP * wave) / r if r > 1 else 1
             dx, dz = dx * k, dz * k
-            x = ctx.cx + dx * cos_th + dz * sin_th
-            z = ctx.cz - dx * sin_th + dz * cos_th
+            ox, oz = dx * cos_th + dz * sin_th, dz * cos_th - dx * sin_th
+            ro = dist((ox, oz), (0, 0))
+            f = heading(src.rot16)
+            x, z = place(ctx.cx + ox, ctx.cz + oz, *((ox / ro, oz / ro) if ro > 1 else (-f[0], -f[1])))
             rot = 2 * math.pi * src.rot16 / 16 + th
-        out.append((p, math.trunc(x), math.trunc(z), rot, src))
+        out.append((p, x, z, rot, src))
     return out
 
 

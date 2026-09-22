@@ -466,6 +466,67 @@ static void TestRuleCtfTeams(void)
 }
 
 
+/*************** RULE SLOTS NEVER START INSIDE ANOTHER CAR ****************/
+
+static void TestRuleKeepsSlotsApart(void)
+{
+			/* EVERY SHIPPED LAYOUT ON A MODIFIED MAP */
+
+	for (int e = 0; e < kNumStartSlotTableEntries; e++)
+	{
+		const StartSlotTableEntry* entry = &kStartSlotTable[e];
+		StartSlot items[MAX_TEST_SLOTS];
+		bool authored[MAX_TEST_SLOTS];
+		StartSlotPose poses[MAX_TEST_SLOTS];
+
+		LoadAuthored(entry, items, authored, MAX_TEST_SLOTS);
+		items[0].x += 50;											// no longer the shipped map
+		CHECK_ENTRY(StartSlots_Fill(entry->set, entry->mapUnitWidth, entry->mapUnitDepth, items, authored,
+									MAX_TEST_SLOTS, poses) == NULL, entry);
+		CheckDistinctAndSpaced(entry, poses, MAX_TEST_SLOTS);
+	}
+
+			/* ONE BATTLE SLOT: THE RING HAS NO RADIUS, SO THE OTHERS LINE UP BEHIND IT */
+
+	{
+		StartSlot items[START_SLOTS_MAX] = {{30000, 30000, 0}};
+		bool authored[START_SLOTS_MAX] = {true};
+		StartSlotPose poses[START_SLOTS_MAX];
+
+		CHECK(StartSlots_Fill(START_SLOT_SET_BATTLE, 128000, 128000, items, authored, START_SLOTS_MAX, poses) == NULL);
+		for (int p = 1; p < START_SLOTS_MAX; p++)
+		{
+			CHECK(poses[p].x == 30000 && poses[p].z == 30000 + 900 * p);			// behind, facing away
+			for (int q = 0; q < p; q++)
+				CHECK(Dist2(poses[p].x, poses[p].z, poses[q].x, poses[q].z) >= (int64_t) MIN_SPACING * MIN_SPACING);
+		}
+	}
+
+			/* CTF TEAM LINES WITH SLOTS 600 APART: THE COLUMN STEPS OUT FURTHER */
+
+	{
+		StartSlot items[MAX_TEST_SLOTS] = {{0, 0, 0}};
+		bool authored[MAX_TEST_SLOTS] = {false};
+		StartSlotPose poses[MAX_TEST_SLOTS];
+
+		for (int p = 0; p < AUTHORED; p++)
+		{
+			items[p] = (StartSlot) { (p & 1) ? 40000 : 20000, 29000 + 600 * (p / 2), (p & 1) ? 4 : 12 };
+			authored[p] = true;
+		}
+		CHECK(StartSlots_Fill(START_SLOT_SET_CTF, 64000, 64000, items, authored, MAX_TEST_SLOTS, poses) == NULL);
+		CHECK(poses[6].x == 20900 && poses[6].z == 29000);			// 600 out, pushed to 900 from p0
+		CHECK(poses[7].x == 39100 && poses[7].z == 29000);
+		for (int p = AUTHORED; p < MAX_TEST_SLOTS; p++)
+		{
+			CHECK((p & 1) ? poses[p].x > 30000 : poses[p].x < 30000);
+			for (int q = 0; q < p; q++)
+				CHECK(Dist2(poses[p].x, poses[p].z, poses[q].x, poses[q].z) >= (int64_t) MIN_SPACING * MIN_SPACING);
+		}
+	}
+}
+
+
 /*************** THE TABLE NEEDS THE MAP EXACTLY AS SHIPPED ****************/
 
 static void TestTableNeedsExactMatch(void)
@@ -654,6 +715,7 @@ int main(void)
 	TestRuleRaceGrid();
 	TestRuleArena();
 	TestRuleCtfTeams();
+	TestRuleKeepsSlotsApart();
 	TestTableNeedsExactMatch();
 	TestPlace();
 	printf("start slots: %d table entries OK\n", kNumStartSlotTableEntries);
