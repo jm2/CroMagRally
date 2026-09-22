@@ -14,3 +14,7 @@
 // per-place step shrinks by 5/(numCars-1), so last place still gets what 6th place
 // got in a six-car race.
 float GetCatchUpPlaceScale(int numCars);
+
+// A picked-up POW reappears after a delay. Above six cars the delay shrinks by
+// 6/numCars, so each car finds about as many POWs as in a six-car race.
+float GetPOWRespawnScale(int numCars);

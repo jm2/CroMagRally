@@ -65,10 +65,33 @@ static void TestLargerFieldsShareTheSixCarRange(void)
 	CHECK(fabsf(hardTraction12 - 2.5f) < 1e-5f);				// the most a 12th-place CPU grips, as 6th of 6
 }
 
+static void TestPOWRespawn(void)
+{
+	for (int n = -1; n <= TUNED_NUM_CARS; n++)
+		CHECK(SameBits(GetPOWRespawnScale(n), 1.0f));
+
+	volatile float delay = 5.0f;										// Triggers.c POW_RESPAWN_DELAY
+	CHECK(SameBits(delay * GetPOWRespawnScale(TUNED_NUM_CARS), 5.0f));
+	CHECK(SameBits(GetPOWRespawnScale(12), 0.5f));
+	CHECK(SameBits(delay * GetPOWRespawnScale(12), 2.5f));
+
+		// Each car sees as many respawns per second as one of six cars did.
+
+	float previous = GetPOWRespawnScale(TUNED_NUM_CARS);
+	for (int n = TUNED_NUM_CARS + 1; n <= MAX_TEST_CARS; n++)
+	{
+		const float scale = GetPOWRespawnScale(n);
+		CHECK(scale > 0.0f && scale < previous);
+		CHECK(fabsf((float) n * scale - (float) TUNED_NUM_CARS) < 1e-5f);
+		previous = scale;
+	}
+}
+
 int main(void)
 {
 	TestSixCarsOrFewerKeepTheOriginalStep();
 	TestLargerFieldsShareTheSixCarRange();
+	TestPOWRespawn();
 	puts("car count tuning tests passed");
 	return EXIT_SUCCESS;
 }
