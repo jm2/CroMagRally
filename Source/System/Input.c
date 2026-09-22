@@ -5,6 +5,7 @@
 #include "game.h"
 #include "network.h"
 #include "inputstate.h"
+#include "localplayers.h"
 
 extern SDL_Window *gSDLWindow;
 
@@ -1133,6 +1134,10 @@ int GetNumGamepads(void) {
 }
 
 SDL_Gamepad *GetGamepad(int n) {
+  if (n < 0 || n >= MAX_LOCAL_PLAYERS) { // n is a local gamepad slot
+    return NULL;
+  }
+
   if (gGamepads[n].open) {
     return gGamepads[n].sdlGamepad;
   } else {
@@ -1432,7 +1437,10 @@ const char *GetPlayerNameWithInputDeviceHint(int whichPlayer) {
   bool enoughGamepads = GetNumGamepads() >= gNumLocalPlayers;
 
   if (!enoughGamepads) {
-    bool hasGamepad = gGamepads[whichPlayer].open;
+    // whichPlayer can be a network player number (up to MAX_PLAYERS-1), but
+    // gGamepads[] is indexed by local slot.
+    int localSlot = GetLocalSlotForPlayer(whichPlayer);
+    bool hasGamepad = localSlot >= 0 && gGamepads[localSlot].open;
     snprintfcat(playerName, sizeof(playerName), "\n[%s]",
                 Localize(hasGamepad ? STR_GAMEPAD : STR_KEYBOARD));
   }

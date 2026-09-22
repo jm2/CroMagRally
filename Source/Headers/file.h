@@ -117,9 +117,14 @@ typedef struct
 	int		vsync;
 	int		bootToTrack;
 	int		smokeTestFrames;
+	int		smokeNetPlayers;		// smoke only: host starts once this many players (itself included) joined
+	int		smokeNetRefusals;		// smoke only: ...and after refusing this many extra joins as full
 	int		car;
 	bool	netHost;
 	bool	netJoin;
+	bool	netJoinDirect;			// dev/test: --join-address connects straight to a host, skipping LAN discovery
+	uint32_t	netJoinAddress;			// IPv4 host address for --join-address (host byte order)
+	bool	printMaxNetPlayers;		// dev/test: print how many players one LAN game seats, then quit
 	int		display;
 	int		windowedWidth;
 	int		windowedHeight;

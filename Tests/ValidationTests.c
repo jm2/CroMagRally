@@ -2,6 +2,7 @@
 #include "net_validation.h"
 #include "inputstate.h"
 #include "lzss.h"
+#include "localplayers.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,6 +17,9 @@
 SuperTileStatus **gSuperTileStatusGrid;
 long gNumSuperTilesDeep;
 long gNumSuperTilesWide;
+Boolean gNetGameInProgress;
+short gMyNetworkPlayerNum;
+short gNumLocalPlayers;
 
 static void TestLZSSCapacity(void)
 {
@@ -108,6 +112,46 @@ static void TestInputStates(void)
 	assert(ResolveAnalogInput(state, true, true, 0.25f) == 0.25f);
 	assert(ResolveAnalogInput(KEYSTATE_IGNOREHELD, true, true, 0.5f) == 0.5f);
 	assert(ResolveAnalogInput(KEYSTATE_OFF, true, true, 0.0f) == 0.0f);
+}
+
+static void TestLocalSlotMapping(void)
+{
+	// Split-screen: player i owns pane/gamepad slot i; CPU players have none.
+	for (int numLocal = 1; numLocal <= MAX_LOCAL_PLAYERS; numLocal++)
+	{
+		for (int p = 0; p < MAX_PLAYERS; p++)
+			assert(LocalSlotForPlayer(p, false, 0, numLocal) == (p < numLocal ? p : -1));
+	}
+
+	// Network: each machine's one human uses slot 0, whatever player number the host gave it.
+	// Players 4 and 5 used to index the four-entry HUD, POW-row and gamepad arrays directly.
+	for (int me = 0; me < MAX_PLAYERS; me++)
+	{
+		for (int p = 0; p < MAX_PLAYERS; p++)
+			assert(LocalSlotForPlayer(p, true, me, 1) == (p == me ? 0 : -1));
+	}
+
+	assert(LocalSlotForPlayer(-1, false, 0, MAX_LOCAL_PLAYERS) == -1);
+	assert(LocalSlotForPlayer(MAX_PLAYERS, true, MAX_PLAYERS, 1) == -1);
+	assert(LocalSlotForPlayer(MAX_LOCAL_PLAYERS, false, 0, MAX_PLAYERS) == -1);
+
+	// The session wrapper is the inverse of GetPlayerNum(pane).
+	gNetGameInProgress = true;
+	gNumLocalPlayers = 1;
+	for (gMyNetworkPlayerNum = 0; gMyNetworkPlayerNum < MAX_PLAYERS; gMyNetworkPlayerNum++)
+	{
+		int slot = GetLocalSlotForPlayer(gMyNetworkPlayerNum);
+		assert(slot == 0 && GetPlayerNum(slot) == gMyNetworkPlayerNum);
+	}
+
+	gNetGameInProgress = false;
+	gMyNetworkPlayerNum = 0;
+	for (gNumLocalPlayers = 1; gNumLocalPlayers <= MAX_LOCAL_PLAYERS; gNumLocalPlayers++)
+	{
+		for (int slot = 0; slot < gNumLocalPlayers; slot++)
+			assert(GetLocalSlotForPlayer(GetPlayerNum(slot)) == slot);
+	}
+	gNumLocalPlayers = 1;
 }
 
 static void TestTerrainRenderResidency(void)
@@ -226,7 +270,15 @@ static void TestConfigValidation(void)
 	message.targetFPS = 60;
 	assert(NetValidateConfigPayload(&message));
 
-	message.numPlayers = MAX_LOCAL_PLAYERS + 1;
+	message.numPlayers = MAX_CLIENTS;						// full lobby: host + MAX_CLIENTS-1 clients
+	message.playerNum = MAX_CLIENTS - 1;
+	assert(NetValidateConfigPayload(&message));
+	message.playerNum = MAX_LOCAL_PLAYERS;					// more network players than split-screen panes
+	assert(NetValidateConfigPayload(&message));
+	message.numPlayers = MAX_CLIENTS + 1;
+	message.playerNum = 1;
+	assert(!NetValidateConfigPayload(&message));
+	message.playerNum = MAX_CLIENTS;
 	assert(!NetValidateConfigPayload(&message));
 	message.numPlayers = 2;
 	message.playerNum = 2;
@@ -337,7 +389,8 @@ static void TestHostControlValidation(void)
 	assert(NetValidateHostControlPayload(&message, 4));
 	assert(!NetValidateHostControlPayload(NULL, 4));
 	assert(!NetValidateHostControlPayload(&message, 0));
-	assert(!NetValidateHostControlPayload(&message, MAX_LOCAL_PLAYERS + 1));
+	assert(NetValidateHostControlPayload(&message, MAX_CLIENTS));
+	assert(!NetValidateHostControlPayload(&message, MAX_CLIENTS + 1));
 
 	const float rates[] = {0, 1, 8, 9, 1000, 1001};
 	for (size_t i = 0; i < sizeof(rates) / sizeof(rates[0]); i++)
@@ -447,6 +500,11 @@ static void TestHostControlValidation(void)
 	assert(!NetValidateHostControlPayload(&message, 4));
 	message.events[0].playerNum = 4;
 	assert(!NetValidateHostControlPayload(&message, 4));
+	assert(NetValidateHostControlPayload(&message, MAX_CLIENTS));
+	message.events[0].playerNum = MAX_CLIENTS - 1;
+	assert(NetValidateHostControlPayload(&message, MAX_CLIENTS));
+	message.events[0].playerNum = MAX_CLIENTS;
+	assert(!NetValidateHostControlPayload(&message, MAX_CLIENTS));
 	message.events[0].playerNum = 0;
 	message.events[0].pad = 1;
 	assert(!NetValidateHostControlPayload(&message, 4));
@@ -718,6 +776,7 @@ int main(void)
 	TestBG3DMetadata();
 	TestBoneNormalCoverage();
 	TestInputStates();
+	TestLocalSlotMapping();
 	TestTerrainRenderResidency();
 	TestEnvelopeValidation();
 	TestCharacterValidation();

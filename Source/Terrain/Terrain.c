@@ -1338,9 +1338,9 @@ void DoPlayerTerrainUpdate(void) {
         if (mask == 0)
           continue;
         else {
-          gSuperTileStatusGrid[row][col].playerHereFlags |=
-              (1
-               << playerNum); // remember which players are using this supertile
+          MarkSuperTilePlayerHere(
+              &gSuperTileStatusGrid[row][col],
+              playerNum); // remember which players are using this supertile
 
           /*****************************************************/
           /* ONLY CREATE GEOMETRY IF PLAYER IS ON THIS MACHINE */

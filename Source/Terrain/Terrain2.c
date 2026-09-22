@@ -349,7 +349,6 @@ Boolean TrackTerrainItem(ObjNode *theNode)
 Boolean SeeIfCoordsOutOfRange(float x, float z, short playerToSkip)
 {
 int			row,col;
-uint16_t		playerFlags, mask;
 
 			/* SEE IF OUT OF RANGE */
 
@@ -364,13 +363,7 @@ uint16_t		playerFlags, mask;
 	col = x * TERRAIN_SUPERTILE_UNIT_SIZE_Frac;							// calc supertile relative row/col that the coord lies on
 	row = z * TERRAIN_SUPERTILE_UNIT_SIZE_Frac;
 
-	playerFlags = gSuperTileStatusGrid[row][col].playerHereFlags;		// get player flags
-
-	mask = 0xffff;
-	if (playerToSkip != -1)												// see if dont check for a player
-		mask &= ~(1 << playerToSkip);
-
-	if (playerFlags & mask)												// if a player is using this supertile, then coords are in range
+	if (IsSuperTileUsedByPlayers(&gSuperTileStatusGrid[row][col], playerToSkip))	// if a player is using this supertile, then coords are in range
 		return(false);
 	else
 		return(true);													// otherwise, out of range since no players can see this supertile

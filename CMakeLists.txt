@@ -610,11 +610,24 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 		add_test(NAME ${test_name} COMMAND ${target})
 	endfunction()
 	cmr_add_gameplay_test(CroMagRallyPathTests paths Tests/PathTests.c Source/Terrain/Paths.c)
+	cmr_add_gameplay_test(CroMagRallyVehiclePickerTests vehicle_picker Tests/VehiclePickerTests.c
+		Source/Player/VehiclePicker.c)
+	cmr_add_gameplay_test(CroMagRallyPlayerLimitTests player_limits Tests/PlayerLimitTests.c
+		Source/Terrain/TerrainResidency.c Source/Screens/InfobarPlace.c Source/System/CollisionList.c)
+	if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+		# Linker section GC keeps only the place calculation from Checkpoints.c.
+		cmr_add_gameplay_test(CroMagRallyRacePlaceTests race_places Tests/RacePlaceTests.c Source/Terrain/Checkpoints.c)
+		target_compile_options(CroMagRallyRacePlaceTests PRIVATE -ffunction-sections -fdata-sections)
+		target_link_options(CroMagRallyRacePlaceTests PRIVATE -Wl,--gc-sections)
+	endif()
+	cmr_add_gameplay_test(CroMagRallyCheckpointTests checkpoints Tests/CheckpointTests.c Source/Terrain/CheckpointProgress.c)
+	cmr_add_gameplay_test(CroMagRallyCPUDriverTests cpu_driver Tests/CPUDriverTests.c Source/Player/CPUDriver.c)
 	add_executable(CroMagRallyValidationTests
 		Tests/ValidationTests.c
 		Source/Network/NetValidation.c
 		Source/Skeleton/SkeletonValidation.c
 		Source/System/InputState.c
+		Source/System/LocalPlayers.c
 		Source/System/LZSSDecode.c
 		Source/3D/BG3DValidation.c
 		Source/System/DeterministicMath.c
@@ -653,6 +666,8 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 		target_link_options(CroMagRallyGameSimulationTests PRIVATE -fsanitize=address,undefined)
 	endif()
 	add_test(NAME game_simulation COMMAND CroMagRallyGameSimulationTests)
+	cmr_add_gameplay_test(CroMagRallyFiniteGuardTests finite_guard Tests/FiniteGuardTests.c Source/System/FiniteGuard.c)
+	cmr_add_gameplay_test(CroMagRallyFenceCollisionTests fence_collision Tests/FenceCollisionTests.c Source/Terrain/Fences.c Source/3D/3DMath.c)
 	add_executable(CroMagRallyAssetLoaderTests Tests/AssetLoaderTests.c
 		Source/3D/BG3DValidation.c Source/System/LZSSDecode.c)
 	target_include_directories(CroMagRallyAssetLoaderTests PRIVATE ${GAME_GENERATED_INCLUDE_DIR} ${GAME_SRCDIR}/Headers)
@@ -690,7 +705,8 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 		if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 			add_executable(CroMagRallyNetworkReadinessTests Tests/NetworkReadinessTests.c
 				Source/Network/NetValidation.c Source/System/TextUtils.c
-				Source/Player/Player.c Source/System/Main.c Source/System/DeterministicMath.c)
+				Source/Player/Player.c Source/Player/VehiclePicker.c Source/System/Main.c
+				Source/System/DeterministicMath.c)
 			target_include_directories(CroMagRallyNetworkReadinessTests PRIVATE ${GAME_GENERATED_INCLUDE_DIR} ${GAME_SRCDIR}/Headers)
 			target_link_libraries(CroMagRallyNetworkReadinessTests PRIVATE Pomme SDL3::SDL3)
 			target_compile_options(CroMagRallyNetworkReadinessTests PRIVATE -ffunction-sections -fdata-sections)

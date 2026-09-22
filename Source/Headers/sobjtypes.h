@@ -132,6 +132,8 @@ enum
 	INFOBAR_SObjType_OverlayBackgroundH,
 };
 
+#define	NUM_PLACE_SPRITES	(INFOBAR_SObjType_Place6 - INFOBAR_SObjType_Place1 + 1)	// big place numbers exist for 1st-6th only
+
 
 enum
 {

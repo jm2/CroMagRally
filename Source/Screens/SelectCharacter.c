@@ -354,7 +354,8 @@ short	p;
 		return(true);
 	}
 	else
-	if (IsCheatKeyComboDown())		// useful to test local multiplayer without having all controllers plugged in
+	if (IsCheatKeyComboDown()		// useful to test local multiplayer without having all controllers plugged in
+		|| gCommandLine.smokeTestFrames)	// unattended net smoke run: take the default character
 	{
 		PlayEffect(EFFECT_ROMANCANDLE_LAUNCH);
 		return true;

@@ -23,12 +23,15 @@ extern NSpSearchReference gNetSearch;
 
 static void SetupNetGatherScreen(void);
 static int DoNetGatherControls(void);
+static int DoNetGatherSmokeTest(uint64_t deadline);
 
 
 
 /****************************/
 /*    CONSTANTS             */
 /****************************/
+
+#define SMOKE_NET_GATHER_TIMEOUT_MS	120000		// --smoke-test-frames: longest unattended wait on one gather screen
 
 /*********************/
 /*    VARIABLES      */
@@ -37,7 +40,7 @@ static int DoNetGatherControls(void);
 static ObjNode* gGatherPrompt = NULL;
 
 
-static void UpdateNetGatherPrompt(void)
+static const char* UpdateNetGatherPrompt(void)
 {
 	static char buf[256];
 
@@ -173,6 +176,7 @@ static void UpdateNetGatherPrompt(void)
 
 
 	TextMesh_Update(output, 0, gGatherPrompt);
+	return output;
 }
 
 
@@ -198,6 +202,14 @@ Boolean DoNetGatherScreen(void)
 
 	int outcome = 0;
 	int smokeFramesRemaining = gCommandLine.smokeTestFrames;
+	uint64_t smokeDeadline = SDL_GetTicks() + SMOKE_NET_GATHER_TIMEOUT_MS;
+
+	if (gCommandLine.smokeNetPlayers && gNetSequenceState == kNetSequence_HostLobbyOpen)
+	{
+		// A net smoke host waits for its players instead of closing the lobby after a few frames.
+		smokeFramesRemaining = 0;
+		SDL_Log("SMOKE: host lobby open on port %d, waiting for %d players", gNetPort, gCommandLine.smokeNetPlayers);
+	}
 
 	while (outcome == 0)
 	{
@@ -225,7 +237,12 @@ Boolean DoNetGatherScreen(void)
 			&& --smokeFramesRemaining == 0)
 		{
 			SDL_Log("SMOKE: host lobby track %d rendered %d frames", gTrackNum + 1, gCommandLine.smokeTestFrames);
+			gSmokeTestPassed = true;
 			outcome = -1;
+		}
+		else if (outcome == 0 && gCommandLine.smokeTestFrames)
+		{
+			outcome = DoNetGatherSmokeTest(smokeDeadline);
 		}
 	}
 
@@ -290,6 +307,36 @@ static void SetupNetGatherScreen(void)
 
 
 
+/******************** SMOKE TEST (--smoke-test-frames) ********************/
+
+// --smoke-net-players: start the race once the expected players joined and any
+// extra joins the test sends (--smoke-net-refusals) were turned away as full.
+static Boolean IsSmokeTestLobbyComplete(void)
+{
+	return gCommandLine.smokeNetPlayers
+		&& NSpGame_GetNumActivePlayers(gNetGame) >= gCommandLine.smokeNetPlayers
+		&& NSpGame_GetNumRefusedClients(gNetGame) >= gCommandLine.smokeNetRefusals;
+}
+
+// An unattended run can't wait for anybody to read an error or press a key.
+static int DoNetGatherSmokeTest(uint64_t deadline)
+{
+	if (gNetSequenceState >= kNetSequence_Error)
+	{
+		SDL_Log("SMOKE: net session ended: %s", UpdateNetGatherPrompt());	// the state may have changed since this frame's prompt
+		return -1;
+	}
+
+	if (SDL_GetTicks() >= deadline)
+	{
+		SDL_Log("SMOKE: gave up waiting in net sequence state %d", gNetSequenceState);
+		return -1;
+	}
+
+	return 0;
+}
+
+
 /***************** DO CHARACTERSELECT CONTROLS *******************/
 
 static int DoNetGatherControls(void)
@@ -310,7 +357,7 @@ static int DoNetGatherControls(void)
 			break;
 
 		case kNetSequence_HostLobbyOpen:
-			if (GetNewNeedStateAnyP(kNeed_UIConfirm)
+			if ((GetNewNeedStateAnyP(kNeed_UIConfirm) || IsSmokeTestLobbyComplete())
 				&& NSpGame_GetNumActivePlayers(gNetGame) >= 2)
 			{
 				gNetSequenceState = kNetSequence_HostReadyToStartGame;

@@ -16,14 +16,14 @@ typedef int sockfd_t;
 #define INVALID_SOCKET (-1)
 #endif
 
-#define MAX_CLIENTS MAX_LOCAL_PLAYERS
+#define MAX_CLIENTS MAX_PLAYERS				// NSp player slots incl. the host's (ID 0), so MAX_CLIENTS-1 clients can join (the original game's 6-player LAN)
 #define kNSpPlayerNameLength 32
 #define NSP_HANDSHAKE_TIMEOUT_MS 10000u
 #define NSP_LOBBY_EXPIRY_MS 5000u
 #define kNSpMaxPayloadLength 512			// CMR7: bumped 256->512 to fit the wider host control msg (must change with the 4CC)
 #define kNSpMaxMessageLength (kNSpMaxPayloadLength + sizeof(NSpMessageHeader))
 
-#define kNSpCMRProtocol4CC 'CMR8'			// CMR8 requires initialized readiness fields; reject older peers at handshake
+#define kNSpCMRProtocol4CC 'CMR8'			// CMR8 (unreleased) requires initialized readiness fields; reject older peers at handshake
 
 typedef enum
 {
@@ -166,6 +166,8 @@ NSpPlayerID NSpGame_AcceptNewClient(NSpGameReference gameRef);
 int NSpGame_StopAcceptingNewClients(NSpGameReference gameRef);
 int NSpGame_AckJoinRequest(NSpGameReference gameRef, NSpMessageHeader* inMessage);
 int NSpGame_GetNumActivePlayers(NSpGameReference gameRef);
+int NSpGame_GetMaxPlayers(void);										// host + clients one game can seat
+int NSpGame_GetNumRefusedClients(NSpGameReference gameRef);				// host: joins refused because the game was full
 uint32_t NSpGame_GetActivePlayersIDMask(NSpGameReference gameRef);
 NSpPlayerID NSpGame_GetNthActivePlayerID(NSpGameReference gameRef, int n);
 int NSpGame_StartAdvertising(NSpGameReference gameRef);
@@ -180,6 +182,7 @@ int NSpSearch_Dispose(NSpSearchReference searchRef);
 int NSpSearch_GetNumGamesFound(NSpSearchReference searchRef);
 int NSpSearch_Tick(NSpSearchReference searchRef);
 NSpGameReference NSpSearch_JoinGame(NSpSearchReference searchRef, int gameNum);
+NSpGameReference NSpGame_JoinAddress(uint32_t ipv4Address);	// dev/test: skip discovery (host byte order, port gNetPort)
 const char* NSpSearch_GetHostAddress(NSpSearchReference searchRef, int gameNum);
 
 int NSpPlayer_Kick(NSpGameReference gameRef, NSpPlayerID kickedPlayerID);

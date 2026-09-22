@@ -12,6 +12,7 @@
 
 #include "game.h"
 #include "network.h"		// Net_IsConnectionBadgeVisible for the in-game connection hint
+#include "localplayers.h"
 #include <stddef.h>
 
 /****************************/
@@ -95,6 +96,7 @@ typedef struct
 	int sub;
 	int displayedValue;
 	int state;
+	int pane;				// split-screen pane that shows this icon (node->PlayerNum is the player it tracks)
 } InfobarIconData;
 CheckSpecialDataStruct(InfobarIconData);
 #define GetInfobarIconData(node) GetSpecialData(node, InfobarIconData)
@@ -141,7 +143,7 @@ static const struct
 	{ offsetof(PlayerInfoType, flamingTimer),			INFOBAR_SObjType_RedTorch },
 };
 
-static int8_t gPOWTimersByRow[MAX_LOCAL_PLAYERS][MAX_POWTIMERS];
+static int8_t gPOWTimersByRow[MAX_SPLITSCREENS][MAX_POWTIMERS];		// per pane, not per player number
 
 const OGLColorRGB kCavemanSkinColors[NUM_CAVEMAN_SKINS] =
 {
@@ -222,9 +224,13 @@ static float GetIconY(Byte whichPane, int iconID)
 
 static void HideIconObjects(int playerNum, int iconType)
 {
+	int pane = GetLocalSlotForPlayer(playerNum);				// icons are stored per pane, not per player number
+	if (pane < 0)
+		return;
+
 	for (int i = 0; i < MAX_SUBICONS; i++)
 	{
-		ObjNode* icon = gInfobarIconObjs[playerNum][iconType][i];
+		ObjNode* icon = gInfobarIconObjs[pane][iconType][i];
 		if (icon)
 		{
 			SetObjectVisible(icon, false);
@@ -385,11 +391,11 @@ static const char*	maps[] =
 
 			/* RESET ROW ALLOCATIONS FOR POW TIMERS */
 
-	for (int p = 0; p < MAX_LOCAL_PLAYERS; p++)
+	for (int pane = 0; pane < MAX_SPLITSCREENS; pane++)
 	{
 		for (int row = 0; row < MAX_POWTIMERS; row++)
 		{
-			gPOWTimersByRow[p][row] = -1;
+			gPOWTimersByRow[pane][row] = -1;
 		}
 	}
 
@@ -531,11 +537,13 @@ static void Infobar_MakeIcon(uint8_t type, uint8_t flags)
 		def.type = INFOBAR_SObjType_WrongWay;
 	}
 
+	GAME_ASSERT(gNumSplitScreenPanes <= MAX_SPLITSCREENS);
+
 	for (int pane = 0; pane < gNumSplitScreenPanes; pane++)
 	{
 		ObjNode* obj = NULL;
 
-		def.player = GetPlayerNum(pane);		// TODO: maybe revise this for net games
+		def.player = GetPlayerNum(pane);		// player shown in this pane (a net game's only pane shows gMyNetworkPlayerNum)
 
 		if (isText)
 			obj = TextMesh_New("?", kTextMeshAlignLeft, &def);
@@ -546,6 +554,7 @@ static void Infobar_MakeIcon(uint8_t type, uint8_t flags)
 		special->type = type;
 		special->sub = sub;
 		special->displayedValue = -1;
+		special->pane = pane;
 //		special->allocatedRow = -1;
 
 		gInfobarIconObjs[pane][type][sub] = obj;
@@ -555,7 +564,7 @@ static void Infobar_MakeIcon(uint8_t type, uint8_t flags)
 static void Infobar_RepositionIconTemp(ObjNode* theNode)
 {
 	const InfobarIconData* special = GetInfobarIconData(theNode);
-	int pane = theNode->PlayerNum;
+	int pane = special->pane;								// not PlayerNum: net player numbers exceed the pane count
 	int id = special->type;
 	int sub = special->sub;
 	theNode->Coord.x = GetIconX(pane, id) + sub * GetIconXSpacing(id);
@@ -910,7 +919,7 @@ static void Infobar_MovePlace(ObjNode* node)
 	switch (GetInfobarIconData(node)->sub)
 	{
 		case 0:
-			ModifySpriteObjectFrame(node, INFOBAR_SObjType_Place1+place);
+			ModifySpriteObjectFrame(node, GetPlaceNumberSprite(place));
 			break;
 
 		case 1:
@@ -1312,11 +1321,13 @@ static void Infobar_MoveToken(ObjNode* node)
 
 /********************* DRAW TIMER POWERUPS **************************/
 
-static int GetRowForPOWTimer(int playerNum, int powTimerID)
+static int GetRowForPOWTimer(int pane, int powTimerID)
 {
+	GAME_ASSERT(pane >= 0 && pane < MAX_SPLITSCREENS);
+
 	for (int row = 0; row < MAX_POWTIMERS; row++)
 	{
-		if (gPOWTimersByRow[playerNum][row] == powTimerID)
+		if (gPOWTimersByRow[pane][row] == powTimerID)
 		{
 			return row;
 		}
@@ -1325,13 +1336,15 @@ static int GetRowForPOWTimer(int playerNum, int powTimerID)
 	return -1;
 }
 
-static int AllocRowForNewPOWTimer(int playerNum, int powTimerID)
+static int AllocRowForNewPOWTimer(int pane, int powTimerID)
 {
+	GAME_ASSERT(pane >= 0 && pane < MAX_SPLITSCREENS);
+
 	for (int row = 0; row < MAX_POWTIMERS; row++)
 	{
-		if (gPOWTimersByRow[playerNum][row] < 0)
+		if (gPOWTimersByRow[pane][row] < 0)
 		{
-			gPOWTimersByRow[playerNum][row] = powTimerID;
+			gPOWTimersByRow[pane][row] = powTimerID;
 			return row;
 		}
 	}
@@ -1339,11 +1352,11 @@ static int AllocRowForNewPOWTimer(int playerNum, int powTimerID)
 	return -1;
 }
 
-static void FreeRowTakenByPOWTimer(int playerNum, int powTimerID)
+static void FreeRowTakenByPOWTimer(int pane, int powTimerID)
 {
-	int8_t* rowAllocation = &gPOWTimersByRow[playerNum][0];
+	int8_t* rowAllocation = &gPOWTimersByRow[pane][0];
 
-	int row = GetRowForPOWTimer(playerNum, powTimerID);
+	int row = GetRowForPOWTimer(pane, powTimerID);
 
 	if (row >= 0)
 	{
@@ -1377,6 +1390,7 @@ enum
 
 	short p = objNode->PlayerNum;
 	InfobarIconData* special = GetInfobarIconData(objNode);
+	int pane = special->pane;								// rows are allocated per pane
 
 	int timerID = special->sub >> 1;
 	int subInRow = special->sub & 1;
@@ -1385,7 +1399,7 @@ enum
 	float timer = *(float*) (((char*) &gPlayerInfo[p]) + timerOffset);
 	bool isTicking = timer > 0;
 
-	int currentRow = GetRowForPOWTimer(p, timerID);
+	int currentRow = GetRowForPOWTimer(pane, timerID);
 	bool hasRow = currentRow >= 0;
 
 	switch (special->state)
@@ -1401,7 +1415,7 @@ enum
 				// Started ticking, reserve row
 				if (!hasRow)
 				{
-					currentRow = AllocRowForNewPOWTimer(p, timerID);
+					currentRow = AllocRowForNewPOWTimer(pane, timerID);
 					hasRow = currentRow >= 0;
 				}
 
@@ -1435,7 +1449,7 @@ enum
 				// Wait for vanish effect to finish
 				if (objNode->TwitchNode == NULL)
 				{
-					FreeRowTakenByPOWTimer(p, timerID);
+					FreeRowTakenByPOWTimer(pane, timerID);
 					special->state = kDormant;
 					SetObjectVisible(objNode, false);
 				}
@@ -1721,14 +1735,16 @@ short	sex;
 
 			/* ANNOUNCE PLACE */
 
-	PlayAnnouncerSound(EFFECT_1st + place, true, 1.0);
+	int placeEffect = GetPlaceAnnouncerEffect(place);
+	if (placeEffect >= 0)										// no voice line past 6th, so stay silent
+		PlayAnnouncerSound(placeEffect, true, 1.0);
 
 			/* MAKE NUMBER SPRITE */
 
 	NewObjectDefinitionType spriteDef =
 	{
 		.group 		= SPRITE_GROUP_INFOBAR,
-		.type		= INFOBAR_SObjType_Place1+place,
+		.type		= GetPlaceNumberSprite(place),
 		.coord		= {0,0,0},
 		.flags		= STATUS_BIT_ONLYSHOWTHISPLAYER,
 		.slot		= SPRITE_SLOT,

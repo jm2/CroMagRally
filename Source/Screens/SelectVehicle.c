@@ -76,7 +76,8 @@ Boolean DoMultiPlayerVehicleSelections(void)
 		// TODO: We should allow bailing out of Character/Vehicle Select screens, even if we started a net game.
 
 #if _DEBUG
-		if (gCommandLine.netJoin || gCommandLine.netHost)
+		if ((gCommandLine.netJoin || gCommandLine.netHost)
+			&& !gCommandLine.smokeTestFrames)						// smoke runs cover the screens (auto-confirmed)
 		{
 			// skip character/vehicle select screens to speed up testing
 		}
@@ -544,7 +545,8 @@ short	p;
 		}
 	}
 	else
-	if (IsCheatKeyComboDown())		// useful to test local multiplayer without having all controllers plugged in
+	if (IsCheatKeyComboDown()		// useful to test local multiplayer without having all controllers plugged in
+		|| gCommandLine.smokeTestFrames)	// unattended net smoke run: take the default car
 	{
 		PlayEffect(EFFECT_ROMANCANDLE_LAUNCH);
 		return true;

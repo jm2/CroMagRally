@@ -10,11 +10,13 @@
 /****************************/
 
 #include "game.h"
+#include "vehicle_picker.h"
 
 /****************************/
 /*    PROTOTYPES            */
 /****************************/
 
+static uint16_t SyncedCPUVehicleRandom(void* context, int cpuIndex, uint16_t min, uint16_t max);
 
 
 /****************************/
@@ -164,8 +166,9 @@ short	i;
 
 void InitPlayersAtStartOfLevel(void)
 {
-int		i,j,type;
-Boolean	taken[NUM_LAND_CAR_TYPES];
+int		i,j;
+int		numCPUVehiclesPicked = 0;
+CPUVehiclePickRules	cpuVehicleRules = { .randomRange = SyncedCPUVehicleRandom };
 
 	gWorstHumanPlace = 0;
 	gNumPlayersEliminated = 0;
@@ -175,24 +178,18 @@ Boolean	taken[NUM_LAND_CAR_TYPES];
 
 		/* FIRST MARK WHICH CAR TYPES THE HUMANS HAVE */
 
-	for (i = 0; i < NUM_LAND_CAR_TYPES; i++)						// first mark all unused
-		taken[i] = false;
-
 	for (i = 0; i < gNumTotalPlayers; i++)
 	{
 		if (!gPlayerInfo[i].isComputer)								// check for human player
 		{
 			GAME_ASSERT(gPlayerInfo[i].vehicleType >= 0);
 			GAME_ASSERT(gPlayerInfo[i].vehicleType < NUM_LAND_CAR_TYPES);
-			taken[gPlayerInfo[i].vehicleType] = true;				// mark this used
+			cpuVehicleRules.humanCarMask |= 1u << gPlayerInfo[i].vehicleType;	// mark this used
 		}
 	}
 
-
-	i = GetNumAgesCompleted();
-	if (i > 2)														// dont get extra cars after winning, so pin @ 2
-		i = 2;
-	type = 6 + (i * 2)-1;											// start @ end of usable cars so it will pick best cars
+	cpuVehicleRules.agesCompleted = GetNumAgesCompleted();
+	cpuVehicleRules.difficulty = gDifficulty;
 
 
 			/* SET SOME GLOBALS */
@@ -201,20 +198,11 @@ Boolean	taken[NUM_LAND_CAR_TYPES];
 	{
 		// Network replacements retain the shared selection (or its default).
 		// Local unlock progress must not change their vehicle or consume synced RNG.
+		// Pick in player order: Hard draws stay interleaved with SetPhysicsForVehicleType's.
 		if (gPlayerInfo[i].isComputer && !gNetGameInProgress)		// set local CPU vehicle type
-		{
-			if (gDifficulty == DIFFICULTY_HARD)					// in hard mode, the CPU can have duplicate cars
-				gPlayerInfo[i].vehicleType = RandomRange(0, type);
-			else														// in other difficulty modes, only choose unique cars
-			{
-				while(taken[type])										// skip over vehicles already used by Humans
-					type--;
+			gPlayerInfo[i].vehicleType = PickCPUVehicle(&cpuVehicleRules, numCPUVehiclesPicked++);
 
-				gPlayerInfo[i].vehicleType = type--;
-			}
-		}
-
-		gPlayerInfo[i].coord.y = GetTerrainY(gPlayerInfo[i].startX,gPlayerInfo[i].startX);
+		gPlayerInfo[i].coord.y = GetTerrainY(gPlayerInfo[i].startX,gPlayerInfo[i].startZ);
 
 			/* CREATE THE CAR MODEL */
 
@@ -378,6 +366,19 @@ Boolean	taken[NUM_LAND_CAR_TYPES];
 
 
 	SetDefaultCameraModeForAllPlayers();
+}
+
+
+/***************** SYNCED CPU VEHICLE RANDOM *********************/
+//
+// Local CPU vehicles on Hard come from the synced RNG.
+//
+
+static uint16_t SyncedCPUVehicleRandom(void* context, int cpuIndex, uint16_t min, uint16_t max)
+{
+	(void) context;
+	(void) cpuIndex;
+	return RandomRange(min, max);
 }
 
 #pragma mark -

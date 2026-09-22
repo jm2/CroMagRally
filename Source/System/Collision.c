@@ -39,6 +39,30 @@ short			gNumCollisions = 0;
 Byte			gTotalSides;
 
 
+/******************* ADD COLLISION *********************/
+//
+// Returns the next free gCollisionList entry, or nil if the list is full.
+// A full list keeps the first MAX_COLLISIONS hits and drops the rest; that
+// takes an unusual pile-up, so it's logged once per session.
+//
+
+static CollisionRec* AddCollision(void)
+{
+static Boolean	warnedFull = false;
+CollisionRec	*rec;
+
+	rec = AppendCollisionRec(gCollisionList, &gNumCollisions, MAX_COLLISIONS);
+
+	if (!rec && !warnedFull)
+	{
+		SDL_Log("WARNING: collision list full (%d entries); dropping further collisions", MAX_COLLISIONS);
+		warnedFull = true;
+	}
+
+	return(rec);
+}
+
+
 /******************* COLLISION DETECT *********************/
 //
 // INPUT: startNumCollisions = value to start gNumCollisions at should we need to keep existing data in collision list
@@ -55,7 +79,9 @@ short		numBaseBoxes,targetNumBoxes,target;
 CollisionBoxType *baseBoxList;
 CollisionBoxType *targetBoxList;
 long		leftSide,rightSide,frontSide,backSide,bottomSide,topSide;
+CollisionRec *rec;
 
+	GAME_ASSERT(startNumCollisions >= 0 && startNumCollisions <= MAX_COLLISIONS);
 	gNumCollisions = startNumCollisions;								// clear list
 
 			/* GET BASE BOX INFO */
@@ -259,21 +285,21 @@ long		leftSide,rightSide,frontSide,backSide,bottomSide,topSide;
 
 						/* ADD TO COLLISION LIST */
 got_sides:
-				gCollisionList[gNumCollisions].baseBox = 0;
-				gCollisionList[gNumCollisions].targetBox = target;
-				gCollisionList[gNumCollisions].sides = sideBits;
-//				gCollisionList[gNumCollisions].type = COLLISION_TYPE_OBJ;
-				gCollisionList[gNumCollisions].objectPtr = thisNode;
-				gNumCollisions++;
+				rec = AddCollision();												// nil if the list is full
+				if (rec)
+				{
+					rec->baseBox = 0;
+					rec->targetBox = target;
+					rec->sides = sideBits;
+//					rec->type = COLLISION_TYPE_OBJ;
+					rec->objectPtr = thisNode;
+				}
 				gTotalSides |= sideBits;											// remember total of this
 			}
 		}
 next:
 		thisNode = thisNode->NextNode;												// next target node
 	}while(thisNode != nil);
-
-	if (gNumCollisions > MAX_COLLISIONS)											// see if overflowed (memory corruption ensued)
-		DoFatalAlert("CollisionDetect: gNumCollisions > MAX_COLLISIONS");
 }
 
 
@@ -872,6 +898,7 @@ short DoSimplePointCollision(OGLPoint3D *thePoint, uint32_t cType, ObjNode *exce
 ObjNode	*thisNode;
 short	targetNumBoxes,target;
 CollisionBoxType *targetBoxList;
+CollisionRec *rec;
 
 	gNumCollisions = 0;
 
@@ -932,10 +959,13 @@ CollisionBoxType *targetBoxList;
 
 					/* THERE HAS BEEN A COLLISION */
 
-			gCollisionList[gNumCollisions].targetBox = target;
-//			gCollisionList[gNumCollisions].type = COLLISION_TYPE_OBJ;
-			gCollisionList[gNumCollisions].objectPtr = thisNode;
-			gNumCollisions++;
+			rec = AddCollision();									// nil if the list is full
+			if (rec)
+			{
+				rec->targetBox = target;
+//				rec->type = COLLISION_TYPE_OBJ;
+				rec->objectPtr = thisNode;
+			}
 		}
 
 next:
@@ -957,6 +987,7 @@ short DoSimpleBoxCollision(float top, float bottom, float left, float right,
 ObjNode			*thisNode;
 short			targetNumBoxes,target;
 CollisionBoxType *targetBoxList;
+CollisionRec	*rec;
 
 	gNumCollisions = 0;
 
@@ -1014,10 +1045,13 @@ CollisionBoxType *targetBoxList;
 
 					/* THERE HAS BEEN A COLLISION */
 
-			gCollisionList[gNumCollisions].targetBox = target;
-//			gCollisionList[gNumCollisions].type = COLLISION_TYPE_OBJ;
-			gCollisionList[gNumCollisions].objectPtr = thisNode;
-			gNumCollisions++;
+			rec = AddCollision();									// nil if the list is full
+			if (rec)
+			{
+				rec->targetBox = target;
+//				rec->type = COLLISION_TYPE_OBJ;
+				rec->objectPtr = thisNode;
+			}
 		}
 
 next:

@@ -147,7 +147,7 @@ typedef	struct
 {
 	uint16_t	supertileIndex;
 	uint8_t		statusFlags;
-	uint8_t		playerHereFlags;
+	uint16_t	playerHereFlags;			// bit (1 << playerNum) per player whose item ring covers this supertile
 }SuperTileStatus;
 
 enum									// statusFlags
@@ -166,6 +166,8 @@ void DisposeSuperTileMemoryList(void);
 extern 	void DisposeTerrain(void);
 void DrawTerrain(void);
 void KeepTerrainAliveForRender(void);
+void MarkSuperTilePlayerHere(SuperTileStatus *status, short playerNum);
+Boolean IsSuperTileUsedByPlayers(const SuperTileStatus *status, short playerToSkip);
 extern	void GetSuperTileInfo(long x, long z, long *superCol, long *superRow, long *tileCol, long *tileRow);
 extern	void InitTerrainManager(void);
 float	GetTerrainY(float x, float z);

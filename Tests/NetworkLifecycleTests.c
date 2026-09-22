@@ -109,26 +109,30 @@ static void Session(void)
     gNetPort = ntohs(address.sin_port);
     CHECK(NSpGame_GetActivePlayersIDMask(host) == 1);
 
-    // CMR7 readiness fields were uninitialized: refuse that peer at the handshake
-    // instead of accepting it and then disconnecting during level preparation.
-    int legacy = socket(AF_INET, SOCK_STREAM, 0);
-    CHECK(connect(legacy, (struct sockaddr*)&address, sizeof(address)) == 0);
-    CHECK(AcceptClient(host) == 1);
-    NSpJoinRequestMessage legacyJoin = {0};
-    NSpClearMessageHeader(&legacyJoin.header);
-    legacyJoin.header.version = 'CMR7';
-    legacyJoin.header.what = kNSpJoinRequest;
-    legacyJoin.header.to = kNSpHostID;
-    legacyJoin.header.messageLen = sizeof(legacyJoin);
-    CHECK(send(legacy, &legacyJoin, sizeof(legacyJoin), MSG_NOSIGNAL) == sizeof(legacyJoin));
-    for (int i = 0; i < 1000 && host->players[1].state != kNSpPlayerState_Offline; i++)
+    // Refuse older peers at the handshake instead of accepting them and disconnecting
+    // later: CMR7 left readiness fields uninitialized during level preparation.
+    const uint32_t legacyVersions[] = {'CMR7'};
+    for (size_t v = 0; v < sizeof(legacyVersions) / sizeof(legacyVersions[0]); v++)
     {
-        CHECK(!NSpMessage_Get(host));
-        SDL_Delay(1);
+        int legacy = socket(AF_INET, SOCK_STREAM, 0);
+        CHECK(connect(legacy, (struct sockaddr*)&address, sizeof(address)) == 0);
+        CHECK(AcceptClient(host) == 1);
+        NSpJoinRequestMessage legacyJoin = {0};
+        NSpClearMessageHeader(&legacyJoin.header);
+        legacyJoin.header.version = legacyVersions[v];
+        legacyJoin.header.what = kNSpJoinRequest;
+        legacyJoin.header.to = kNSpHostID;
+        legacyJoin.header.messageLen = sizeof(legacyJoin);
+        CHECK(send(legacy, &legacyJoin, sizeof(legacyJoin), MSG_NOSIGNAL) == sizeof(legacyJoin));
+        for (int i = 0; i < 1000 && host->players[1].state != kNSpPlayerState_Offline; i++)
+        {
+            CHECK(!NSpMessage_Get(host));
+            SDL_Delay(1);
+        }
+        CHECK(host->players[1].state == kNSpPlayerState_Offline);
+        CHECK(NSpGame_GetActivePlayersIDMask(host) == 1);
+        CloseSocket(&legacy);
     }
-    CHECK(host->players[1].state == kNSpPlayerState_Offline);
-    CHECK(NSpGame_GetActivePlayersIDMask(host) == 1);
-    CloseSocket(&legacy);
 
     // A send failure before join approval also recycles silently.
     LobbyInfo pendingLobby = {.hostAddr = address};
@@ -152,6 +156,21 @@ static void Session(void)
         CHECK(connect(silent[i], (struct sockaddr*)&address, sizeof(address)) == 0);
         CHECK(AcceptClient(host) == i + 1);
     }
+
+    // The host plus MAX_CLIENTS-1 clients fill the lobby (host + 5 clients, as in the
+    // original game). One more client is denied instead of being given a slot.
+    int overflow = socket(AF_INET, SOCK_STREAM, 0);
+    CHECK(connect(overflow, (struct sockaddr*)&address, sizeof(address)) == 0);
+    CHECK(AcceptClient(host) == -1);
+    NSpJoinDeniedMessage denied = {0};
+    WaitReadable(overflow);
+    CHECK(recv(overflow, &denied, sizeof(denied), MSG_WAITALL) == sizeof(denied));
+    CHECK(denied.header.what == kNSpJoinDenied && denied.header.messageLen == sizeof(denied));
+    CHECK(strcmp(denied.reason, "THE GAME IS FULL.") == 0);
+    CloseSocket(&overflow);
+    for (int i = 1; i < MAX_CLIENTS; i++)
+        CHECK(host->players[i].state == kNSpPlayerState_AwaitingHandshake);
+
     CHECK(send(silent[0], "C", 1, MSG_NOSIGNAL) == 1);
     testNow += NSP_HANDSHAKE_TIMEOUT_MS - 1;
     CHECK(!NSpMessage_Get(host));
