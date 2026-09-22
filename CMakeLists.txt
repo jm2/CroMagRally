@@ -615,6 +615,7 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 		Source/Network/NetValidation.c
 		Source/Skeleton/SkeletonValidation.c
 		Source/System/InputState.c
+		Source/System/LocalPlayers.c
 		Source/System/LZSSDecode.c
 		Source/3D/BG3DValidation.c
 		Source/System/DeterministicMath.c
