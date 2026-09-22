@@ -360,9 +360,9 @@ const StartSlotTableEntry kStartSlotTable[] =
 		{
 			{ 33900,  20300,  4 },	// p6: moved 310 from the rule
 			{ 27970,  16747,  8 },	// p7: rule
-			{ 24515,  22594, 13 },	// p8: rule
-			{ 26500,  19500, 11 },	// p9: moved 1611 from the rule
-			{ 25800,  23000, 14 },	// p10: moved 1467 from the rule
+			{ 24300,  22800, 13 },	// p8: moved 297 from the rule
+			{ 26200,  19700, 11 },	// p9: moved 1630 from the rule
+			{ 26100,  23000, 14 },	// p10: moved 1518 from the rule
 			{ 31200,  19700,  4 },	// p11: moved 2321 from the rule
 		},
 	},
@@ -471,7 +471,7 @@ const StartSlotTableEntry kStartSlotTable[] =
 			{ 14800,  12450, 10 },	// p6: rule
 			{ 43400,  42300,  2 },	// p7: moved 790 from the rule
 			{ 14900,  10900, 10 },	// p8: moved 300 from the rule
-			{ 42900,  43200,  1 },	// p9: moved 570 from the rule, turned -1/16 for a clear run
+			{ 42900,  43200,  1 },	// p9: moved 570 from the rule, turned -1/16 (straight: wall 650 ahead (46% over 200))
 			{ 14800,  13700, 10 },	// p10: moved 2280 from the rule
 			{ 44300,  44600,  2 },	// p11: moved 2282 from the rule
 		},
@@ -491,11 +491,11 @@ const StartSlotTableEntry kStartSlotTable[] =
 		.extra =
 		{
 			{ 30100,  23900,  4 },	// p6: moved 232 from the rule
-			{ 27700,  23100,  7 },	// p7: moved 2616 from the rule, turned -1/16 for a clear run
+			{ 28500,  22200,  8 },	// p7: moved 2701 from the rule, turned +1/16 (straight: team torch 1450 ahead)
 			{ 29270,  26310,  1 },	// p8: rule
-			{ 26800,  25500, 15 },	// p9: moved 2666 from the rule
+			{ 26800,  25500, 14 },	// p9: moved 2666 from the rule, turned -1/16 (straight: on the nose of p3)
 			{ 27400,  26600,  0 },	// p10: moved 1174 from the rule
-			{ 29200,  22000,  6 },	// p11: moved 548 from the rule
+			{ 30000,  22700,  5 },	// p11: moved 1522 from the rule
 		},
 	},
 	{
@@ -557,7 +557,7 @@ const StartSlotTableEntry kStartSlotTable[] =
 		.extra =
 		{
 			{ 25600,  41900,  0 },	// p6: moved 509 from the rule
-			{ 37500,   9100,  7 },	// p7: moved 710 from the rule, turned +1/16 for a clear run
+			{ 37500,   9100,  7 },	// p7: moved 710 from the rule, turned +1/16 (straight: wall 1000 ahead (35% over 200))
 			{ 25800,  40000,  0 },	// p8: moved 1615 from the rule
 			{ 37400,  10300,  6 },	// p9: moved 1680 from the rule
 			{ 25900,  42750,  0 },	// p10: rule

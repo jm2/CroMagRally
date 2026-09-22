@@ -2,8 +2,8 @@
 """Checks Source/Terrain/StartSlotTable.c, the generated start slots for players 6-11.
 
 Re-validates every slot in the checked-in table against the shipped playfields (spacing,
-fences, flatness and height, water, obstacles, map bounds, a clear run ahead, CTF sides,
-the checkpoint rule),
+fences, flatness and height, water, obstacles, map bounds, a clear run ahead, no car on
+another's nose, CTF sides, the checkpoint rule),
 checks that the table is exactly what tools/gen_start_slots.py generates today, and checks
 that the validator rejects each kind of bad slot. Uses only the standard library.
 
@@ -112,6 +112,30 @@ class StartSlotTableTests(unittest.TestCase):
         # The first table's China p11 faced a 63% bank 950 ahead, though the average grade over
         # the whole run was only 21%.
         self.assertRejected(self.problems_with('BronzeAge_China', gen.SET_RACE, 11, 24350, 71750), 'wall 950 ahead')
+
+    def test_rejects_slot_inside_the_battle_ring(self):
+        # The first table's Spiral p7, where four authored cars' headings converged.
+        self.assertRejected(self.problems_with('Battle_Spiral', gen.SET_BATTLE, 7, 27700, 23100, 7),
+                            'inside the authored ring')
+
+    def test_rejects_car_on_a_nose(self):
+        md = self.map('Battle_Coliseum')
+        p0 = md.authored(False)[0]
+        f = gen.heading(p0.rot16)
+        spot = (p0.x - f[1] * 1500, p0.z + f[0] * 1500)            # 1500 beside p0, facing it
+        rot = gen.rot16_towards(p0.x - spot[0], p0.z - spot[1])
+        self.assertRejected(self.problems_with('Battle_Coliseum', gen.SET_BATTLE, 6, spot[0], spot[1], rot),
+                            'p0 is on its nose')
+
+    def test_on_nose_rule(self):
+        car = gen.Slot(0, 0, 0, 0)                                  # faces -z
+        self.assertTrue(gen.on_nose(car, gen.Slot(1, 100, -2900, 8)))      # head-on, 2900 ahead
+        self.assertFalse(gen.on_nose(car, gen.Slot(1, 100, -3100, 8)))
+        self.assertTrue(gen.on_nose(car, gen.Slot(1, -400, -1900, 4)))     # crossing, 1900 ahead
+        self.assertFalse(gen.on_nose(car, gen.Slot(1, -400, -2100, 4)))
+        self.assertFalse(gen.on_nose(car, gen.Slot(1, 600, -1000, 4)))     # beside the path
+        self.assertFalse(gen.on_nose(car, gen.Slot(1, 0, -1000, 2)))       # following, 45 degrees off
+        self.assertFalse(gen.on_nose(car, gen.Slot(1, 0, 1000, 8)))        # behind
 
     def test_rejects_water(self):
         md = self.map('BronzeAge_Egypt')

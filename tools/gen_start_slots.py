@@ -17,7 +17,8 @@ procedural rule (Source/Terrain/StartSlots.c).
           single slots move to the best spot nearby.
   battle  Each slot keeps the procedural rule's spot (a second, wider ring rotated half a slot)
           if that passes, else takes the best passing spot nearby: close to the rule's spot, on
-          flat ground, with room around it. Slots face the ring's centre.
+          flat ground, with room around it, outside the authored ring. Slots face the ring's
+          centre, and no two cars start on each other's nose.
   ctf     Likewise from the rule's spot (a column beside each team's line, towards the arena),
           on the team's own half of the arena, with the team's heading.
 
@@ -90,6 +91,12 @@ MAX_STEP_GRADE = 0.35   # nor climbs or drops steeper than this over any 200-uni
 # (Atlantis 1450); authored arena slots >= 1500, except Maze battle p4 (1350) and four CTF slots
 # that start by a hedge or on a slope (Maze p0, TarPits p1 and p5, Ramps p3).
 CLEAR_RUN = {'race': 2000, 'battle': 1500, 'ctf': 1500}
+# No generated slot may sit on another car's nose, or have one on its own: within PATH_RANGE ahead
+# and PATH_WIDTH to either side of the heading, unless both face within 2/16 turn of each other
+# (a car following another, as on a race grid), and within HEADON_RANGE when they face each other
+# (7/16 turn or more apart). Authored rings: the nearest car on a nose is 1350 ahead (Spiral p3 to
+# p4), then 1945 and 2157; cars facing each other are >= 3050 apart.
+PATH_RANGE, PATH_WIDTH, HEADON_RANGE = 2000, 500, 3000
 RACE_GAP = 1300         # the procedural rule's gap between the authored grid and its copy
 RACE_BEHIND = 900       # race slots stay this far behind the rearmost authored slot, so every
                         # human swapped into them starts behind every CPU on an authored slot
@@ -381,6 +388,8 @@ class Context:
         if set_name == SET_RACE:
             self.rear = min(self.depth(s.pos) for s in authored)
             self.p0_gap = self.depth(authored[0].pos) - self.rear
+        if set_name == SET_BATTLE:
+            self.ring = min(dist(s.pos, (self.cx, self.cz)) for s in authored)
         if set_name == SET_CTF:
             b0, b1 = md.bases[0], md.bases[1]
             self.bisector = ((b0[0] + b1[0]) / 2, (b0[1] + b1[1]) / 2)
@@ -436,6 +445,10 @@ def check_site(ctx, slot, full=False):
             if m['behind'] < RACE_BEHIND and failed('only %d behind the authored grid' % m['behind']):
                 break
             if slot.rot16 != src.rot16 and failed('heading differs from the grid'):
+                break
+        if ctx.set == SET_BATTLE:
+            m['radius'] = dist(p, (ctx.cx, ctx.cz))
+            if m['radius'] < ctx.ring and failed('inside the authored ring (%d from its centre, ring %d)' % (m['radius'], ctx.ring)):
                 break
         if ctx.set == SET_CTF:
             m['side'] = ctx.side(slot)
@@ -503,7 +516,35 @@ def check_slot(ctx, slot, others, full=False):
     m['fence_nbr'] = ctx.md.fence_between(p, nearest.pos)
     if m['fence_nbr']:
         fails.append('fence between it and its neighbour p%d' % nearest.player)
+        if not full:
+            return fails, m
+    m['path'] = path_conflict(slot, others)
+    if m['path']:
+        fails.append(m['path'])
     return fails, m
+
+
+def on_nose(a, b):
+    """True if car b starts on car a's nose: in a's path (PATH_RANGE ahead, or HEADON_RANGE when
+    they face each other, and PATH_WIDTH to either side), unless both face the same way."""
+    turn = abs(turn16(a.rot16, b.rot16))
+    if turn <= 2:
+        return False
+    f = heading(a.rot16)
+    dx, dz = b.x - a.x, b.z - a.z
+    ahead = dx * f[0] + dz * f[1]
+    side = dz * f[0] - dx * f[1]
+    return 0 < ahead <= (HEADON_RANGE if turn >= 7 else PATH_RANGE) and abs(side) <= PATH_WIDTH
+
+
+def path_conflict(slot, others):
+    """Why slot and another car would drive into each other at the start, or None."""
+    for o in sorted(others, key=lambda o: o.player):
+        if on_nose(o, slot):
+            return 'on the nose of p%d' % o.player
+        if on_nose(slot, o):
+            return 'p%d is on its nose' % o.player
+    return None
 
 
 def set_problems(ctx, extra):
@@ -721,9 +762,12 @@ def generate_arena(ctx):
         spot = nearest_valid(ctx, target, others, preferred)
         if spot is None:
             raise SystemExit('%s %s: no valid spot for player %d' % (ctx.md.name, ctx.set, p))
-        turn = turn16(preferred(spot.x, spot.z), spot.rot16)
-        spot.note = 'moved %d from the rule' % dist(spot.pos, target.pos) + \
-            (', turned %+d/16 for a clear run' % turn if turn else '')
+        spot.note = 'moved %d from the rule' % dist(spot.pos, target.pos)
+        want = preferred(spot.x, spot.z)
+        if spot.rot16 != want:                      # say why the preferred heading didn't do
+            straight = Slot(p, spot.x, spot.z, want)
+            straight.source = ctx.source_for(straight)
+            spot.note += ', turned %+d/16 (straight: %s)' % (turn16(want, spot.rot16), check_slot(ctx, straight, others)[0][0])
         placed.append(spot)
     return placed
 
@@ -886,6 +930,8 @@ def summary(ctx, results):
         n = len(ctx.md.pf.checkpoints)
         bits.append('min behind %d' % min(m.get('behind', 0) for m in ms))
         bits.append('%d behind ckpt N-1' % sum(1 for m in ms if n - 1 in m.get('checkpoints', [])))
+    if ctx.set == SET_BATTLE:
+        bits.append('min radius %d (ring %d)' % (min(m.get('radius', 0) for m in ms), ctx.ring))
     if ctx.set == SET_CTF:
         bits.append('min side %d' % min(m.get('side', 0) for m in ms))
     failed = sum(1 for _, fails, _ in results if fails)
@@ -911,6 +957,8 @@ def report(sets):
                 bits.append('behind %5d' % m.get('behind', 0))
                 if n - 1 in m.get('checkpoints', []):
                     bits.append('behind ckpt N-1')
+            if ctx.set == SET_BATTLE:
+                bits.append('radius %4d' % m.get('radius', 0))
             if ctx.set == SET_CTF:
                 bits.append('side %5d' % m.get('side', 0))
             bits.append('OK' if not fails else 'FAIL: ' + '; '.join(fails))
@@ -1004,14 +1052,29 @@ def render_previews(sets, out_dir):
     for ctx, extra in sets:
         by_map.setdefault(ctx.md.name, []).append((ctx, extra))
 
+    def region(md, set_name, pts):
+        """The world square a preview shows: the whole arena for CTF, else the slots plus room."""
+        if set_name == SET_CTF:
+            nz = [(r, c) for r, row in enumerate(md.pf.stGrid) for c, v in enumerate(row) if v > 0]
+            r0, r1 = min(r for r, _ in nz), max(r for r, _ in nz)
+            c0, c1 = min(c for _, c in nz), max(c for _, c in nz)
+            su = terlib.SUPERTILE_UNITS
+            span = max(c1 - c0 + 1, r1 - r0 + 1) * su
+            return c0 * su, r0 * su, c0 * su + span, r0 * su + span
+        mx = (min(p[0] for p in pts) + max(p[0] for p in pts)) / 2
+        mz = (min(p[1] for p in pts) + max(p[1] for p in pts)) / 2
+        half = max(max(p[0] for p in pts) - min(p[0] for p in pts),
+                   max(p[1] for p in pts) - min(p[1] for p in pts)) / 2 + (3000 if set_name == SET_RACE else 2000)
+        return mx - half, mz - half, mx + half, mz + half
+
     race_tiles, arena_tiles = [], []
+    px = 460
     for name, entries in by_map.items():
         md = entries[0][0].md
-        views = []
-        for label, pick in (('before: procedural rule', 'rule'), ('after: table', 'table')):
-            groups = []
-            allpts = []
-            for ctx, extra in entries:
+        rows = []
+        for ctx, extra in entries:                  # one row per slot set: before | after
+            views = []
+            for label, pick in (('before: procedural rule', 'rule'), ('after: table', 'table')):
                 if pick == 'rule':
                     gen = []
                     for p, x, z, rot, src in rule_slots(ctx):
@@ -1029,35 +1092,23 @@ def render_previews(sets, out_dir):
                     bad = {s.player for s, fails, _ in validate_set(ctx, extra) if s is not None and fails}
                 shipped = [(s, rot_of(s)) for s in ctx.authored]
                 if ctx.set == SET_CTF:
-                    groups.append((shipped, lambda s: TEAM[s.team]))
-                    groups.append((gen, lambda s, bad=bad: BAD if s.player in bad else NEW_TEAM[s.team]))
+                    groups = [(shipped, lambda s: TEAM[s.team]),
+                              (gen, lambda s, bad=bad: BAD if s.player in bad else NEW_TEAM[s.team])]
                 else:
-                    groups.append((shipped, lambda s: SHIPPED))
-                    groups.append((gen, lambda s, bad=bad: BAD if s.player in bad else GOOD))
-                allpts += [(s.x, s.z) for s, _ in shipped + gen]
-            views.append((label, groups, allpts))
-        if md.is_arena:
-            nz = [(r, c) for r, row in enumerate(md.pf.stGrid) for c, v in enumerate(row) if v > 0]
-            r0, r1 = min(r for r, _ in nz), max(r for r, _ in nz)
-            c0, c1 = min(c for _, c in nz), max(c for _, c in nz)
-            su = terlib.SUPERTILE_UNITS
-            span = max(c1 - c0 + 1, r1 - r0 + 1) * su
-            x0, z0 = c0 * su, r0 * su
-            x1, z1 = x0 + span, z0 + span
-            px = 560
-        else:
-            pts = views[0][2] + views[1][2]
-            mx = (min(p[0] for p in pts) + max(p[0] for p in pts)) / 2
-            mz = (min(p[1] for p in pts) + max(p[1] for p in pts)) / 2
-            half = max(max(p[0] for p in pts) - min(p[0] for p in pts),
-                       max(p[1] for p in pts) - min(p[1] for p in pts)) / 2 + 3000
-            x0, z0, x1, z1 = mx - half, mz - half, mx + half, mz + half
-            px = 460
-        base = base_image(md, x0, z0, x1, z1, px)
-        pair = Image.new('RGB', (px * 2 + 6, px), (20, 20, 24))
-        for i, (label, groups, _) in enumerate(views):
-            im = draw(md, base.copy(), x0, z0, x1, z1, groups, '%s  %s' % (name.split('_')[1], label))
-            pair.paste(im, (i * (px + 6), 0))
+                    groups = [(shipped, lambda s: SHIPPED),
+                              (gen, lambda s, bad=bad: BAD if s.player in bad else GOOD)]
+                views.append((label, groups, [(s.x, s.z) for s, _ in shipped + gen]))
+            x0, z0, x1, z1 = region(md, ctx.set, views[0][2] + views[1][2])
+            base = base_image(md, x0, z0, x1, z1, px)
+            row = Image.new('RGB', (px * 2 + 6, px), (20, 20, 24))
+            title = name.split('_')[1] + ('' if ctx.set == SET_RACE else ' ' + ctx.set)
+            for i, (label, groups, _) in enumerate(views):
+                im = draw(md, base.copy(), x0, z0, x1, z1, groups, '%s  %s' % (title, label))
+                row.paste(im, (i * (px + 6), 0))
+            rows.append(row)
+        pair = Image.new('RGB', (px * 2 + 6, len(rows) * (px + 6) - 6), (20, 20, 24))
+        for i, row in enumerate(rows):
+            pair.paste(row, (0, i * (px + 6)))
         pair.save(os.path.join(out_dir, name + '.png'))
         (arena_tiles if md.is_arena else race_tiles).append(pair)
 
@@ -1081,8 +1132,8 @@ def render_previews(sets, out_dir):
               'magenta circles = obstacle clearance   blue boxes = water patches, black = tar']
     sheet(race_tiles, 2, 'Race grids: shipped slots 1-6 (blue) + slots 7-12 (green)', legend,
           os.path.join(out_dir, 'race_grids.png'))
-    sheet(arena_tiles, 2, 'Arenas: battle ring (blue shipped, green new) + CTF (red/green shipped, '
-          'pink/light green new); squares = team bases', legend, os.path.join(out_dir, 'arenas.png'))
+    sheet(arena_tiles, 2, 'Arenas: battle ring (top; blue shipped, green new) + CTF (bottom; red/green '
+          'shipped, pink/light green new); squares = team bases', legend, os.path.join(out_dir, 'arenas.png'))
 
 
 # ---- main --------------------------------------------------------------------------------------
