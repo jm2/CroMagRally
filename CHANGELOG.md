@@ -1,5 +1,17 @@
 # Cro-Mag Rally Changelog
 
+- **Unreleased**
+    - Restore six-player LAN and Wi-Fi games (host plus five clients), as in the original game. The network protocol is now CMR9, so older builds can't join newer hosts and vice versa.
+    - Fix HUD, POW-timer and gamepad-hint state being indexed by network player number. In four-player LAN games the third and fourth players' HUD icons were laid out from split-screen pane data the renderer never refreshes; with six players, players 5 and 6 would have read and written out of bounds.
+    - CPU cars no longer get stuck floating after being knocked into deep water, which stranded them for the rest of the race on Egypt and the Jungle river.
+    - Fix an intermittent NaN when a submarine was pushed into a fence while barely moving, which froze it and broke terrain streaming around its camera.
+    - Guard car, submarine and camera motion against non-finite values: a bad value now resets to the last finite state and is logged once, instead of freezing the vehicle for the rest of the race.
+    - Fix a car starting behind the last checkpoint running the whole race a lap down. No shipped grid does this, but larger grids do.
+    - Pick CPU cars with a tested rule that reuses CPU cars instead of running past the car list when CPUs outnumber free cars; six-car races pick exactly the same cars as before.
+    - Harden player-count limits: supertile player masks cover up to 16 players, place numbers and announcer lines can't index past their tables, the collision list checks its capacity before writing, and the self-running demo's last place follows the player count.
+    - Sample each car's starting height at its own start position (an original typo used the x coordinate twice).
+    - Developers: add `--join-address HOST[:PORT]` to join a LAN game directly without discovery, smoke-only `--smoke-net-players`/`--smoke-net-refusals` auto-start, `--print-max-net-players`, and `Tests/NetworkSmokeTests.py` for headless multi-instance LAN runs. A `--smoke-test-frames` run that ends before its completion line now exits with status 1.
+
 - **3.1.1 (July 15, 2026)**
     - Use one pinned SDL3 source checkout across every supported platform.
     - Harden network message validation, deterministic simulation, session teardown, preferences, input handling, and mobile lifecycle behavior.
