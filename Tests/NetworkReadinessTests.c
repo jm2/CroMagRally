@@ -795,6 +795,36 @@ static void SmokeLobbyAutoStart(void)
     EndSession(peers);
 }
 
+// One human and a full grid of CPUs in a local practice race.
+static void BeginLocalPractice(void)
+{
+    memset(gPlayerInfo, 0, sizeof(gPlayerInfo));
+    gNetGameInProgress = gIsNetworkHost = gIsNetworkClient = false;
+    gGameMode = GAME_MODE_PRACTICE;
+    gNumRealPlayers = 1;
+    gNumTotalPlayers = MAX_PLAYERS;
+    for (int i = 1; i < gNumTotalPlayers; i++) gPlayerInfo[i].isComputer = true;
+    unlockedAges = 0;
+    gDifficulty = DIFFICULTY_MEDIUM;
+}
+
+// Local games pick CPU vehicles through the extracted picker, in player order.
+static void LocalCPUVehicles(void)
+{
+    static const short freeCars[] = {CAR_TYPE_TURTLE, CAR_TYPE_LOG, CAR_TYPE_GEODE,
+        CAR_TYPE_BONEBUGGY, CAR_TYPE_MAMMOTH}; // best starter cars first, skipping the human's
+    BeginLocalPractice();
+    gPlayerInfo[0].vehicleType = CAR_TYPE_ROCK;
+    InitPlayersAtStartOfLevel();
+    CHECK(gPlayerInfo[0].vehicleType == CAR_TYPE_ROCK);
+    for (int i = 1; i < gNumTotalPlayers; i++)
+        CHECK(gPlayerInfo[i].vehicleType == freeCars[(i - 1) % 5]);
+    gDifficulty = DIFFICULTY_HARD; // the RandomRange stub returns its minimum
+    InitPlayersAtStartOfLevel();
+    for (int i = 1; i < gNumTotalPlayers; i++)
+        CHECK(gPlayerInfo[i].vehicleType == CAR_TYPE_MAMMOTH);
+}
+
 int main(void)
 {
     Readiness(VEHICLE_READY_TIMEOUT_MS, kNetSequence_WaitingForPlayerVehicles, kNetSequence_GotAllPlayerVehicles);
@@ -823,6 +853,7 @@ int main(void)
     CapacityInGameDepartures();
     DirectJoin();
     SmokeLobbyAutoStart();
-    puts("Readiness, paused-leave and full-lobby tests passed");
+    LocalCPUVehicles();
+    puts("Readiness, paused-leave, full-lobby and local CPU vehicle tests passed");
     return 0;
 }
