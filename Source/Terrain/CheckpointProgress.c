@@ -18,7 +18,7 @@
 // "went back"; neither was reachable, so they're gone.
 //
 
-Boolean CrossCheckpoint(short *checkpointNum, Boolean *checkpointTagged, long numCheckpoints, short c)
+Boolean CrossCheckpoint(short lapNum, short *checkpointNum, Boolean *checkpointTagged, long numCheckpoints, short c)
 {
 short	oldCheckpoint = *checkpointNum;
 Boolean	didLap = false;
@@ -60,6 +60,19 @@ Boolean	didLap = false;
 	{
 		*checkpointNum = c;
 		checkpointTagged[c] = true;
+	}
+
+			/* STARTED BEHIND THE LAST CHECKPOINT */
+			//
+			// A grid slot behind checkpoint N-1 crosses it forward before ever reaching
+			// the finish line. Every tag is still set from InitPlayersAtStartOfLevel, so
+			// keep that state instead of treating it as driving backward, which would
+			// untag N-1 and leave the car a lap down.
+			//
+	else
+	if (lapNum < 0 && c == oldCheckpoint && c == numCheckpoints - 1)
+	{
+		// nothing changes until the finish line starts lap 0
 	}
 
 			/* SEE IF WENT BACK */

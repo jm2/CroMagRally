@@ -33,7 +33,7 @@ static Boolean Cross(Racer* r, short c)
 {
 	CHECK(!r->raceComplete);								// UpdatePlayerCheckpoints stops after the race
 	CHECK(0 <= c && c < r->numCheckpoints);
-	Boolean lap = CrossCheckpoint(&r->checkpointNum, r->tagged, r->numCheckpoints, c);
+	Boolean lap = CrossCheckpoint(r->lapNum, &r->checkpointNum, r->tagged, r->numCheckpoints, c);
 	CHECK(0 <= r->checkpointNum && r->checkpointNum < r->numCheckpoints);
 	if (lap)
 	{
@@ -93,6 +93,41 @@ static void TestReverseAtGrid(long n)
 	CHECK(r.lapNum == -1 && r.checkpointNum == n - 1);
 	CHECK(Cross(&r, 0));
 	DriveRestOfRace(&r);
+}
+
+// A slot behind checkpoint N-1 crosses it forward first. That must leave the car
+// exactly where a grid car is, so it starts lap 0 at the finish line instead of
+// running the race a lap down.
+static void TestStartBehindLastCheckpoint(long n)
+{
+	Racer r = StartRace(n);
+	CHECK(!Cross(&r, (short)(n - 1)));
+	CHECK(r.lapNum == -1 && r.checkpointNum == n - 1 && CountTags(&r) == n);
+	CHECK(!Cross(&r, (short)(n - 1)));						// reversing over it again changes nothing
+	CHECK(!Cross(&r, (short)(n - 1)));
+	CHECK(r.lapNum == -1 && r.checkpointNum == n - 1 && CountTags(&r) == n);
+	CHECK(Cross(&r, 0));
+	CHECK(r.lapNum == 0 && r.checkpointNum == 0 && CountTags(&r) == 0);
+	DriveRestOfRace(&r);
+}
+
+// The start exception ends with the first lap: after that, backing over N-1
+// untags it like any other checkpoint.
+static void TestStartExceptionOnlyBeforeFirstLap(long n)
+{
+	Racer r = StartRace(n);
+	CHECK(!Cross(&r, (short)(n - 1)));
+	CHECK(Cross(&r, 0));
+	for (short c = 1; c < n; c++)
+		CHECK(!Cross(&r, c));
+	CHECK(!Cross(&r, (short)(n - 1)));
+	CHECK(r.lapNum == 0 && r.checkpointNum == n - 2 && !r.tagged[n - 1]);
+	CHECK(!Cross(&r, (short)(n - 2)));						// keep reversing
+	CHECK(r.checkpointNum == n - 3 && !r.tagged[n - 2]);
+	CHECK(!Cross(&r, (short)(n - 2)));
+	CHECK(!Cross(&r, (short)(n - 1)));
+	CHECK(Cross(&r, 0));
+	CHECK(r.lapNum == 1);
 }
 
 // A slot two or more checkpoints back reads its first crossing as going backward,
@@ -211,6 +246,8 @@ int main(void)
 	{
 		TestGridStart(n);
 		TestReverseAtGrid(n);
+		TestStartBehindLastCheckpoint(n);
+		TestStartExceptionOnlyBeforeFirstLap(n);
 		TestStartBehindEarlierCheckpoint(n);
 		TestBackOverFinishLine(n);
 		TestBackOverMiddleCheckpoint(n);

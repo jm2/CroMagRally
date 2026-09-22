@@ -102,7 +102,8 @@ OGLVector2D	checkToCheck,aim,deltaVec;
 
 		if (IntersectLineSegments(playerFromX, playerFromZ, playerToX, playerToZ,x1,z1,x2,z2,&intersectX, &intersectZ))
     	{
-			if (CrossCheckpoint(&gPlayerInfo[p].checkpointNum, gPlayerInfo[p].checkpointTagged, gNumCheckpoints, c))
+			if (CrossCheckpoint(gPlayerInfo[p].lapNum, &gPlayerInfo[p].checkpointNum,
+					gPlayerInfo[p].checkpointTagged, gNumCheckpoints, c))
 				NextLap(p);
 			break;
 		}
