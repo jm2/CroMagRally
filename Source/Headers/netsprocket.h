@@ -16,14 +16,14 @@ typedef int sockfd_t;
 #define INVALID_SOCKET (-1)
 #endif
 
-#define MAX_CLIENTS MAX_LOCAL_PLAYERS
+#define MAX_CLIENTS MAX_PLAYERS				// NSp player slots incl. the host's (ID 0), so MAX_CLIENTS-1 clients can join (the original game's 6-player LAN)
 #define kNSpPlayerNameLength 32
 #define NSP_HANDSHAKE_TIMEOUT_MS 10000u
 #define NSP_LOBBY_EXPIRY_MS 5000u
 #define kNSpMaxPayloadLength 512			// CMR7: bumped 256->512 to fit the wider host control msg (must change with the 4CC)
 #define kNSpMaxMessageLength (kNSpMaxPayloadLength + sizeof(NSpMessageHeader))
 
-#define kNSpCMRProtocol4CC 'CMR8'			// CMR8 requires initialized readiness fields; reject older peers at handshake
+#define kNSpCMRProtocol4CC 'CMR9'			// CMR9 accepts MAX_CLIENTS network players (CMR8 validated at most 4); reject older peers at handshake
 
 typedef enum
 {

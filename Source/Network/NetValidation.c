@@ -2,6 +2,13 @@
 #include "net_validation.h"
 #include <math.h>
 
+// The lobby hands every network player (host + clients) a gPlayerInfo slot, readiness and
+// active-player masks hold one bit per NSp player ID, and every client may leave in the same
+// host frame, each scheduling a become-bot event that must fit in one host control message.
+_Static_assert(MAX_CLIENTS <= MAX_PLAYERS, "every network player needs a player slot");
+_Static_assert(MAX_CLIENTS <= 32, "NSp player-ID masks are uint32_t");
+_Static_assert(NET_MAX_PENDING_EVENTS >= MAX_CLIENTS - 1, "one pending become-bot event per client");
+
 int NetNormalizeRefreshRate(int refreshRate)
 {
 	if (refreshRate < NET_MIN_FPS)
@@ -101,7 +108,7 @@ Boolean NetValidateConfigPayload(const NetConfigMessage* message)
 	return message->age >= 0
 		&& message->age < NUM_AGES
 		&& message->numPlayers >= 1
-		&& message->numPlayers <= MAX_LOCAL_PLAYERS
+		&& message->numPlayers <= MAX_CLIENTS						// network players, not this machine's split-screen players
 		&& message->playerNum >= 0
 		&& message->playerNum < message->numPlayers
 		&& message->difficulty < NUM_DIFFICULTIES
@@ -172,7 +179,7 @@ Boolean NetValidateHostControlPayload(const NetHostControlInfoMessageType* messa
 	const float maxAbsSyncCoord = 1000000.0f;
 	const float maxAbsSyncRotation = 1000000.0f;
 
-	if (!message || numRealPlayers < 1 || numRealPlayers > MAX_LOCAL_PLAYERS)
+	if (!message || numRealPlayers < 1 || numRealPlayers > MAX_CLIENTS)
 		return false;
 
 	if (!isfinite(message->fps)

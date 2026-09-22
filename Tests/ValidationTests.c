@@ -270,7 +270,15 @@ static void TestConfigValidation(void)
 	message.targetFPS = 60;
 	assert(NetValidateConfigPayload(&message));
 
-	message.numPlayers = MAX_LOCAL_PLAYERS + 1;
+	message.numPlayers = MAX_CLIENTS;						// full lobby: host + MAX_CLIENTS-1 clients
+	message.playerNum = MAX_CLIENTS - 1;
+	assert(NetValidateConfigPayload(&message));
+	message.playerNum = MAX_LOCAL_PLAYERS;					// more network players than split-screen panes
+	assert(NetValidateConfigPayload(&message));
+	message.numPlayers = MAX_CLIENTS + 1;
+	message.playerNum = 1;
+	assert(!NetValidateConfigPayload(&message));
+	message.playerNum = MAX_CLIENTS;
 	assert(!NetValidateConfigPayload(&message));
 	message.numPlayers = 2;
 	message.playerNum = 2;
@@ -381,7 +389,8 @@ static void TestHostControlValidation(void)
 	assert(NetValidateHostControlPayload(&message, 4));
 	assert(!NetValidateHostControlPayload(NULL, 4));
 	assert(!NetValidateHostControlPayload(&message, 0));
-	assert(!NetValidateHostControlPayload(&message, MAX_LOCAL_PLAYERS + 1));
+	assert(NetValidateHostControlPayload(&message, MAX_CLIENTS));
+	assert(!NetValidateHostControlPayload(&message, MAX_CLIENTS + 1));
 
 	const float rates[] = {0, 1, 8, 9, 1000, 1001};
 	for (size_t i = 0; i < sizeof(rates) / sizeof(rates[0]); i++)
@@ -491,6 +500,11 @@ static void TestHostControlValidation(void)
 	assert(!NetValidateHostControlPayload(&message, 4));
 	message.events[0].playerNum = 4;
 	assert(!NetValidateHostControlPayload(&message, 4));
+	assert(NetValidateHostControlPayload(&message, MAX_CLIENTS));
+	message.events[0].playerNum = MAX_CLIENTS - 1;
+	assert(NetValidateHostControlPayload(&message, MAX_CLIENTS));
+	message.events[0].playerNum = MAX_CLIENTS;
+	assert(!NetValidateHostControlPayload(&message, MAX_CLIENTS));
 	message.events[0].playerNum = 0;
 	message.events[0].pad = 1;
 	assert(!NetValidateHostControlPayload(&message, 4));
