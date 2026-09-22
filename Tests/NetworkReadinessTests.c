@@ -42,6 +42,15 @@ void ShowWinLose(short playerNum, Byte mode, short winner)
     winLoseWinner[playerNum] = winner;
 }
 Boolean GetNewNeedStateAnyP(int needID) { return needID == kNeed_UIBack && backPressed; }
+void DoAlert(const char* format, ...)
+{
+    va_list args;
+    va_start(args, format);
+    vfprintf(stderr, format, args);
+    va_end(args);
+    fputc('\n', stderr);
+    exit(1); // no scenario here expects a user-facing alert
+}
 
 // Keep real level player initialization; isolate terrain/model/physics setup.
 int GetNumAgesCompleted(void) { return unlockedAges; }
@@ -59,8 +68,31 @@ ObjNode* InitPlayer_Submarine(int playerNum, OGLPoint3D* where, float rotY)
 void SetPhysicsForVehicleType(short playerNum) { (void)playerNum; }
 void SetDefaultCameraModeForAllPlayers(void) {}
 
-static NSpGame* BeginSession(NSpGame** first, NSpGame** second)
+#define SMALL_SESSION 3 // host + two clients: the original sparse-ID scenarios
+#define FULL_SESSION MAX_CLIENTS // host + every client slot
+
+// Dense game indices deliberately differ from sparse NSp IDs: clients take IDs in
+// reverse player order (3 peers: player 1 <-> ID 2, player 2 <-> ID 1).
+static NSpPlayerID PlayerNSpID(int numPlayers, int playerNum)
 {
+    return playerNum == 0 ? kNSpHostID : numPlayers - playerNum;
+}
+
+static int NSpIDPlayer(int numPlayers, NSpPlayerID id)
+{
+    return id == kNSpHostID ? 0 : numPlayers - id;
+}
+
+static uint32_t AllPeersMask(int numPlayers)
+{
+    return (uint32_t) ((1ull << numPlayers) - 1);
+}
+
+// Host plus numPlayers - 1 real loopback clients. peers[id] is the client whose NSp
+// ID is id; peers[kNSpHostID] is the host.
+static NSpGame* BeginSession(int numPlayers, NSpGame* peers[MAX_CLIENTS])
+{
+    CHECK(numPlayers >= 2 && numPlayers <= MAX_CLIENTS);
     ResetNetGameTransientState();
     memset(gPlayerInfo, 0, sizeof(gPlayerInfo));
     gNetGameInProgress = true;
@@ -74,7 +106,7 @@ static NSpGame* BeginSession(NSpGame** first, NSpGame** second)
     memset(winLoseMode, 0, sizeof(winLoseMode));
     memset(winLoseWinner, 0, sizeof(winLoseWinner));
     backPressed = false;
-    gNumGatheredPlayers = gNumRealPlayers = gNumTotalPlayers = 3;
+    gNumGatheredPlayers = gNumRealPlayers = gNumTotalPlayers = numPlayers;
     gGameMode = GAME_MODE_MULTIPLAYERRACE;
     gDifficulty = DIFFICULTY_MEDIUM;
     unlockedAges = 0;
@@ -82,30 +114,46 @@ static NSpGame* BeginSession(NSpGame** first, NSpGame** second)
     NSpGame* host = NSpGame_Host();
     CHECK(host);
     gNetPort = ntohs(Address(host->hostListenSocket).sin_port);
-    *first = Join(host);
-    *second = Join(host);
-    Drain(*first);
+    memset(peers, 0, MAX_CLIENTS * sizeof(*peers));
+    peers[kNSpHostID] = host;
+    for (int id = 1; id < numPlayers; id++)
+    {
+        peers[id] = Join(host);
+        CHECK(peers[id]->myID == id);
+    }
+    for (int id = 1; id < numPlayers; id++)
+        Drain(peers[id]); // announcements of later joiners
     gNetGame = host;
-    // Dense game indices deliberately differ from sparse NSp IDs.
-    gPlayerInfo[0].net.nspPlayerID = 0;
-    gPlayerInfo[1].net.nspPlayerID = 2;
-    gPlayerInfo[2].net.nspPlayerID = 1;
-    for (int i = 0; i < gNumTotalPlayers; i++) gPlayerInfo[i].health = 1;
+    for (int i = 0; i < gNumTotalPlayers; i++)
+    {
+        gPlayerInfo[i].net.nspPlayerID = PlayerNSpID(numPlayers, i);
+        gPlayerInfo[i].health = 1;
+    }
     return host;
 }
 
-static void EndSession(NSpGame* host, NSpGame* first, NSpGame* second)
+static void DisposeClients(NSpGame* peers[MAX_CLIENTS])
 {
-    NSpGame_Dispose(first, 0);
-    NSpGame_Dispose(second, 0);
-    NSpGame_Dispose(host, 0);
+    for (int id = 1; id < MAX_CLIENTS; id++)
+    {
+        if (peers[id])
+            NSpGame_Dispose(peers[id], 0);
+        peers[id] = NULL;
+    }
+}
+
+static void EndSession(NSpGame* peers[MAX_CLIENTS])
+{
+    DisposeClients(peers);
+    NSpGame_Dispose(peers[kNSpHostID], 0);
+    peers[kNSpHostID] = NULL;
     gNetGame = NULL;
 }
 
 static void Readiness(uint32_t timeout, int waiting, int ready)
 {
-    NSpGame *first, *second;
-    NSpGame* host = BeginSession(&first, &second);
+    NSpGame* peers[MAX_CLIENTS];
+    NSpGame* host = BeginSession(SMALL_SESSION, peers);
     if (waiting == kNetSequence_HostWaitForPlayersToPrepareLevel)
         InitPlayersAtStartOfLevel();
     ClearPlayerSyncMask();
@@ -125,14 +173,14 @@ static void Readiness(uint32_t timeout, int waiting, int ready)
     CHECK(!gPlayerInfo[2].isEliminated); // the replacement must retain car controls
     CHECK(gNumGatheredPlayers == 2);
     CHECK(gNumPlayersEliminated == 0); // race bots do not affect battle bookkeeping
-    CHECK(ExpectLeave(second) == 1);
-    EndSession(host, first, second);
+    CHECK(ExpectLeave(peers[2]) == 1);
+    EndSession(peers);
 }
 
 static void LastPeerTimeout(void)
 {
-    NSpGame *first, *second;
-    NSpGame* host = BeginSession(&first, &second);
+    NSpGame* peers[MAX_CLIENTS];
+    NSpGame* host = BeginSession(SMALL_SESSION, peers);
     NSpPlayer_Kick(host, 2);
     ApplyBecomeBot(1);
     CHECK(gNumGatheredPlayers == 2);
@@ -150,14 +198,13 @@ static void LastPeerTimeout(void)
     backPressed = true;
     CHECK(DoNetGatherControls() == -1);
     backPressed = false;
-    NSpGame_Dispose(first, 0);
-    NSpGame_Dispose(second, 0);
+    DisposeClients(peers);
 }
 
 static void SelectorResumesAfterTeardown(void)
 {
-    NSpGame *first, *second;
-    NSpGame* host = BeginSession(&first, &second);
+    NSpGame* peers[MAX_CLIENTS];
+    NSpGame* host = BeginSession(SMALL_SESSION, peers);
     CHECK(host);
     EndNetworkGame(); // production teardown performed by a failed vehicle broadcast
     gNetSequenceState = kNetSequence_ClientOfflineBecauseKicked;
@@ -170,14 +217,13 @@ static void SelectorResumesAfterTeardown(void)
     gatherScreenCalls = 0;
     CHECK(GetVehicleSelectionFromNetPlayers());
     CHECK(gatherScreenCalls == 0 && gNetSequenceState == kNetSequence_Offline);
-    NSpGame_Dispose(first, 0);
-    NSpGame_Dispose(second, 0);
+    DisposeClients(peers);
 }
 
 static void DelayedReady(void)
 {
-    NSpGame *first, *second;
-    NSpGame* host = BeginSession(&first, &second);
+    NSpGame* peers[MAX_CLIENTS];
+    NSpGame* host = BeginSession(SMALL_SESSION, peers);
     ClearPlayerSyncMask();
     MarkPlayerSynced(0);
     MarkPlayerSynced(1);
@@ -187,7 +233,7 @@ static void DelayedReady(void)
     HostAdvanceReadinessBarrier(LEVEL_READY_TIMEOUT_MS,
         kNetSequence_HostWaitForPlayersToPrepareLevel, kNetSequence_GameLoop);
     CHECK(gNetSequenceState == kNetSequence_GameLoop && NSpGame_GetNumActivePlayers(host) == 3);
-    EndSession(host, first, second);
+    EndSession(peers);
 }
 
 static void ExpectSurvivalWinner(void)
@@ -206,8 +252,8 @@ static void ExpectSurvivalWinner(void)
 
 static void SurvivalReadinessRemoval(bool alreadyEliminated)
 {
-    NSpGame *first, *second;
-    NSpGame* host = BeginSession(&first, &second);
+    NSpGame* peers[MAX_CLIENTS];
+    BeginSession(SMALL_SESSION, peers);
     gGameMode = GAME_MODE_SURVIVAL;
     if (alreadyEliminated) PlayerLoseHealth(2, 1);
     PlayerInfoType before[MAX_PLAYERS];
@@ -224,7 +270,7 @@ static void SurvivalReadinessRemoval(bool alreadyEliminated)
 
     // Replay the actual leave notification against the surviving peer's pre-drop
     // state, then use real damage/victory logic to prove it reaches the same winner.
-    NSpMessageHeader* leave = WaitMessage(second);
+    NSpMessageHeader* leave = WaitMessage(peers[2]);
     CHECK(leave->what == kNSpPlayerLeft);
     memcpy(gPlayerInfo, before, sizeof(before));
     gNumPlayersEliminated = alreadyEliminated ? 1 : 0;
@@ -232,18 +278,18 @@ static void SurvivalReadinessRemoval(bool alreadyEliminated)
     gTrackCompleted = false;
     gIsNetworkHost = false;
     gIsNetworkClient = true;
-    gNetGame = second;
+    gNetGame = peers[2];
     gNetSequenceState = kNetSequence_ClientWaitForSyncFromHost;
     CHECK(!HandleOtherNetMessage(leave));
-    NSpMessage_Release(second, leave);
+    NSpMessage_Release(peers[2], leave);
     ExpectSurvivalWinner();
-    EndSession(host, first, second);
+    EndSession(peers);
 }
 
 static void BattleDepartureWinner(int mode)
 {
-    NSpGame *first, *second;
-    NSpGame* host = BeginSession(&first, &second);
+    NSpGame* peers[MAX_CLIENTS];
+    BeginSession(SMALL_SESSION, peers);
     gGameMode = mode;
     if (mode == GAME_MODE_TAG1)
     {
@@ -262,7 +308,7 @@ static void BattleDepartureWinner(int mode)
     CHECK(gTrackCompleted && !gPlayerInfo[0].isEliminated);
     for (int i = 0; i < gNumTotalPlayers; i++)
         CHECK(winLoseWinner[i] == 0 && winLoseMode[i] == (i == 0 ? 1 : 2));
-    EndSession(host, first, second);
+    EndSession(peers);
 }
 
 static void VerifyVehicleTimeoutAfterInit(int mode)
@@ -299,8 +345,8 @@ static void VerifyVehicleTimeoutAfterInit(int mode)
 
 static void BattleVehicleTimeout(int mode)
 {
-    NSpGame *first, *second;
-    NSpGame* host = BeginSession(&first, &second);
+    NSpGame* peers[MAX_CLIENTS];
+    BeginSession(SMALL_SESSION, peers);
     gGameMode = mode;
     PlayerInfoType before[MAX_PLAYERS];
     memcpy(before, gPlayerInfo, sizeof(before));
@@ -314,7 +360,7 @@ static void BattleVehicleTimeout(int mode)
     CHECK(gNetSequenceState == kNetSequence_GotAllPlayerVehicles && !gGameOver);
     VerifyVehicleTimeoutAfterInit(mode);
 
-    NSpMessageHeader* leave = WaitMessage(second);
+    NSpMessageHeader* leave = WaitMessage(peers[2]);
     CHECK(leave->what == kNSpPlayerLeft);
     memcpy(gPlayerInfo, before, sizeof(before));
     gNumPlayersEliminated = 0;
@@ -322,31 +368,31 @@ static void BattleVehicleTimeout(int mode)
     gTrackCompleted = false;
     gIsNetworkHost = false;
     gIsNetworkClient = true;
-    gNetGame = second;
+    gNetGame = peers[2];
     gNetSequenceState = kNetSequence_WaitingForPlayerVehicles;
     CHECK(!HandleOtherNetMessage(leave));
-    NSpMessage_Release(second, leave);
+    NSpMessage_Release(peers[2], leave);
     VerifyVehicleTimeoutAfterInit(mode);
-    EndSession(host, first, second);
+    EndSession(peers);
 }
 
 static void SurvivalWithoutSurvivors(void)
 {
-    NSpGame *first, *second;
-    NSpGame* host = BeginSession(&first, &second);
+    NSpGame* peers[MAX_CLIENTS];
+    BeginSession(SMALL_SESSION, peers);
     gGameMode = GAME_MODE_SURVIVAL;
     for (int i = 0; i < gNumTotalPlayers; i++) PlayerLoseHealth(i, 1);
     UpdateGameModeSpecifics();
     CHECK(gTrackCompleted && gNumPlayersEliminated == gNumTotalPlayers);
     for (int i = 0; i < gNumTotalPlayers; i++)
         CHECK(winLoseWinner[i] == -1 && winLoseMode[i] == 2);
-    EndSession(host, first, second);
+    EndSession(peers);
 }
 
 static void NetworkReplacementVehicle(int selectedVehicle)
 {
-    NSpGame *first, *second;
-    NSpGame* host = BeginSession(&first, &second);
+    NSpGame* peers[MAX_CLIENTS];
+    BeginSession(SMALL_SESSION, peers);
     gPlayerInfo[2].vehicleType = selectedVehicle;
     ApplyBecomeBot(2);
     const int difficulties[] = {DIFFICULTY_MEDIUM, DIFFICULTY_HARD};
@@ -362,13 +408,13 @@ static void NetworkReplacementVehicle(int selectedVehicle)
             CHECK(gPlayerInfo[2].isComputer && !gPlayerInfo[2].isEliminated);
         }
     }
-    EndSession(host, first, second);
+    EndSession(peers);
 }
 
 static void TagWinnerDeparture(void)
 {
-    NSpGame *first, *second;
-    NSpGame* host = BeginSession(&first, &second);
+    NSpGame* peers[MAX_CLIENTS];
+    BeginSession(SMALL_SESSION, peers);
     gGameMode = GAME_MODE_TAG1;
     for (int i = 0; i < gNumTotalPlayers; i++) gPlayerInfo[i].tagTimer = 60;
     ChooseTaggedPlayerWithIndex(0);
@@ -382,13 +428,13 @@ static void TagWinnerDeparture(void)
     ApplyBecomeBot(2); // the winner disconnects during the result cooldown
     CHECK(gNumPlayersEliminated == 3 && !gPlayerInfo[2].isIt);
     CHECK(taggedChoices == choicesBefore); // nobody remains to select
-    EndSession(host, first, second);
+    EndSession(peers);
 }
 
 static void PausedLeaveAndReset(void)
 {
-    NSpGame *first, *second;
-    NSpGame* host = BeginSession(&first, &second);
+    NSpGame* peers[MAX_CLIENTS];
+    BeginSession(SMALL_SESSION, peers);
     gNetSequenceState = kNetSequence_GameLoop;
     gPlayerInfo[2].net.pauseState = 1;
     gNetBadge[2] = true;
@@ -416,7 +462,268 @@ static void PausedLeaveAndReset(void)
     ResetNetGameTransientState();
     CHECK(gPlayerSyncMask == 0 && gReadinessStartedMs == 0 && gHostSendCounter == 0);
     CHECK(!gNetBadge[1] && !sFrameEventTable[0].valid && !sHostPendingEvents[0].active);
-    EndSession(host, first, second);
+    EndSession(peers);
+}
+
+// A join beyond capacity is answered with a reason, not silently dropped, and does
+// not disturb any seated peer.
+static void ExpectJoinRefused(NSpGame* host)
+{
+    uint32_t seated = NSpGame_GetActivePlayersIDMask(host);
+    LobbyInfo lobby = {.hostAddr = Address(host->hostListenSocket)};
+    NSpGame* extra = JoinLobby(&lobby);
+    CHECK(extra);
+    CHECK(AcceptClient(host) == -1);
+    NSpMessageHeader* denied = WaitMessage(extra);
+    CHECK(denied->what == kNSpJoinDenied);
+    CHECK(!strcmp(((NSpJoinDeniedMessage*) denied)->reason, "THE GAME IS FULL."));
+    NSpMessage_Release(extra, denied);
+    NSpGame_Dispose(extra, 0);
+    CHECK(NSpGame_GetActivePlayersIDMask(host) == seated);
+    CHECK(!NSpMessage_Get(host));
+}
+
+static uint32_t ExpectLeaves(NSpGame* game, int count)
+{
+    uint32_t heard = 0;
+    for (int i = 0; i < count; i++)
+        heard |= 1u << ExpectLeave(game);
+    CHECK(!NSpMessage_Get(game));
+    return heard;
+}
+
+// Close every odd client ID (sparse, non-adjacent departures).
+static uint32_t DisposeOddClients(NSpGame* peers[MAX_CLIENTS], int* count)
+{
+    uint32_t odd = 0;
+    *count = 0;
+    for (int id = 1; id < FULL_SESSION; id += 2)
+    {
+        NSpGame_Dispose(peers[id], 0);
+        peers[id] = NULL;
+        odd |= 1u << id;
+        (*count)++;
+    }
+    return odd;
+}
+
+// Seat every client slot and refuse one more; then free sparse slots and refill them.
+static void CapacityLobby(void)
+{
+    NSpGame* peers[MAX_CLIENTS];
+    NSpGame* host = BeginSession(FULL_SESSION, peers);
+    CHECK(NSpGame_GetNumActivePlayers(host) == FULL_SESSION);
+    for (int id = 0; id < FULL_SESSION; id++)
+        CHECK(NSpGame_GetActivePlayersIDMask(peers[id]) == AllPeersMask(FULL_SESSION));
+    ExpectJoinRefused(host);
+
+    int leavers;
+    uint32_t odd = DisposeOddClients(peers, &leavers);
+    CHECK(ExpectLeaves(host, leavers) == odd);
+    CHECK(NSpGame_GetActivePlayersIDMask(host) == (AllPeersMask(FULL_SESSION) & ~odd));
+    for (int id = 2; id < FULL_SESSION; id += 2)
+        CHECK(ExpectLeaves(peers[id], leavers) == odd);
+
+    // Rejoins take the lowest free IDs, so the table is full again.
+    for (int id = 1; id < FULL_SESSION; id += 2)
+    {
+        peers[id] = Join(host);
+        CHECK(peers[id]->myID == id);
+    }
+    for (int id = 1; id < FULL_SESSION; id++)
+        Drain(peers[id]);
+    for (int id = 0; id < FULL_SESSION; id++)
+        CHECK(NSpGame_GetActivePlayersIDMask(peers[id]) == AllPeersMask(FULL_SESSION));
+    ExpectJoinRefused(host);
+    EndSession(peers);
+}
+
+// The real configuration broadcast numbers every seated client densely.
+static void CapacityConfig(void)
+{
+    NSpGame* peers[MAX_CLIENTS];
+    BeginSession(FULL_SESSION, peers);
+    gTheAge = 0;
+    gTrackNum = 0;
+    gTargetFPS = 60;
+    CHECK(HostSendGameConfigInfo() == noErr);
+    CHECK(gNumRealPlayers == FULL_SESSION && gMyNetworkPlayerNum == 0);
+    uint32_t numbered = 1;
+    for (int id = 1; id < FULL_SESSION; id++)
+    {
+        NSpMessageHeader* message = WaitMessage(peers[id]);
+        CHECK(message->what == kNetConfigureMessage);
+        const NetConfigMessage* config = (const NetConfigMessage*) message;
+        CHECK(NetValidateConfigPayload(config) && config->numPlayers == FULL_SESSION);
+        CHECK(config->playerNum > 0 && gPlayerInfo[config->playerNum].net.nspPlayerID == id);
+        numbered |= 1u << config->playerNum;
+        NSpMessage_Release(peers[id], message);
+    }
+    CHECK(numbered == AllPeersMask(FULL_SESSION));
+    EndSession(peers);
+}
+
+static void SendVehicle(NSpGame* client, int playerNum)
+{
+    NetPlayerCharTypeMessage message;
+    memset(&message, 0, sizeof(message));
+    NSpClearMessageHeader(&message.h);
+    message.h.to = kNSpAllPlayers;
+    message.h.what = kNetPlayerCharTypeMessage;
+    message.h.messageLen = sizeof(message);
+    message.playerNum = playerNum;
+    message.vehicleType = playerNum % NUM_LAND_CAR_TYPES;
+    message.sex = playerNum & 1;
+    message.skin = playerNum % NUM_CAVEMAN_SKINS;
+    CHECK(NSpMessage_Send(client, &message.h, kNSpSendFlag_Registered) == kNSpRC_OK);
+}
+
+static void SendLevelReady(NSpGame* client)
+{
+    NetSyncMessage message;
+    memset(&message, 0, sizeof(message));
+    NSpClearMessageHeader(&message.h);
+    message.h.to = kNSpHostID;
+    message.h.what = kNetSyncMessage;
+    message.h.messageLen = sizeof(message);
+    CHECK(NSpMessage_Send(client, &message.h, kNSpSendFlag_Registered) == kNSpRC_OK);
+}
+
+static void PumpHostUntil(int state)
+{
+    for (int i = 0; i < 1000 && gNetSequenceState != state; i++)
+    {
+        if (!UpdateNetSequence())
+            SDL_Delay(1);
+    }
+    CHECK(gNetSequenceState == state);
+}
+
+// Read exactly the relayed vehicle choices and leave notices a client is owed.
+static void ExpectRelays(NSpGame* client, int vehicles, uint32_t leaves, int leaveCount)
+{
+    uint32_t heard = 0;
+    for (int pending = vehicles + leaveCount; pending > 0; pending--)
+    {
+        NSpMessageHeader* message = WaitMessage(client);
+        if (message->what == kNetPlayerCharTypeMessage)
+            vehicles--;
+        else
+        {
+            CHECK(message->what == kNSpPlayerLeft);
+            heard |= 1u << ((NSpPlayerLeftMessage*) message)->playerID;
+        }
+        NSpMessage_Release(client, message);
+    }
+    CHECK(vehicles == 0 && heard == leaves && !NSpMessage_Get(client));
+}
+
+// Both readiness barriers complete with every client seat in use, and with sparse
+// clients leaving before they report: exactly those players become race bots.
+static void CapacityReadiness(bool departures)
+{
+    NSpGame* peers[MAX_CLIENTS];
+    NSpGame* host = BeginSession(FULL_SESSION, peers);
+    ClearPlayerSyncMask();
+    MarkPlayerSynced(kNSpHostID);
+    gNetSequenceState = kNetSequence_WaitingForPlayerVehicles;
+    int leavers = 0;
+    uint32_t leaving = departures ? DisposeOddClients(peers, &leavers) : 0;
+    int senders = 0;
+    for (int id = 1; id < FULL_SESSION; id++)
+    {
+        if (peers[id])
+        {
+            SendVehicle(peers[id], NSpIDPlayer(FULL_SESSION, id));
+            senders++;
+        }
+    }
+    PumpHostUntil(kNetSequence_GotAllPlayerVehicles);
+    CHECK(!gGameOver && gNumGatheredPlayers == FULL_SESSION - leavers);
+    CHECK(NSpGame_GetActivePlayersIDMask(host) == (AllPeersMask(FULL_SESSION) & ~leaving));
+    for (int id = 1; id < FULL_SESSION; id++)
+    {
+        int playerNum = NSpIDPlayer(FULL_SESSION, id);
+        const PlayerInfoType* player = &gPlayerInfo[playerNum];
+        if (leaving & (1u << id))
+            CHECK(player->isComputer && !player->isEliminated);
+        else
+            CHECK(!player->isComputer && player->vehicleType == playerNum % NUM_LAND_CAR_TYPES);
+    }
+    for (int id = 1; id < FULL_SESSION; id++)
+    {
+        if (peers[id])
+            ExpectRelays(peers[id], senders - 1, leaving, leavers);
+    }
+
+    ClearPlayerSyncMask();
+    MarkPlayerSynced(kNSpHostID);
+    gNetSequenceState = kNetSequence_HostWaitForPlayersToPrepareLevel;
+    for (int id = 1; id < FULL_SESSION; id++)
+    {
+        if (peers[id])
+            SendLevelReady(peers[id]);
+    }
+    PumpHostUntil(kNetSequence_GameLoop);
+    CHECK(gPlayerSyncMask == NSpGame_GetActivePlayersIDMask(host));
+    EndSession(peers);
+}
+
+static void PumpHostUntilScheduled(int events)
+{
+    for (int i = 0; i < 1000; i++)
+    {
+        Host_PumpClientInputs();
+        int scheduled = 0;
+        for (int s = 0; s < NET_MAX_PENDING_EVENTS; s++)
+            scheduled += sHostPendingEvents[s].active;
+        if (scheduled == events)
+            return;
+        CHECK(scheduled < events);
+        SDL_Delay(1);
+    }
+    DoFatalAlert("Timed out waiting for %d scheduled leave events", events);
+}
+
+// Every client may leave a running race in the same frame: each leave becomes one
+// frame-aligned bot conversion, and one host packet carries all of them.
+static void CapacityInGameDepartures(void)
+{
+    NSpGame* peers[MAX_CLIENTS];
+    BeginSession(FULL_SESSION, peers);
+    gNetSequenceState = kNetSequence_GameLoop;
+    gHostSendCounter = 10;
+    int leavers;
+    uint32_t odd = DisposeOddClients(peers, &leavers);
+    PumpHostUntilScheduled(leavers);
+    for (int id = 2; id < FULL_SESSION; id += 2)
+    {
+        CHECK(ExpectLeaves(peers[id], leavers) == odd);
+        CHECK(!gPlayerInfo[NSpIDPlayer(FULL_SESSION, id)].isComputer);
+    }
+    DisposeClients(peers);
+    PumpHostUntilScheduled(FULL_SESSION - 1);
+
+    NetHostControlInfoMessageType wire;
+    memset(&wire, 0, sizeof(wire));
+    uint32_t frame = gHostSendCounter + NET_MAX_EVENT_LEAD;
+    Host_FillOutgoingEvents(&wire, gHostSendCounter);
+    CHECK(wire.eventCount == FULL_SESSION - 1);
+    uint32_t converting = 0;
+    for (int e = 0; e < wire.eventCount; e++)
+    {
+        CHECK(wire.events[e].type == kEvBecomeBot && wire.events[e].effectiveFrame == frame);
+        converting |= 1u << wire.events[e].playerNum;
+    }
+    CHECK(converting == (AllPeersMask(FULL_SESSION) & ~1u));
+    CHECK(gNumGatheredPlayers == FULL_SESSION && !gGameOver);
+    gHostSendCounter = frame + 1; // the host just sent the effective frame
+    ApplyPendingFrameEvents();
+    for (int i = 1; i < FULL_SESSION; i++)
+        CHECK(gPlayerInfo[i].isComputer && !gPlayerInfo[i].isEliminated);
+    CHECK(gNumGatheredPlayers == 1 && gGameOver);
+    CHECK(gNetSequenceState == kNetSequence_OfflineEverybodyLeft);
+    EndSession(peers);
 }
 
 int main(void)
@@ -440,6 +747,11 @@ int main(void)
     NetworkReplacementVehicle(CAR_TYPE_GEODE); // a selection already received from the peer
     TagWinnerDeparture();
     PausedLeaveAndReset();
-    puts("Readiness and paused-leave tests passed");
+    CapacityLobby();
+    CapacityConfig();
+    CapacityReadiness(false);
+    CapacityReadiness(true);
+    CapacityInGameDepartures();
+    puts("Readiness, paused-leave and full-lobby tests passed");
     return 0;
 }
