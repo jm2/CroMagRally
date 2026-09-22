@@ -137,6 +137,8 @@ enum
 	NUM_EFFECTS
 };
 
+#define	NUM_ANNOUNCER_PLACE_LINES	(EFFECT_6th - EFFECT_1st + 1)		// the announcer says "1st" through "6th" only
+
 
 
 /**********************/

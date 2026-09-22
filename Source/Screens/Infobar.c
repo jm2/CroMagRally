@@ -919,7 +919,7 @@ static void Infobar_MovePlace(ObjNode* node)
 	switch (GetInfobarIconData(node)->sub)
 	{
 		case 0:
-			ModifySpriteObjectFrame(node, INFOBAR_SObjType_Place1+place);
+			ModifySpriteObjectFrame(node, GetPlaceNumberSprite(place));
 			break;
 
 		case 1:
@@ -1735,14 +1735,16 @@ short	sex;
 
 			/* ANNOUNCE PLACE */
 
-	PlayAnnouncerSound(EFFECT_1st + place, true, 1.0);
+	int placeEffect = GetPlaceAnnouncerEffect(place);
+	if (placeEffect >= 0)										// no voice line past 6th, so stay silent
+		PlayAnnouncerSound(placeEffect, true, 1.0);
 
 			/* MAKE NUMBER SPRITE */
 
 	NewObjectDefinitionType spriteDef =
 	{
 		.group 		= SPRITE_GROUP_INFOBAR,
-		.type		= INFOBAR_SObjType_Place1+place,
+		.type		= GetPlaceNumberSprite(place),
 		.coord		= {0,0,0},
 		.flags		= STATUS_BIT_ONLYSHOWTHISPLAYER,
 		.slot		= SPRITE_SLOT,
