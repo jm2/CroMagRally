@@ -1,7 +1,8 @@
 // Driver looks: default body/outfit per slot, the character screen's outfit and body
-// changes, and CPU re-dressing.
+// changes, CPU re-dressing, and the minimap's repeated-outfit marker.
 #include "game.h"
 #include "driver_looks.h"
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -480,6 +481,74 @@ static void TestTwelveCarScreens(void)
 }
 
 
+/********************* MINIMAP BLIP MARKERS ************************/
+
+static float Luminance(float r, float g, float b)
+{
+	float c[3] = { r, g, b };
+	for (int i = 0; i < 3; i++)
+		c[i] = c[i] <= 0.04045f ? c[i] / 12.92f : powf((c[i] + 0.055f) / 1.055f, 2.4f);
+	return 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2];
+}
+
+static float Contrast(float l1, float l2)
+{
+	return l1 > l2 ? (l1 + 0.05f) / (l2 + 0.05f) : (l2 + 0.05f) / (l1 + 0.05f);
+}
+
+static void TestBlipMarkers(void)
+{
+	DriverLook looks[MAX_TEST_PLAYERS];
+
+	// Six cars: nobody repeats an outfit, so every blip looks as it always did.
+	GetDefaultLooks(looks, ORIGINAL_NUM_PLAYERS);
+	for (int i = 0; i < ORIGINAL_NUM_PLAYERS; i++)
+		CHECK(GetDriverOutfitRank(looks, i) == 0);
+
+	// Twelve cars: the first six keep plain blips and the second wave is marked.
+	GetDefaultLooks(looks, NUM_LOOKS);
+	for (int i = 0; i < NUM_LOOKS; i++)
+		CHECK(GetDriverOutfitRank(looks, i) == (i < ORIGINAL_NUM_PLAYERS ? 0 : 1));
+
+	// Whatever the humans choose, each outfit has exactly one plain blip.
+	for (int trial = 0; trial < 5000; trial++)
+	{
+		GetDefaultLooks(looks, NUM_LOOKS);
+		for (int step = 0; step < 20; step++)
+		{
+			const int who = NextRandom(MAX_TEST_HUMANS);
+			CycleDriverOutfit(looks, NUM_LOOKS, who, NextRandom(2) ? 1 : -1, PlayersBefore(who), true);
+		}
+		int plain[NUM_CAVEMAN_SKINS] = {0}, marked = 0;
+		for (int i = 0; i < NUM_LOOKS; i++)
+		{
+			const int rank = GetDriverOutfitRank(looks, i);
+			CHECK(rank == 0 || rank == 1);
+			if (rank == 0)
+				plain[looks[i].skin]++;
+			else
+				marked++;
+		}
+		for (int skin = 0; skin < NUM_CAVEMAN_SKINS; skin++)
+			CHECK(plain[skin] == 1);
+		CHECK(marked == NUM_LOOKS - NUM_CAVEMAN_SKINS);
+	}
+
+	// The marker stands out from every outfit colour: at least the 3:1 contrast WCAG asks
+	// of graphics, black on the light colours and white on blue.
+	for (int skin = 0; skin < NUM_CAVEMAN_SKINS; skin++)
+	{
+		const OGLColorRGB fill = kCavemanSkinColors[skin];
+		const float shade = GetBlipMarkerShade(fill.r, fill.g, fill.b);
+		CHECK(shade == 0.0f || shade == 1.0f);
+		CHECK(Contrast(Luminance(fill.r, fill.g, fill.b), Luminance(shade, shade, shade)) >= 3.0f);
+		CHECK(shade == (skin == CAVEMAN_SKIN_BLUE ? 1.0f : 0.0f));
+	}
+	CHECK(GetBlipMarkerShade(0, 0, 0) == 1.0f);
+	CHECK(GetBlipMarkerShade(1, 1, 1) == 0.0f);
+}
+
+
 int main(void)
 {
 	TestDefaultLooks();
@@ -487,6 +556,7 @@ int main(void)
 	TestCycleDriverSkin();
 	TestSixCarScreensMatchOriginal();
 	TestTwelveCarScreens();
+	TestBlipMarkers();
 	puts("driver looks tests passed");
 	return 0;
 }

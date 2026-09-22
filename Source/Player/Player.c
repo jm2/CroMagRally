@@ -425,6 +425,22 @@ static void SetPlayerDriverLooks(const DriverLook looks[MAX_PLAYERS])
 }
 
 
+/******************** GET PLAYER OUTFIT RANK ***********************/
+//
+// How many lower-numbered players wear playerNum's outfit (see GetDriverOutfitRank).
+//
+
+int GetPlayerOutfitRank(short playerNum)
+{
+DriverLook	looks[MAX_PLAYERS];
+
+	GAME_ASSERT(playerNum >= 0 && playerNum < MAX_PLAYERS);
+
+	GetPlayerDriverLooks(looks);
+	return GetDriverOutfitRank(looks, playerNum);
+}
+
+
 /******************** CYCLE PLAYER OUTFIT ***********************/
 //
 // Character select: steps whichPlayer to the next outfit. Players in playersDone keep their

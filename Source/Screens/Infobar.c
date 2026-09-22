@@ -11,6 +11,7 @@
 /****************************/
 
 #include "game.h"
+#include "driver_looks.h"
 #include "network.h"		// Net_IsConnectionBadgeVisible for the in-game connection hint
 #include "localplayers.h"
 #include <stddef.h>
@@ -51,6 +52,7 @@ static void MovePressAnyKey(ObjNode *theNode);
 #define PLAYER_NAME_SAFE_CHARSET " .0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 #define OVERHEAD_MAP_REFERENCE_SIZE 256.0f
+#define BLIP_MARKER_SCALE	0.4f				// marker inside a repeated outfit's minimap blip
 
 #define INFOBAR_SPRITE_FLAGS (kTextMeshAlignCenter | kTextMeshAlignMiddle | kTextMeshKeepCurrentProjection)
 
@@ -154,16 +156,6 @@ static const struct
 };
 
 static int8_t gPOWTimersByRow[MAX_SPLITSCREENS][MAX_POWTIMERS];		// per pane, not per player number
-
-const OGLColorRGB kCavemanSkinColors[NUM_CAVEMAN_SKINS] =
-{
-	[CAVEMAN_SKIN_BROWN]	=	{.8,.5,.3},
-	[CAVEMAN_SKIN_GREEN]	=	{ 0, 1, 0},
-	[CAVEMAN_SKIN_BLUE]		=	{ 0, 0, 1},
-	[CAVEMAN_SKIN_GRAY]		=	{.5,.5,.5},
-	[CAVEMAN_SKIN_RED]		=	{ 1, 0, 0},
-	[CAVEMAN_SKIN_WHITE]	=	{ 1, 1, 1},
-};
 
 /*********************/
 /*    VARIABLES      */
@@ -840,6 +832,8 @@ static void Infobar_DrawMap(Byte whichPane)
 
 			/* SET COLOR */
 
+		Boolean marked = false;
+
 		switch(gGameMode)
 		{
 			case	GAME_MODE_TAG1:
@@ -852,6 +846,8 @@ static void Infobar_DrawMap(Byte whichPane)
 
 			default:
 					gGlobalColorFilter = kCavemanSkinColors[gPlayerInfo[i].skin];
+					if (gGameMode != GAME_MODE_CAPTUREFLAG)			// CTF outfits are team colours, not drivers
+						marked = GetPlayerOutfitRank(i) > 0;
 		}
 
 		
@@ -864,6 +860,29 @@ static void Infobar_DrawMap(Byte whichPane)
 			scaleBasis,
 			rot,
 			INFOBAR_SPRITE_FLAGS);
+
+			/* HOLLOW OUT A REPEATED OUTFIT'S BLIP */
+			//
+			// Past six cars every outfit colour is worn twice. A dark (or, on a dark colour,
+			// light) centre marks the later driver, so the first six keep their original blips
+			// and no new colours are added for colour-blind players to confuse.
+			//
+
+		if (marked)
+		{
+			const float shade = GetBlipMarkerShade(gGlobalColorFilter.r, gGlobalColorFilter.g, gGlobalColorFilter.b);
+			gGlobalColorFilter = (OGLColorRGB) { shade, shade, shade };
+
+			DrawSprite2(
+				SPRITE_GROUP_INFOBAR,
+				INFOBAR_SObjType_PlayerBlip,
+				x,
+				z,
+				scaleBasis * BLIP_MARKER_SCALE,
+				scaleBasis * BLIP_MARKER_SCALE,
+				rot,
+				INFOBAR_SPRITE_FLAGS);
+		}
 	}
 
 	gGlobalColorFilter = (OGLColorRGB) {1,1,1};

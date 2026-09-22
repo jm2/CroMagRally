@@ -54,3 +54,11 @@ void ChangeDriverBody(DriverLook looks[], int numPlayers, int whichPlayer, short
 // NUM_DRIVER_SEXES * NUM_CAVEMAN_SKINS players the repeats are spread evenly. Returns how many
 // CPUs changed.
 int ResolveCPUDriverLooks(DriverLook looks[], int numPlayers, int numFixed);
+
+// How many of players 0...playerNum-1 wear playerNum's outfit. Minimap blips are coloured by
+// outfit (kCavemanSkinColors), so from rank 1 on a blip needs a marker to stand apart.
+int GetDriverOutfitRank(const DriverLook looks[], int playerNum);
+
+// Grey level (0 = black, 1 = white) for a marker drawn over a blip of this fill colour:
+// whichever contrasts more with it.
+float GetBlipMarkerShade(float r, float g, float b);

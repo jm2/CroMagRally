@@ -9,6 +9,17 @@ _Static_assert(NUM_CAVEMAN_SKINS <= 32, "skinsTaken holds one bit per outfit");
 _Static_assert(MAX_PLAYERS <= 32, "lockedMask holds one bit per player");
 
 
+const OGLColorRGB kCavemanSkinColors[NUM_CAVEMAN_SKINS] =			// minimap blip colour of each outfit
+{
+	[CAVEMAN_SKIN_BROWN]	=	{.8,.5,.3},
+	[CAVEMAN_SKIN_GREEN]	=	{ 0, 1, 0},
+	[CAVEMAN_SKIN_BLUE]		=	{ 0, 0, 1},
+	[CAVEMAN_SKIN_GRAY]		=	{.5,.5,.5},
+	[CAVEMAN_SKIN_RED]		=	{ 1, 0, 0},
+	[CAVEMAN_SKIN_WHITE]	=	{ 1, 1, 1},
+};
+
+
 static short WrapSkin(int skin)
 {
 	skin %= NUM_CAVEMAN_SKINS;
@@ -264,3 +275,38 @@ int	numChanged = 0;
 	return numChanged;
 }
 
+
+/******************** GET DRIVER OUTFIT RANK ***********************/
+
+int GetDriverOutfitRank(const DriverLook looks[], int playerNum)
+{
+int	rank = 0;
+
+	for (int j = 0; j < playerNum; j++)
+	{
+		if (looks[j].skin == looks[playerNum].skin)
+			rank++;
+	}
+
+	return rank;
+}
+
+
+/******************** GET BLIP MARKER SHADE ***********************/
+//
+// Picks black or white by WCAG contrast against the fill's relative luminance.
+//
+
+static float LinearizeSRGB(float c)
+{
+	return c <= 0.04045f ? c / 12.92f : powf((c + 0.055f) / 1.055f, 2.4f);
+}
+
+float GetBlipMarkerShade(float r, float g, float b)
+{
+	const float luminance = 0.2126f * LinearizeSRGB(r) + 0.7152f * LinearizeSRGB(g) + 0.0722f * LinearizeSRGB(b);
+	const float contrastWithBlack = (luminance + 0.05f) / 0.05f;
+	const float contrastWithWhite = 1.05f / (luminance + 0.05f);
+
+	return contrastWithWhite > contrastWithBlack ? 1.0f : 0.0f;
+}
