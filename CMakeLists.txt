@@ -621,6 +621,7 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 		target_link_options(CroMagRallyRacePlaceTests PRIVATE -Wl,--gc-sections)
 	endif()
 	cmr_add_gameplay_test(CroMagRallyCheckpointTests checkpoints Tests/CheckpointTests.c Source/Terrain/CheckpointProgress.c)
+	cmr_add_gameplay_test(CroMagRallyCPUDriverTests cpu_driver Tests/CPUDriverTests.c Source/Player/CPUDriver.c)
 	add_executable(CroMagRallyValidationTests
 		Tests/ValidationTests.c
 		Source/Network/NetValidation.c

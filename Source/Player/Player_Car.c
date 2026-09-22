@@ -10,6 +10,7 @@
 /****************************/
 
 #include "game.h"
+#include "cpu_driver.h"
 
 /****************************/
 /*    PROTOTYPES            */
@@ -2142,35 +2143,7 @@ Boolean			onWater;
 		/*********************************/
 
 	if (!gNoCarControls)													// see if control is allowed
-	{
-		gPlayerInfo[player].oldPositionTimer -= fps;
-		if (gPlayerInfo[player].oldPositionTimer <= 0.0f)					// see if time to do the check
-		{
-			float	stuckDist;
-
-			gPlayerInfo[player].oldPositionTimer += POSITION_TIMER;			// reset timer
-
-			if (onWater)
-				stuckDist = 40.0f;
-			else
-				stuckDist = 80.0f;
-
-			if (CalcDistance3D(gPlayerInfo[player].oldPosition.x, gPlayerInfo[player].oldPosition.y, gPlayerInfo[player].oldPosition.z,
-								gCoord.x, gCoord.y, gCoord.z) < stuckDist)		// see if player isnt moving
-			{
-				if (gPlayerInfo[player].reverseTimer > 0.0f)					// if was reversing then go forward again
-					gPlayerInfo[player].reverseTimer = 0;
-				else
-					gPlayerInfo[player].reverseTimer = 4.0f;					// try moving backwards to get unstuck
-			}
-			else
-			{
-				gPlayerInfo[player].reverseTimer = 0;						// player is NOT stuck, so go forward
-			}
-
-			gPlayerInfo[player].oldPosition = gCoord;						// remember position
-		}
-	}
+		UpdateCPUStuckCheck(&gPlayerInfo[player], &gCoord, fps);
 
 
 	if ((theNode->StatusBits & STATUS_BIT_ONGROUND) || onWater)
@@ -2241,7 +2214,7 @@ Boolean			onWater;
 				/* SEE IF NEED TO ACCEL, COAST, OR BRAKE  */
 				/******************************************/
 
-			if (gPlayerInfo[player].isPlaning || gPlayerInfo[player].greasedTiresTimer || (fabs(theNode->DeltaRot.y) > PI))	// if sliding or spinning then brake!
+			if (CPUShouldBrakeForSkid(&gPlayerInfo[player], (theNode->StatusBits & STATUS_BIT_ONGROUND) != 0, theNode->DeltaRot.y))	// if sliding or spinning then brake!
 				brake = true;
 			else
 			if ((theNode->Speed2D > 2500.0f) && (gDifficulty > DIFFICULTY_EASY))			// if we're going fast then see if we need to slow
@@ -2281,22 +2254,7 @@ Boolean			onWater;
 			/* SET BRAKE, FORWARD/BACKWARD KEYS */
 			/************************************/
 
-		if (brake)
-		{
-			gPlayerInfo[player].controlBits |= (1L << kControlBit_Brakes);
-		}
-		else
-		if (giveGas)
-		{
-			if (gPlayerInfo[player].reverseTimer > 0.0f)						// see if going in reverse
-			{
-			    gPlayerInfo[player].controlBits |= (1L << kControlBit_Backward);
-				if ((gPlayerInfo[player].reverseTimer -= fps) < 0.0f)			// dec reverse timer
-					gPlayerInfo[player].reverseTimer = 0;
-			}
-			else
-			    gPlayerInfo[player].controlBits |= (1L << kControlBit_Forward);	// go forward
-		}
+		gPlayerInfo[player].controlBits |= CPUPedalControlBits(&gPlayerInfo[player], brake, giveGas, fps);
 	}
 
 
