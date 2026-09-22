@@ -250,7 +250,7 @@ typedef struct { NetFrameEvent ev; Boolean active; } PendingEventSlot;
 static PendingEventSlot sHostPendingEvents[NET_MAX_PENDING_EVENTS];
 
 // Per-machine apply table (host + clients): dedupe by (effectiveFrame,type,playerNum) + apply once.
-typedef struct { uint32_t effectiveFrame; uint8_t type; int8_t playerNum; Boolean applied; Boolean valid; } FrameEventEntry;
+typedef struct { uint32_t effectiveFrame; uint8_t type; int8_t playerNum; uint16_t pad; Boolean applied; Boolean valid; } FrameEventEntry;
 static FrameEventEntry sFrameEventTable[NET_MAX_PENDING_EVENTS];
 
 // Connection-liveness badge (host: per-player slot; client: gNetBadge[0] = host link).
@@ -376,7 +376,7 @@ static void RejectProtocolMessage(const NSpMessageHeader* message)
 // Record an event into the per-machine apply table, deduped by (effectiveFrame,type,playerNum).
 // Called on the host (from Host_ScheduleFrameEvent) and on clients (from the host control handler,
 // once per re-broadcast). Idempotent: a re-broadcast event already in the table is ignored.
-static void RecordFrameEvent(uint32_t effectiveFrame, uint8_t type, int8_t playerNum)
+static void RecordFrameEvent(uint32_t effectiveFrame, uint8_t type, int8_t playerNum, uint16_t pad)
 {
 	for (int k = 0; k < NET_MAX_PENDING_EVENTS; k++)			// dedupe
 	{
@@ -393,6 +393,7 @@ static void RecordFrameEvent(uint32_t effectiveFrame, uint8_t type, int8_t playe
 			e->effectiveFrame	= effectiveFrame;
 			e->type				= type;
 			e->playerNum		= playerNum;
+			e->pad				= pad;
 			e->applied			= false;
 			e->valid			= true;
 			return;
@@ -402,32 +403,43 @@ static void RecordFrameEvent(uint32_t effectiveFrame, uint8_t type, int8_t playe
 	// rare; the TCP keepalive backstop still converts the peer eventually via a later leave/drop.
 }
 
+static Boolean IsFrameEventPending(uint8_t type, int playerNum)
+{
+	for (int k = 0; k < NET_MAX_PENDING_EVENTS; k++)
+	{
+		const FrameEventEntry* e = &sFrameEventTable[k];
+		if (e->valid && !e->applied && e->type == type && e->playerNum == playerNum)
+			return true;
+	}
+	return false;
+}
+
 // HOST: schedule a frame-aligned event. Deduped against any un-applied (type,playerNum) already in
 // flight so a leave + a silence-timeout drop for the same player don't double-convert. effectiveFrame is the
 // frame ABOUT to be sent (gHostSendCounter) + lead, so all clients receive it before applying.
-static void Host_ScheduleFrameEvent(uint8_t type, int playerNum)
+// Returns whether it was scheduled.
+static Boolean Host_ScheduleFrameEvent(uint8_t type, int playerNum, uint16_t pad)
 {
 	if (!IsValidPlayerNum(playerNum))
-		return;
+		return false;
 
-	for (int k = 0; k < NET_MAX_PENDING_EVENTS; k++)			// dedupe an in-flight (un-applied) (type,playerNum)
-	{
-		FrameEventEntry* e = &sFrameEventTable[k];
-		if (e->valid && !e->applied && e->type == type && e->playerNum == playerNum)
-			return;
-	}
+	if (IsFrameEventPending(type, playerNum))					// dedupe an in-flight (un-applied) (type,playerNum)
+		return false;
 
 	uint32_t effF = gHostSendCounter + NET_MAX_EVENT_LEAD;
 
 	bool queuedForBroadcast = false;
 	for (int s = 0; s < NET_MAX_PENDING_EVENTS; s++)			// push into the outgoing re-broadcast ring
 	{
-		if (!sHostPendingEvents[s].active)
+		// A slot whose frame is before the one about to be sent was applied and sent for the last
+		// time; Host_FillOutgoingEvents just hasn't expired it yet. Reusing it keeps the ring at one
+		// event per non-host player when a CPU decides its next POW use in its last one's frame.
+		if (!sHostPendingEvents[s].active || sHostPendingEvents[s].ev.effectiveFrame < gHostSendCounter)
 		{
 			sHostPendingEvents[s].ev.effectiveFrame	= effF;
 			sHostPendingEvents[s].ev.type			= type;
 			sHostPendingEvents[s].ev.playerNum		= (int8_t) playerNum;
-			sHostPendingEvents[s].ev.pad			= 0;
+			sHostPendingEvents[s].ev.pad			= pad;
 			sHostPendingEvents[s].active			= true;
 			queuedForBroadcast = true;
 			break;
@@ -440,7 +452,40 @@ static void Host_ScheduleFrameEvent(uint8_t type, int playerNum)
 	// matches RecordFrameEvent's own drop-on-full contract; the TCP-keepalive backstop still
 	// converts the peer via a later leave/drop.
 	if (queuedForBroadcast)
-		RecordFrameEvent(effF, type, (int8_t) playerNum);		// host applies via the same shared table as the clients
+		RecordFrameEvent(effF, type, (int8_t) playerNum, pad);	// host applies via the same shared table as the clients
+	return queuedForBroadcast;
+}
+
+// HOST: a CPU car (fill CPU or replacement bot) uses its POW at one later frame on every machine,
+// the host included; DoCPUPowerupLogic makes the decision. At most one use per car is in flight.
+// Returns false, and nobody uses it, if it can't be broadcast.
+Boolean Host_ScheduleCPUPOW(short playerNum, short powType, Boolean backward)
+{
+	if (!gNetGameInProgress || !gIsNetworkHost
+		|| playerNum < 1 || !IsValidPlayerNum(playerNum) || !gPlayerInfo[playerNum].isComputer
+		|| powType < 0 || powType >= MAX_POW_TYPES)
+	{
+		return false;
+	}
+	return Host_ScheduleFrameEvent(kEvCpuThrow, playerNum, NetEncodeCPUPOW(powType, backward));
+}
+
+Boolean Net_IsCPUPOWPending(short playerNum)
+{
+	return IsFrameEventPending(kEvCpuThrow, playerNum);
+}
+
+// BOTH ROLES: the CPU car uses this POW in the frame being simulated, if it still holds it
+// (DoCPUPowerupLogic, on the car's first control pass).
+static void ApplyCPUPOW(int playerNum, uint16_t pad, uint32_t frame)
+{
+	short powType;
+	Boolean backward;
+	if (!IsValidPlayerNum(playerNum) || !gPlayerInfo[playerNum].isComputer || !NetDecodeCPUPOW(pad, &powType, &backward))
+		return;
+	gPlayerInfo[playerNum].net.cpuPOWType = powType;
+	gPlayerInfo[playerNum].net.cpuPOWBackward = backward;
+	gPlayerInfo[playerNum].net.cpuPOWFrame = frame;
 }
 
 // HOST: map a leave message's NSpPlayerID to a dense player index and schedule its become-bot.
@@ -452,7 +497,7 @@ static void ScheduleBecomeBotFromLeave(NSpPlayerLeftMessage* mess)
 		printf("ScheduleBecomeBotFromLeave: no matching player id #%d; ignoring.\n", (int) mess->playerID);
 		return;
 	}
-	Host_ScheduleFrameEvent(kEvBecomeBot, i);
+	Host_ScheduleFrameEvent(kEvBecomeBot, i, 0);
 	gNetBadge[i] = false;
 }
 
@@ -593,6 +638,7 @@ void ApplyPendingFrameEvents(void)
 		{
 			case kEvBecomeBot:		ApplyBecomeBot(e->playerNum); break;
 			case kEvUnpauseForce:	if (IsValidPlayerNum(e->playerNum)) gPlayerInfo[e->playerNum].net.pauseState = 0; break;
+			case kEvCpuThrow:		ApplyCPUPOW(e->playerNum, e->pad, frame); break;
 			default:				break;
 		}
 		e->applied = true;
@@ -637,7 +683,7 @@ void NetCheck_ConnectionTimeouts(void)
 				// Record the deterministic conversion before removing the low-level peer. Remaining
 				// clients ignore the immediate PlayerLeft during gameplay and apply this event from
 				// the ordered host-control stream at the same simulation frame as the host.
-				Host_ScheduleFrameEvent(kEvBecomeBot, pn);
+				Host_ScheduleFrameEvent(kEvBecomeBot, pn, 0);
 				gNetBadge[pn] = false;
 				NSpPlayer_Kick(gNetGame, pid);
 				break;								// active-player indexing changed; resume next frame
@@ -1540,11 +1586,17 @@ short							i;
 // This data will contain the fps and control bitfield info for each player.
 //
 
+static void RecordHostFrameEvents(const NetHostControlInfoMessageType* mess)
+{
+	for (int k = 0; k < mess->eventCount; k++)
+		RecordFrameEvent(mess->events[k].effectiveFrame, mess->events[k].type, mess->events[k].playerNum, mess->events[k].pad);
+}
+
 static Boolean Client_InGame_HandleHostControlInfoMessage(NetHostControlInfoMessageType* mess)
 {
 	GAME_ASSERT(gIsNetworkClient);
 
-	if (!NetValidateHostControlPayload(mess, gNumRealPlayers))
+	if (!NetValidateHostControlPayload(mess, gNumRealPlayers, gNumTotalPlayers))
 	{
 		RejectProtocolMessage(&mess->h);
 		return false;
@@ -1606,11 +1658,7 @@ static Boolean Client_InGame_HandleHostControlInfoMessage(NetHostControlInfoMess
 	// CMR7 Stage 4: record any host-broadcast frame-aligned events (deduped). The client applies them
 	// from the shared table in StepGameSimulation at effectiveFrame, AFTER the seed check above and
 	// BEFORE MoveEverything — exactly where the host applies its own copy.
-	{
-		uint8_t ec = mess->eventCount;
-		for (int k = 0; k < ec; k++)
-			RecordFrameEvent(mess->events[k].effectiveFrame, mess->events[k].type, mess->events[k].playerNum);
-	}
+	RecordHostFrameEvents(mess);
 
 	return true;
 }

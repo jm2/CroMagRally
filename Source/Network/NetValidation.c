@@ -8,6 +8,8 @@
 _Static_assert(MAX_CLIENTS <= MAX_PLAYERS, "every network player needs a player slot");
 _Static_assert(MAX_CLIENTS <= 32, "NSp player-ID masks are uint32_t");
 _Static_assert(NET_MAX_PENDING_EVENTS >= MAX_CLIENTS - 1, "one pending become-bot event per client");
+_Static_assert(NET_MAX_PENDING_EVENTS >= MAX_PLAYERS - 1, "one pending event per non-host player");
+_Static_assert(MAX_POW_TYPES - 1 <= NET_CPU_POW_TYPE_MASK, "a CPU POW event names every POW type");
 
 int NetNormalizeRefreshRate(int refreshRate)
 {
@@ -172,7 +174,27 @@ Boolean NetValidateClientControlPayload(const NetClientControlInfoMessageType* m
 		&& message->analogSteering.y <= 1.0f;
 }
 
-Boolean NetValidateHostControlPayload(const NetHostControlInfoMessageType* message, int numRealPlayers)
+uint16_t NetEncodeCPUPOW(int powType, Boolean backward)
+{
+	return (uint16_t) ((powType & NET_CPU_POW_TYPE_MASK) | (backward ? NET_CPU_POW_BACKWARD : 0));
+}
+
+Boolean NetDecodeCPUPOW(uint16_t pad, short* powType, Boolean* backward)
+{
+	if ((pad & ~(NET_CPU_POW_TYPE_MASK | NET_CPU_POW_BACKWARD)) != 0
+		|| (pad & NET_CPU_POW_TYPE_MASK) >= MAX_POW_TYPES)
+	{
+		return false;
+	}
+
+	if (powType)
+		*powType = (short) (pad & NET_CPU_POW_TYPE_MASK);
+	if (backward)
+		*backward = (pad & NET_CPU_POW_BACKWARD) != 0;
+	return true;
+}
+
+Boolean NetValidateHostControlPayload(const NetHostControlInfoMessageType* message, int numRealPlayers, int numTotalPlayers)
 {
 	const uint32_t validControlBits = (1u << NUM_CONTROL_BITS) - 1u;
 	const uint8_t validInputFlags = INPUT_FLAG_SUBSTITUTED | INPUT_FLAG_COALESCED;
@@ -181,8 +203,11 @@ Boolean NetValidateHostControlPayload(const NetHostControlInfoMessageType* messa
 	const float maxAbsSyncCoord = 1000000.0f;
 	const float maxAbsSyncRotation = 1000000.0f;
 
-	if (!message || numRealPlayers < 1 || numRealPlayers > MAX_CLIENTS)
+	if (!message || numRealPlayers < 1 || numRealPlayers > MAX_CLIENTS
+		|| numTotalPlayers < numRealPlayers || numTotalPlayers > MAX_PLAYERS)
+	{
 		return false;
+	}
 
 	if (!isfinite(message->fps)
 		|| !isfinite(message->fpsFrac)
@@ -228,15 +253,31 @@ Boolean NetValidateHostControlPayload(const NetHostControlInfoMessageType* messa
 	for (int i = 0; i < message->eventCount; i++)
 	{
 		const NetFrameEvent* event = &message->events[i];
-		if ((event->type != kEvBecomeBot && event->type != kEvUnpauseForce)
-			|| event->playerNum < 0
-			|| event->playerNum >= numRealPlayers
-			|| event->pad != 0
-			|| event->effectiveFrame - message->frameCounter > NET_MAX_EVENT_LEAD)
+		Boolean validEvent;
+		switch (event->type)
 		{
-			return false;
+			case kEvBecomeBot:
+			case kEvUnpauseForce:
+				validEvent = event->playerNum >= 0 && event->playerNum < numRealPlayers && event->pad == 0;
+				break;
+
+			case kEvCpuThrow:												// the host's car is never a CPU
+				validEvent = event->playerNum >= 1 && event->playerNum < numTotalPlayers
+					&& NetDecodeCPUPOW(event->pad, NULL, NULL);
+				break;
+
+			default:
+				validEvent = false;
+				break;
 		}
 
+		if (!validEvent || event->effectiveFrame - message->frameCounter > NET_MAX_EVENT_LEAD)
+			return false;
+
+		// The host never has two events of one type pending for one player: it dedupes
+		// leaves, and a CPU's next POW use waits until its last one applied. A player's
+		// become-bot and its first POW use as a bot never share a packet either (the host
+		// stops sending an event once its frame passed), but different types may.
 		for (int j = 0; j < i; j++)
 		{
 			if (message->events[j].type == event->type

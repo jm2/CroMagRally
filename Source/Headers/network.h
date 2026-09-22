@@ -57,9 +57,11 @@ _Static_assert(sizeof(NetSyncMessage) <= kNSpMaxMessageLength, "sync msg fits");
 		//
 		// Carried in the host control stream so every machine applies a leave/bot-conversion
 		// at the identical sim frame. Fields land in the CMR7 bump; populated in Stage 4.
+		// kEvCpuThrow: in a network game a CPU car (fill CPU or replacement bot) uses its POW
+		// only when the host says so, so every machine uses the same POW at the same frame.
 		//
 
-enum { kEvReserved = 0, kEvBecomeBot = 1, kEvUnpauseForce = 2 };
+enum { kEvReserved = 0, kEvBecomeBot = 1, kEvUnpauseForce = 2, kEvCpuThrow = 3 };
 enum { INPUT_FLAG_SUBSTITUTED = 0x01, INPUT_FLAG_COALESCED = 0x02 };
 
 typedef struct
@@ -67,15 +69,22 @@ typedef struct
 	uint32_t			effectiveFrame;					// host sim frame at which every machine applies it
 	uint8_t				type;							// kEv*
 	int8_t				playerNum;
-	uint16_t			pad;
+	uint16_t			pad;							// kEvCpuThrow: the POW use (NetEncodeCPUPOW); 0 for the other types
 }NetFrameEvent;
 _Static_assert(sizeof(NetFrameEvent) == 8, "NetFrameEvent ABI");
+
+// kEvCpuThrow's pad: the POW type, and whether it is thrown backward.
+#define NET_CPU_POW_TYPE_MASK	0x000F
+#define NET_CPU_POW_BACKWARD	0x0010
 
 // Max frame-aligned events buffered/applied concurrently (host pending ring + per-machine apply
 // table). The wire MUST carry the same count: NetCheck/leave can schedule one become-bot per
 // in-flight player in a SINGLE host frame, all sharing one effectiveFrame, so a smaller wire cap
 // would silently drop the surplus and desync the host vs clients (seed/state FATAL).
-#define NET_MAX_PENDING_EVENTS	8
+// Each non-host player has at most one event pending: a human's become-bot, or, once it
+// drives a CPU car, one POW use (the host decides the next only after the last applied).
+// At least 8, the wire size since CMR7.
+#define NET_MAX_PENDING_EVENTS	(MAX_PLAYERS - 1 > 8 ? MAX_PLAYERS - 1 : 8)
 
 // Host input buffering and frame-event scheduling limits are wire invariants too: the
 // payload validator must agree with the producer on every accepted telemetry/event value.
@@ -177,6 +186,8 @@ void Net_Pump(void);
 int Net_GetConnectionHint(void);				// CMR7: per-client D_init seed (1 = WiFi, 0 = wired)
 
 void ApplyPendingFrameEvents(void);				// CMR7 Stage 4: apply frame-aligned events (become-bot) for the frame just simulated
+Boolean Host_ScheduleCPUPOW(short playerNum, short powType, Boolean backward);	// every machine's CPU car uses this POW at one later frame
+Boolean Net_IsCPUPOWPending(short playerNum);	// a CPU car's scheduled POW use is not applied yet
 void NetCheck_ConnectionTimeouts(void);			// CMR7 Stage 4: per-frame lastHeard badge/drop policy (host + client)
 void Net_MaybeSendKeepAlive(void);				// CMR7 Stage 4: throttled header-only heartbeat (lobby/barriers keep radios awake)
 void Net_RefreshLastHeard(void);				// CMR7 Stage 4: reset all liveness clocks to now (game-loop entry)

@@ -371,6 +371,7 @@ SharedCPUVehicleSeed	sharedCPUVehicleSeed;
 		gPlayerInfo[i].attackTimer		= 2;					// dont attack for the first few seconds
 		gPlayerInfo[i].targetedPlayer	= -1;					// no players targeted yet
 		gPlayerInfo[i].targetingTimer	= 0;
+		gPlayerInfo[i].net.cpuPOWType	= POW_TYPE_NONE;		// no host-scheduled POW use (network games)
 		gPlayerInfo[i].pathVec.x	= 0;
 		gPlayerInfo[i].pathVec.y	= 0;
 

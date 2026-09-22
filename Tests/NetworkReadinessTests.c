@@ -1112,6 +1112,144 @@ static void NetworkFillRace(void)
     gMyNetworkPlayerNum = 0;
 }
 
+// Apply every frame's events up to and including lastFrame, as StepGameSimulation does.
+static void ApplyEventsThrough(uint32_t firstFrame, uint32_t lastFrame, int watchedPlayer)
+{
+    for (uint32_t frame = firstFrame; frame <= lastFrame; frame++)
+    {
+        gHostSendCounter = frame + 1; // the host sent, or the client consumed, this frame
+        ApplyPendingFrameEvents();
+        if (frame < lastFrame)
+            CHECK(gPlayerInfo[watchedPlayer].net.cpuPOWType == POW_TYPE_NONE);
+    }
+}
+
+// In a network race the host decides every CPU car's POW use and broadcasts it like a
+// leave. Each machine records the same events from the host's packets and has the car use
+// the POW at the same frame. One use per car is in flight; a use that can't be broadcast
+// is never applied; a car may schedule its next use in the frame its last one applied.
+static void NetworkCPUPOWEvents(void)
+{
+    const Boolean savedPref = gGamePrefs.cpuFill;
+    NSpGame* peers[MAX_CLIENTS];
+    BeginSession(SMALL_SESSION, peers);
+    gTheAge = 0;
+    gTrackNum = 3;
+    gTargetFPS = 60;
+    gGamePrefs.cpuFill = true;
+    CHECK(HostSendGameConfigInfo() == noErr);
+    short cars[MAX_PLAYERS], looks[MAX_PLAYERS];
+    SeatNetworkRace(cars, looks);
+    CHECK(gNumTotalPlayers == MAX_PLAYERS);
+    for (int i = 0; i < MAX_PLAYERS; i++)
+        CHECK(gPlayerInfo[i].net.cpuPOWType == POW_TYPE_NONE);
+    gNetSequenceState = kNetSequence_GameLoop;
+    const uint32_t start = 10;
+    gHostSendCounter = start;
+    const int lastCPU = MAX_PLAYERS - 1, firstCPU = SMALL_SESSION, leaver = SMALL_SESSION - 1;
+
+    // Only the host schedules, only for a CPU car, one use per car at a time.
+    CHECK(!Host_ScheduleCPUPOW(0, POW_TYPE_BONE, false));
+    CHECK(!Host_ScheduleCPUPOW(leaver, POW_TYPE_BONE, false)); // still a human
+    CHECK(!Host_ScheduleCPUPOW(lastCPU, MAX_POW_TYPES, false));
+    CHECK(!Host_ScheduleCPUPOW(MAX_PLAYERS, POW_TYPE_BONE, false));
+    gIsNetworkHost = false;
+    gIsNetworkClient = true;
+    CHECK(!Host_ScheduleCPUPOW(lastCPU, POW_TYPE_BONE, false));
+    gIsNetworkHost = true;
+    gIsNetworkClient = false;
+    CHECK(Host_ScheduleCPUPOW(lastCPU, POW_TYPE_MINE, true));
+    CHECK(Net_IsCPUPOWPending(lastCPU) && !Net_IsCPUPOWPending(firstCPU));
+    CHECK(!Host_ScheduleCPUPOW(lastCPU, POW_TYPE_BONE, false));
+    CHECK(Host_ScheduleCPUPOW(firstCPU, POW_TYPE_NITRO, false));
+    CHECK(Host_ScheduleFrameEvent(kEvBecomeBot, leaver, 0)); // and a client leaves
+
+    NetHostControlInfoMessageType wire;
+    memset(&wire, 0, sizeof(wire));
+    wire.fps = 60.0f;
+    wire.fpsFrac = 1.0f / 60.0f;
+    wire.frameCounter = gHostSendCounter;
+    Host_FillOutgoingEvents(&wire, gHostSendCounter);
+    CHECK(wire.eventCount == 3);
+    CHECK(NetValidateHostControlPayload(&wire, gNumRealPlayers, gNumTotalPlayers));
+    CHECK(!NetValidateHostControlPayload(&wire, gNumRealPlayers, gNumRealPlayers)); // no fill: no such car
+    const uint32_t effective = start + NET_MAX_EVENT_LEAD;
+
+    // The host applies from its own table; a client from the packets (each event arrives
+    // in several). Both end up with the same cars using the same POWs at the same frame.
+    PlayerInfoType before[MAX_PLAYERS], views[2][MAX_PLAYERS];
+    memcpy(before, gPlayerInfo, sizeof(before));
+    const short gathered = gNumGatheredPlayers;
+    for (int view = 0; view < 2; view++)
+    {
+        if (view)
+        {
+            memcpy(gPlayerInfo, before, sizeof(before));
+            gNumGatheredPlayers = gathered;
+            memset(sFrameEventTable, 0, sizeof(sFrameEventTable));
+            RecordHostFrameEvents(&wire);
+            RecordHostFrameEvents(&wire);
+        }
+        ApplyEventsThrough(start, effective, lastCPU);
+        memcpy(views[view], gPlayerInfo, sizeof(gPlayerInfo));
+        CHECK(!Net_IsCPUPOWPending(lastCPU) && !Net_IsCPUPOWPending(firstCPU));
+    }
+    CHECK(!memcmp(views[0], views[1], sizeof(views[0])));
+    CHECK(gPlayerInfo[lastCPU].net.cpuPOWType == POW_TYPE_MINE && gPlayerInfo[lastCPU].net.cpuPOWBackward);
+    CHECK(gPlayerInfo[lastCPU].net.cpuPOWFrame == effective);
+    CHECK(gPlayerInfo[firstCPU].net.cpuPOWType == POW_TYPE_NITRO && !gPlayerInfo[firstCPU].net.cpuPOWBackward);
+    CHECK(gPlayerInfo[leaver].isComputer && gPlayerInfo[leaver].net.cpuPOWType == POW_TYPE_NONE);
+
+    // Still in the effective frame: the cars decide their next uses. The slots of the uses
+    // just applied are free although not expired yet, so a ring the fakes below otherwise
+    // fill still takes every car's next use, and the replacement bot's first.
+    int fakes = 0;
+    for (int slot = 0; slot < NET_MAX_PENDING_EVENTS; slot++)
+    {
+        if (!sHostPendingEvents[slot].active)
+        {
+            sHostPendingEvents[slot].active = true;
+            sHostPendingEvents[slot].ev = (NetFrameEvent){.effectiveFrame = effective + 5, .type = kEvUnpauseForce};
+            if (++fakes == NET_MAX_PENDING_EVENTS - 3)
+                break;
+        }
+    }
+    CHECK(fakes == NET_MAX_PENDING_EVENTS - 3);
+    CHECK(Host_ScheduleCPUPOW(lastCPU, POW_TYPE_BONE, false));
+    CHECK(Host_ScheduleCPUPOW(firstCPU, POW_TYPE_OIL, true));
+    CHECK(Host_ScheduleCPUPOW(leaver, POW_TYPE_BOTTLEROCKET, false));
+
+    // Now the ring is full: the next use is neither broadcast nor applied here.
+    CHECK(!Host_ScheduleCPUPOW(firstCPU + 1, POW_TYPE_BONE, false));
+    CHECK(!Net_IsCPUPOWPending(firstCPU + 1));
+    memset(&wire, 0, sizeof(wire));
+    Host_FillOutgoingEvents(&wire, effective + 1);
+    CHECK(wire.eventCount == NET_MAX_PENDING_EVENTS);
+    int uses = 0;
+    for (int e = 0; e < wire.eventCount; e++)
+    {
+        if (wire.events[e].type == kEvCpuThrow)
+        {
+            CHECK(wire.events[e].effectiveFrame == effective + 1 + NET_MAX_EVENT_LEAD);
+            CHECK(wire.events[e].playerNum != firstCPU + 1);
+            uses++;
+        }
+    }
+    CHECK(uses == 3);
+    ApplyEventsThrough(effective + 1, effective + 1 + NET_MAX_EVENT_LEAD, firstCPU + 1);
+    CHECK(gPlayerInfo[firstCPU + 1].net.cpuPOWType == POW_TYPE_NONE);
+    CHECK(gPlayerInfo[leaver].net.cpuPOWType == POW_TYPE_BOTTLEROCKET);
+    CHECK(gPlayerInfo[firstCPU].net.cpuPOWType == POW_TYPE_OIL && gPlayerInfo[firstCPU].net.cpuPOWBackward);
+
+    gNetSequenceState = kNetSequence_Offline;
+    EndSession(peers);
+    gGamePrefs.cpuFill = savedPref;
+    gNetGameCPUFill = false;
+    gCPUFillThisRace = false;
+    gNumLocalPlayers = gNumRealPlayers = 1;
+    gMyNetworkPlayerNum = 0;
+}
+
 int main(void)
 {
     Readiness(VEHICLE_READY_TIMEOUT_MS, kNetSequence_WaitingForPlayerVehicles, kNetSequence_GotAllPlayerVehicles);
@@ -1146,6 +1284,7 @@ int main(void)
     NetworkFillVehicles();
     NetworkFillLooks();
     NetworkFillRace();
+    NetworkCPUPOWEvents();
     puts("Readiness, paused-leave, full-lobby, local CPU vehicle, start-height, split-screen seat and network fill tests passed");
     return 0;
 }
