@@ -763,6 +763,10 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 	add_test(
 		NAME localization_data
 		COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/Tests/LocalizationDataTests.py ${CMAKE_SOURCE_DIR})
+	add_test(
+		NAME start_slot_table
+		COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/Tests/StartSlotTableTests.py ${CMAKE_SOURCE_DIR})
+	set_tests_properties(start_slot_table PROPERTIES TIMEOUT 600)
 	if(WIN32)
 		add_custom_command(TARGET CroMagRallyAssetExtractionTests POST_BUILD
 			COMMAND ${CMAKE_COMMAND} -E copy_if_different
