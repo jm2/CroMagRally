@@ -10,6 +10,7 @@
 /****************************/
 
 #include "game.h"
+#include "cpu_fill.h"
 #include "vehicle_picker.h"
 
 /****************************/
@@ -139,19 +140,12 @@ short	i;
 
 
 			/* SEE HOW MANY PLAYERS IN GAME */
+			//
+			// CPU cars (isComputer above) take every slot after the humans'. Multiplayer
+			// races only have them with CPU fill; battle modes never do.
+			//
 
-	switch(gGameMode)
-	{
-		case	GAME_MODE_PRACTICE:
-		case	GAME_MODE_TOURNAMENT:
-//		case	GAME_MODE_MULTIPLAYERRACE:
-				gNumTotalPlayers = MAX_PLAYERS;                 // use them all
-				break;
-
-		default:
-				gNumTotalPlayers = gNumRealPlayers;				// no CPU players in battle modes
-				break;
-	}
+	gNumTotalPlayers = CountPlayersInGame(gGameMode, gNumRealPlayers, gCPUFillThisRace);
 
 
 	SafeDisposePtr((Ptr) backup);

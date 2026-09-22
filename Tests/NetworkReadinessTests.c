@@ -849,6 +849,44 @@ static void StartHeightSampling(void)
         CHECK(terrainQueries[i].x == gPlayerInfo[i].startX && terrainQueries[i].y == gPlayerInfo[i].startZ);
 }
 
+// A local split-screen race: humans take the first slots and panes, and with CPU fill
+// CPU cars (not on this machine, no pane) take the rest, on the best cars left free.
+static void LocalSplitScreenSeats(void)
+{
+    for (short humans = 2; humans <= MAX_LOCAL_PLAYERS; humans++)
+    {
+        for (int fill = 0; fill <= 1; fill++)
+        {
+            memset(gPlayerInfo, 0, sizeof(gPlayerInfo));
+            gNetGameInProgress = gIsNetworkHost = gIsNetworkClient = false;
+            gGameMode = GAME_MODE_MULTIPLAYERRACE;
+            gNumLocalPlayers = gNumRealPlayers = humans;
+            gCPUFillThisRace = fill;
+            gMyNetworkPlayerNum = 0;
+            InitPlayerInfo_Game();
+            CHECK(gNumTotalPlayers == (fill ? MAX_PLAYERS : humans));
+            for (int i = 0; i < gNumTotalPlayers; i++)
+            {
+                Boolean human = i < humans;
+                CHECK(gPlayerInfo[i].isComputer == !human);
+                CHECK(gPlayerInfo[i].onThisMachine == human);
+                CHECK(gPlayerInfo[i].splitPaneNum == (human ? i : -1));
+                if (human)
+                    gPlayerInfo[i].vehicleType = CAR_TYPE_ROCK - i;    // the best starter cars
+            }
+
+            unlockedAges = 0;
+            gDifficulty = DIFFICULTY_MEDIUM;
+            InitPlayersAtStartOfLevel();
+            const int numFreeCars = CAR_TYPE_ROCK + 1 - humans;      // the starter cars no human drives
+            for (int i = humans; i < gNumTotalPlayers; i++)          // best first, one each, then again
+                CHECK(gPlayerInfo[i].vehicleType == CAR_TYPE_ROCK - humans - (i - humans) % numFreeCars);
+        }
+    }
+    gCPUFillThisRace = false;
+    gNumLocalPlayers = gNumRealPlayers = 1;
+}
+
 int main(void)
 {
     Readiness(VEHICLE_READY_TIMEOUT_MS, kNetSequence_WaitingForPlayerVehicles, kNetSequence_GotAllPlayerVehicles);
@@ -879,6 +917,7 @@ int main(void)
     SmokeLobbyAutoStart();
     LocalCPUVehicles();
     StartHeightSampling();
-    puts("Readiness, paused-leave, full-lobby, local CPU vehicle and start-height tests passed");
+    LocalSplitScreenSeats();
+    puts("Readiness, paused-leave, full-lobby, local CPU vehicle, start-height and split-screen seat tests passed");
     return 0;
 }

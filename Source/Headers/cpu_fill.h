@@ -19,6 +19,11 @@ enum
 // battle arenas have no AI paths, and the CPU driver knows no battle rules.
 Boolean CPUFillAppliesToMode(int gameMode);
 
+// How many cars race in a game. Humans take slots 0..numRealPlayers-1 and CPU cars
+// the rest. Single-player races use every slot; multiplayer races only with CPU fill
+// (Pangea's had none); battle modes never seat CPU cars.
+short CountPlayersInGame(int gameMode, short numRealPlayers, Boolean cpuFill);
+
 // finisher just completed a multiplayer race. Returns true if that ends the race,
 // and then sets results[p] for each of the numPlayers players.
 // Without CPU fill the first car home wins and everyone else loses, as always (that

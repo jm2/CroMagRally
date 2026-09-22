@@ -46,6 +46,35 @@ static void TestModes(void)
 		CHECK(CPUFillAppliesToMode(mode) == (mode == GAME_MODE_MULTIPLAYERRACE));
 }
 
+static void TestPlayerCounts(void)
+{
+	for (int mode = 0; mode < NUM_GAME_MODES; mode++)
+	{
+		for (short humans = 1; humans <= MAX_PLAYERS; humans++)
+		{
+			for (int fill = 0; fill <= 1; fill++)
+			{
+				short count = CountPlayersInGame(mode, humans, fill);
+				switch (mode)
+				{
+					case GAME_MODE_PRACTICE:						// single-player races use every slot
+					case GAME_MODE_TOURNAMENT:
+						CHECK(count == MAX_PLAYERS);
+						break;
+
+					case GAME_MODE_MULTIPLAYERRACE:					// CPU cars only with fill
+						CHECK(count == (fill ? MAX_PLAYERS : humans));
+						break;
+
+					default:										// battle modes: humans only
+						CHECK(count == humans);
+						break;
+				}
+			}
+		}
+	}
+}
+
 static void TestHumansOnlyRace(void)
 {
 	// Without fill, the first car home wins and everyone else loses, as before.
@@ -135,6 +164,7 @@ static void TestFilledRace(void)
 int main(void)
 {
 	TestModes();
+	TestPlayerCounts();
 	TestHumansOnlyRace();
 	TestFilledRace();
 	puts("CPU fill tests passed");

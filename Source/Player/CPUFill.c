@@ -14,6 +14,24 @@ Boolean CPUFillAppliesToMode(int gameMode)
 }
 
 
+/******************** COUNT PLAYERS IN GAME *********************/
+
+short CountPlayersInGame(int gameMode, short numRealPlayers, Boolean cpuFill)
+{
+	switch (gameMode)
+	{
+		case	GAME_MODE_PRACTICE:
+		case	GAME_MODE_TOURNAMENT:
+				return MAX_PLAYERS;
+
+		default:
+				if (cpuFill && CPUFillAppliesToMode(gameMode))
+					return MAX_PLAYERS;
+				return numRealPlayers;
+	}
+}
+
+
 /******************** DECIDE MULTIPLAYER RACE FINISH *********************/
 //
 // Each human keeps seeing their place among all the cars: a CPU that finishes

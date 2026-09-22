@@ -3,6 +3,7 @@
 
 import os
 from pathlib import Path
+import re
 import socket
 import subprocess
 import sys
@@ -38,6 +39,7 @@ def run(binary: Path, args: list[str], marker: str | None = None,
                 or "Game Fatal Alert:" in output):
             raise AssertionError(f"Startup failed for {args} (exit {result.returncode}):\n{output}")
         print(f"PASS: {' '.join(args)}", flush=True)
+        return output
 
 
 def main() -> None:
@@ -52,11 +54,20 @@ def main() -> None:
                          "--smoke-test-frames", "3"],
                 f"SMOKE: {mode} track {track} rendered 3 frames")
 
-    # Smoke-only local split-screen multiplayer races, 2..4 humans (MAX_LOCAL_PLAYERS).
+    # Smoke-only local split-screen multiplayer races, 2..4 humans (MAX_LOCAL_PLAYERS),
+    # humans only or with CPU cars filling every other slot.
+    filled_grids = set()
     for players, track in ((2, 1), (3, 9), (4, 5)):
-        run(binary, ["--track", str(track), "--no-vsync", "--smoke-test-frames", "3",
-                     "--smoke-local-players", str(players)],
+        local = ["--track", str(track), "--no-vsync", "--smoke-test-frames", "3",
+                 "--smoke-local-players", str(players)]
+        run(binary, local,
             f"SMOKE: local race track {track} with {players} players and {players} cars rendered 3 frames")
+        output = run(binary, [*local, "--smoke-cpu-fill"], f"SMOKE: local race track {track} with {players} players")
+        filled_grids.add(int(re.search(r"with \d+ players and (\d+) cars", output).group(1)))
+    if len(filled_grids) != 1 or min(filled_grids) <= 4:
+        raise AssertionError(f"CPU fill should race one full grid every time, got {filled_grids} cars")
+    run(binary, ["--track", "1", "--smoke-test-frames", "3", "--smoke-cpu-fill"],
+        rejection="--smoke-cpu-fill requires --smoke-local-players")
     for players in ("1", "5", "garbage"):
         run(binary, ["--track", "1", "--smoke-test-frames", "3", "--smoke-local-players", players],
             rejection="Invalid --smoke-local-players")

@@ -2002,6 +2002,7 @@ void GameMain(void)
 		{
 			gGameMode = GAME_MODE_MULTIPLAYERRACE;
 			gNumLocalPlayers = gNumRealPlayers = gCommandLine.smokeLocalPlayers;
+			gCPUFillThisRace = gCommandLine.smokeCPUFill && CPUFillAppliesToMode(gGameMode);
 		}
 		InitPlayerInfo_Game();
 
