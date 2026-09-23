@@ -3,8 +3,8 @@
 This branch implements charter §5 (fill empty multiplayer race slots with CPU cars)
 on top of `fix/player-limit-gaps` (PR #42, merged to master as `c92e559`), written
 against `MAX_PLAYERS` generically. **Split-screen and LAN fill are both wired and
-tested.** What remains is the §5.6 merge check onto `feat/12-players`, a CHANGELOG
-entry and the owner decisions below. Delete this file before merging.
+tested**, the §5.6 merge check onto `feat/12-players` passes, and the CHANGELOG
+entry is written. What remains is the owner decisions below. Delete this file before merging.
 
 The protocol cookie stays `CMR8` (unreleased; owner decision, 2026-09-22). The
 network unit's `CMR9 -> CMRB` commit was deliberately left out.
@@ -100,15 +100,31 @@ network unit's `CMR9 -> CMRB` commit was deliberately left out.
 
 ## Not done
 
-1. §5.6 merge check: test-merge onto `feat/12-players` (4 split-screen humans + 8
-   CPUs; host + 1 client + 10 CPUs). The branches overlap in:
-   - `Player.c` (driver looks: keep either `ResolveCPUDriverLooks` or the fill dressing);
-   - `Boot.cpp` and `file.h` (smoke flags);
-   - `BUILD.md`;
-   - `Tests/ValidationTests.c`.
-
-   At 12 players `NET_MAX_PENDING_EVENTS` becomes 11. A static assert checks the
-   host message still fits in `kNSpMaxMessageLength`.
+1. ~~§5.6 merge check~~ **done** (2026-09-22). I test-merged `origin/feat/cpu-slot-fill`
+   (`4fc9143`) onto `origin/feat/12-players` (`537481d`) in the local branch
+   `wip/mergecheck-b3-onto-b2`. It was not pushed.
+   - **Conflicts:** 9 files, all resolvable. Mostly the branches add next to each other
+     in `CMakeLists.txt`, `file.h`, `Boot.cpp`, `NetValidation.c`, `Main.c`,
+     `StartupSmokeTests.py` and `ValidationTests.c`. Decisions made in the merge:
+     - `NET_MAX_PENDING_EVENTS` = `max(MAX_PLAYERS, 8)`: 12 at twelve players, and at
+       least one per non-host player.
+     - The `--smoke-test-frames` limit without soak flags is 36000 (this branch's LAN
+       soaks); soak runs keep 100000.
+     - In `Player.c`, the CPU car count comes from `CountPlayersInGame` plus the
+       `--smoke-cars` override. This branch's network car picker is kept. CPU looks
+       come from `DressNetworkFillCPUs` (network fill races) and then feat/12-players'
+       `ResolveCPUDriverLooks`.
+   - **One real failure on the first attempt:** with only `ResolveCPUDriverLooks`,
+     `NetworkFillLooks` failed, because peers whose character screens swapped outfits
+     into CPU slots dressed the CPUs differently. Re-dealing the fill CPUs first fixed it.
+   - **CI-equivalent run on the merge:** ctest 30/30 on both builds, 114 StartupSmoke
+     PASS lines, MalformedAssetTests PASS.
+   - **§4 acceptance with fill on, sanitizer build, all 9 tracks, 3000 frames:**
+     - 4 split-screen humans + 8 CPUs: clean.
+     - LAN host + 1 client + 10 CPUs: clean. Every peer agreed on 12 cars and on
+       2–25 host-decided CPU POW uses per track, with no desync.
+   - Notes and the resolution diff are in `/var/tmp/cmr-tools/mergecheck-notes.md` and
+     `mergecheck-resolution.diff`. Whoever merges second must redo these resolutions.
 2. ~~CHANGELOG entry for branch 3~~ done (Unreleased section).
 3. No test drives `DoCPUPowerupLogic`'s network path in-process, because
    `Player_Car.c` isn't in the readiness harness. The LAN soak's per-peer POW-use
