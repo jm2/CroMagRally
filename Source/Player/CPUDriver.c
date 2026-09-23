@@ -173,14 +173,14 @@ void RecordCPURescueCrossing(PlayerInfoType *pinfo, float x, float z, float dirX
 //
 // CPU_RESCUE_AHEAD past the car's last forward checkpoint crossing, facing the way it
 // was driving then. If another car is within CPU_RESCUE_CLEARANCE, further along that
-// way, a CPU_RESCUE_STEP at a time (twice at most); if all are taken, the first. Only
+// way, a CPU_RESCUE_STEP at a time (twice at most). Returns false, leaving *spot alone,
+// if every place is taken: the caller tries again later rather than overlap a car. Only
 // simulation state, so every network peer agrees.
 //
 
-CPURescueSpot FindCPURescueSpot(const PlayerInfoType *pinfo, const OGLPoint3D others[], int numOthers)
+Boolean FindCPURescueSpot(const PlayerInfoType *pinfo, const OGLPoint3D others[], int numOthers, CPURescueSpot *spot)
 {
 	const float dx = pinfo->rescueDirX, dz = pinfo->rescueDirZ;
-	CPURescueSpot spot = { pinfo->rescueX + dx * CPU_RESCUE_AHEAD, pinfo->rescueZ + dz * CPU_RESCUE_AHEAD, atan2f(-dx, -dz) };
 
 	for (int step = 0; step <= 2; step++)
 	{
@@ -195,11 +195,12 @@ CPURescueSpot FindCPURescueSpot(const PlayerInfoType *pinfo, const OGLPoint3D ot
 		}
 		if (clear)
 		{
-			spot.x = x;
-			spot.z = z;
-			break;
+			spot->x = x;
+			spot->z = z;
+			spot->rotY = atan2f(-dx, -dz);
+			return true;
 		}
 	}
 
-	return spot;
+	return false;
 }

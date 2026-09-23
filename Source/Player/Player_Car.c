@@ -580,7 +580,12 @@ int				numOthers = 0;
 			others[numOthers++] = gPlayerInfo[i].objNode->Coord;
 	}
 
-	const CPURescueSpot spot = FindCPURescueSpot(pinfo, others, numOthers);
+	CPURescueSpot spot;
+	if (!FindCPURescueSpot(pinfo, others, numOthers, &spot))
+	{
+		pinfo->rescueTimer = CPU_RESCUE_TIME;							// every spot is taken: try again next frame
+		return;
+	}
 
 	SDL_Log("CPU rescue: player %d from (%.0f, %.0f, %.0f) back to checkpoint %d, lap %d",
 			p, theNode->Coord.x, theNode->Coord.y, theNode->Coord.z, pinfo->checkpointNum, pinfo->lapNum);

@@ -205,29 +205,34 @@ static void TestRescueTimer(void)
 static void TestRescueSpot(void)
 {
 	PlayerInfoType p = {0};
+	CPURescueSpot spot;
 
 	// Just past where the car last crossed a checkpoint going forward, facing the way it
 	// was driving then (cars face (-sin rotY, -cos rotY)).
 	RecordCPURescueCrossing(&p, 1000, -2000, 0, -30);							// driving toward -z
-	CPURescueSpot spot = FindCPURescueSpot(&p, NULL, 0);
+	CHECK(FindCPURescueSpot(&p, NULL, 0, &spot));
 	CHECK(spot.x == 1000 && spot.z == -2000 - CPU_RESCUE_AHEAD);
 	CHECK(fabsf(-sinf(spot.rotY)) < 0.001f && fabsf(-cosf(spot.rotY) - (-1)) < 0.001f);
 
 	// A diagonal crossing keeps its direction, normalized.
 	RecordCPURescueCrossing(&p, 0, 0, 3, 4);
-	spot = FindCPURescueSpot(&p, NULL, 0);
+	CHECK(FindCPURescueSpot(&p, NULL, 0, &spot));
 	CHECK(fabsf(spot.x - 0.6f * CPU_RESCUE_AHEAD) < 0.01f && fabsf(spot.z - 0.8f * CPU_RESCUE_AHEAD) < 0.01f);
 	CHECK(fabsf(-sinf(spot.rotY) - 0.6f) < 0.001f && fabsf(-cosf(spot.rotY) - 0.8f) < 0.001f);
 
-	// A car in the way: further along, a step at a time; all taken: the first spot.
+	// A car in the way: further along, a step at a time.
 	RecordCPURescueCrossing(&p, 1000, -2000, 0, -1);
 	OGLPoint3D others[3] = { {1000, 0, -2000 - CPU_RESCUE_AHEAD} };
-	spot = FindCPURescueSpot(&p, others, 1);
+	CHECK(FindCPURescueSpot(&p, others, 1, &spot));
 	CHECK(spot.x == 1000 && spot.z == -2000 - CPU_RESCUE_AHEAD - CPU_RESCUE_STEP);
+
+	// Every place taken: no spot, and the caller's spot is left alone (never overlap a car).
 	others[1] = (OGLPoint3D) {1000, 0, -2000 - CPU_RESCUE_AHEAD - CPU_RESCUE_STEP};
 	others[2] = (OGLPoint3D) {1000, 0, -2000 - CPU_RESCUE_AHEAD - 2 * CPU_RESCUE_STEP};
-	spot = FindCPURescueSpot(&p, others, 3);
-	CHECK(spot.z == -2000 - CPU_RESCUE_AHEAD);
+	const CPURescueSpot untouched = {1, 2, 3};
+	spot = untouched;
+	CHECK(!FindCPURescueSpot(&p, others, 3, &spot));
+	CHECK(spot.x == 1 && spot.z == 2 && spot.rotY == 3);
 
 	// A zero-length move keeps the previous direction; the point still moves.
 	RecordCPURescueCrossing(&p, 50, 60, 0, 0);

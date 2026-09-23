@@ -35,4 +35,4 @@ typedef struct
 int CPURaceProgress(short lapNum, short checkpointNum, long numCheckpoints);
 Boolean UpdateCPURescueTimer(PlayerInfoType *pinfo, int progress, float distToNext, Boolean racing, float dt);
 void RecordCPURescueCrossing(PlayerInfoType *pinfo, float x, float z, float dirX, float dirZ);
-CPURescueSpot FindCPURescueSpot(const PlayerInfoType *pinfo, const OGLPoint3D others[], int numOthers);
+Boolean FindCPURescueSpot(const PlayerInfoType *pinfo, const OGLPoint3D others[], int numOthers, CPURescueSpot *spot);
