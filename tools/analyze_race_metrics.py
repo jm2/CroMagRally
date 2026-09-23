@@ -67,7 +67,7 @@ def summarize(path, source, stranded_fraction):
     cpus = [c for c in cars if c["cpu"] == 1]
     humans = [c for c in cars if c["cpu"] == 0]
     # Checkpoints passed; a car still behind the last checkpoint on lap -1 has passed none.
-    progress = [c["lap"] * ncp + (c["ckpt"] if c["ckpt"] != ncp - 1 or c["lap"] >= 0 else 0) for c in cpus]
+    progress = [c["lap"] * ncp + c["ckpt"] if c["lap"] >= 0 else 0 for c in cpus]  # still on the grid: 0
     row.update(
         ok=True, why=race.get("why", "?"), racetime=rt, cpus=len(cpus),
         cpu_lap1=mean([c["lap1"] - c["lap0"] for c in cpus if c["lap1"] > 0 and c["lap0"] >= 0]),
