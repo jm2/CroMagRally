@@ -17,6 +17,10 @@ import sys
 
 SYNCED = re.compile(r"\b(MyRandomLong|RandomRange|RandomFloat2?)\s*\(")
 FUNCTION = re.compile(r"^[A-Za-z_][\w \t\*]*?\b(\w+)\s*\([^;]*$")
+# A declaration or definition of one of those functions (a type right before the name),
+# which is not a draw. "float x = RandomFloat();" and "return RandomRange(...)" are.
+DECLARATION = re.compile(r"^\s*(?:extern\s+)?(?:static\s+)?(?:inline\s+)?(?!return\b|else\b|case\b)"
+                         r"[A-Za-z_]\w*[\s\*]+(?:MyRandomLong|RandomRange|RandomFloat2?)\s*\(")
 ALLOWED = {
     ("Source/System/Misc.c", "RandomRange"),  # the RNG itself
     ("Source/System/Misc.c", "RandomFloat2"),
@@ -45,12 +49,24 @@ def draws(root: Path) -> set[tuple[str, str]]:
             match = FUNCTION.match(line)
             if match:
                 function = match.group(1)
-            if SYNCED.search(line) and not line.lstrip().startswith(("extern", "uint", "float")):
+            if SYNCED.search(line) and not DECLARATION.match(line):
                 found.add((name, function))
     return found
 
 
+def check_filter() -> None:
+    for line in ("extern uint32_t MyRandomLong(void);", "extern\tfloat RandomFloat(void);",
+                 "uint16_t\tRandomRange(unsigned short min, unsigned short max)", "float RandomFloat2(void);"):
+        if not DECLARATION.match(line):
+            raise AssertionError(f"declaration counted as a draw: {line!r}")
+    for line in ("float x = RandomFloat();", "\tuint32_t seed = MyRandomLong();", "\treturn RandomRange(0, 5);",
+                 "\tRandomRange(0, 5);", "\tconst float f = 2 * RandomFloat2();"):
+        if not SYNCED.search(line) or DECLARATION.match(line):
+            raise AssertionError(f"draw not counted: {line!r}")
+
+
 def main() -> None:
+    check_filter()
     root = Path(sys.argv[1])
     found = draws(root)
     unexpected = sorted(found - ALLOWED)

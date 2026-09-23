@@ -122,8 +122,8 @@ def main() -> None:
             f"SMOKE: local race track {track} with {players} players and {players} cars rendered 3 frames")
         output = run(binary, [*local, "--smoke-cpu-fill"], f"SMOKE: local race track {track} with {players} players")
         filled_grids.add(int(re.search(r"with \d+ players and (\d+) cars", output).group(1)))
-    if len(filled_grids) != 1 or min(filled_grids) <= 4:
-        raise AssertionError(f"CPU fill should race one full grid every time, got {filled_grids} cars")
+    if filled_grids != {6}:  # fresh prefs: the default, original six-car grid
+        raise AssertionError(f"CPU fill should fill the six-car grid every time, got {filled_grids} cars")
     run(binary, ["--track", "1", "--smoke-test-frames", "3", "--smoke-cpu-fill"],
         rejection="--smoke-cpu-fill requires --smoke-local-players or --smoke-net-players")
     for players in ("1", "5", "garbage"):
