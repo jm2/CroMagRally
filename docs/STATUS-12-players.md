@@ -20,18 +20,15 @@ branch 2 doesn't bump it (owner decision, 2026-09-22).
 - **Distinct drivers** (§4.4):
   - All 12 sex/outfit combinations are used (`DriverLooks.c`).
   - `CycleSkin` swaps stay distinct and can no longer spin forever.
-  - The minimap marks the second wearer of each outfit with a centre dot. This
-    was chosen over six new colours for colour-blind contrast; screenshots are in
-    `/var/tmp/cmr-b2-drivers-shots/`.
-- **Budgets** (§4.6–4.7), all scaling with `MAX_PLAYERS` and giving exactly the
-  old values at 6 players:
-  - sound channels: 20 per 6 players, so 40 at 12;
-  - skid marks: 10 per player;
-  - particle groups: 40 + 5 per player, with scaled snow and bubble reserves;
+  - The second wearer of each outfit gets its own minimap colour (owner decision; this
+    replaced a centre-dot marker).
+- **Budgets** (§4.6–4.7):
+  - sound channels: a fixed 64 (owner decision);
+  - skid marks: 40 per player (owner decision);
+  - particle groups: 70 per six players, with scaled snow and bubble reserves;
   - collision list: kept at 60 and asserted;
   - a note that the supertile pool scales with panes, not cars;
-  - the scoreboard drops records whose place is past the build's limit
-    (documented and tested).
+  - scoreboard places are bounded by a fixed 16, not the player limit (owner decision).
 - **Audit fixes:**
   - The host-control validation test now builds the full event list from every
     network player.
@@ -113,18 +110,20 @@ StartupSmoke PASS lines, MalformedAssetTests PASS. GitHub CI on PR #43 passes on
    regenerated with it.
 6. ~~CHANGELOG entry for branch 2~~ done (Unreleased section).
 
-## Open decisions for the owner
+## Owner decisions (2026-09-22)
 
-- Tournament `placeToWin` (`Main.c:393-396`): 3rd of 12 on Easy, 1st otherwise. Keep it or scale it?
-- Battle length at 12: worst case for Tag1 is (N−1) × duration, and CTF keeps 6 flags per team. Scale them?
-- Minimap: a centre dot on second wearers, or six extra colours?
-- Spanish, German and Swedish use the English ordinal sprites (original behaviour). Switch Spanish to º/ª?
-- Sound channels: 40 at 12 (Europe peaks at 43), or the charter's 32?
-- Particle groups: 100 at 12 (stock gating ratio), or fully proportional (140)?
-- Skid pool: the per-car share is unchanged, and the pool is full by design at both 6 and 12.
-- Scoreboard downgrade: a 6-player build drops 7th–12th records written by a
-  12-player build. Accept that, or validate against a fixed bound such as 16?
-- Humans on the character screen may still pick the same look as each other; only CPUs are re-dressed.
+- Tournament `placeToWin`: **kept as is** until live testing.
+- Battle length at 12 players: **still open** (a recommendation is in the PR thread).
+- Minimap: **six more colours** in the current style (violet, magenta, yellow, cyan, dark
+  green, navy for the second wearer of brown, green, blue, gray, red and white). Done.
+- Spanish, German and Swedish ordinals: **kept** as they are (original behaviour).
+- Humans picking the same look on LAN: **accepted**, since it matches current behaviour.
+- Sound channels: **as many as necessary**, so a fixed 64 for every build. Done.
+- Particle groups: **proportional** (70 per six players, so 140 at 12). Done.
+- Skid-mark pool: **raised** to 40 per car (240 at 6, 480 at 12). Done.
+- Scoreboard: **fixed bound** of 16 places, so 6- and 12-player builds share records. Done.
+- CPU rescue for cars wedged on fences: **deferred**.
+- CTF start-slot balance: **pending** more context (explained in the PR thread).
 
 ## Pre-existing issues noticed (not changed)
 
