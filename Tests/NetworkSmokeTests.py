@@ -173,7 +173,11 @@ def check(instances: list[Instance], players: int, capacity: int, track: int, fr
 
     # Every peer seats the same grid, the humans plus CPU cars in every other slot with
     # fill, and has them use the POWs the host scheduled.
-    grids = {(int(m.group(1)), int(m.group(2))) for i in [host, *seated] for m in GRID.finditer(i.output)}
+    reports = {i.name: [(int(m.group(1)), int(m.group(2))) for m in GRID.finditer(i.output)]
+               for i in [host, *seated]}
+    if any(len(r) != 1 for r in reports.values()):
+        raise AssertionError(f"expected one grid report from every peer, got {reports}")
+    grids = {r[0] for r in reports.values()}
     if len(grids) != 1:
         raise AssertionError(f"peers raced different grids (cars, CPU POW uses): {sorted(grids)}")
     cars, uses = grids.pop()
