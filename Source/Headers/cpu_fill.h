@@ -47,11 +47,10 @@ short CountPlayersInGame(int gameMode, short numRealPlayers, Boolean cpuFill, sh
 // leftover CPUs keep theirs. numPlayers must not exceed 32.
 void MakeCPULooksDistinct(PlayerInfoType players[], short numPlayers);
 
-// Network CPU fill: dresses the CPUs in slots numHumans..numPlayers-1 alike on every peer.
-// Each starts from the look InitPlayerInfo_Game dealt its slot, whatever this machine's
-// character screen swapped into it. Then MakeCPULooksDistinct's rule applies, with every
-// human slot keeping its look (a player who has since left included, bot or not).
-// numPlayers must not exceed 32.
+// Network CPU fill: puts the CPUs in slots numHumans..numPlayers-1 back in the look
+// InitPlayerInfo_Game dealt their slots (GetDefaultDriverLook), whatever this machine's
+// character screen swapped into them, so every peer starts alike. Human slots keep their
+// looks. InitPlayersAtStartOfLevel then runs ResolveCPUDriverLooks to keep drivers apart.
 void DressNetworkFillCPUs(PlayerInfoType players[], short numHumans, short numPlayers);
 
 // finisher just completed a multiplayer race. Returns true if that ends the race,
