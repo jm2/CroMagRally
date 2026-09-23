@@ -109,7 +109,7 @@ network unit's `CMR9 -> CMRB` commit was deliberately left out.
 
    At 12 players `NET_MAX_PENDING_EVENTS` becomes 11. A static assert checks the
    host message still fits in `kNSpMaxMessageLength`.
-2. CHANGELOG entry for branch 3, left for the owner as instructed.
+2. ~~CHANGELOG entry for branch 3~~ done (Unreleased section).
 3. No test drives `DoCPUPowerupLogic`'s network path in-process, because
    `Player_Car.c` isn't in the readiness harness. The LAN soak's per-peer POW-use
    counts cover it.
