@@ -148,7 +148,7 @@ typedef struct
 	int		smokeNetPlayers;		// smoke only: host starts once this many players (itself included) joined
 	int		smokeNetRefusals;		// smoke only: ...and after refusing this many extra joins as full
 	int		smokeLocalPlayers;		// smoke only: race --track as a split-screen multiplayer race with this many humans
-	bool	smokeCPUFill;			// smoke only: ...and fill its empty slots with CPU cars
+	bool	smokeCPUFill;			// smoke only: the local race, or the hosted network race, fills its empty slots with CPU cars
 	int		car;
 	bool	netHost;
 	bool	netJoin;

@@ -1000,8 +1000,9 @@ static Boolean UpdateSmokeTestFrame(void)
 			return false;
 
 		gSmokeFramesRemaining = 0;
-		SDL_Log("SMOKE: net race track %d player %d/%d simulated %d frames",
-				gTrackNum + 1, gMyNetworkPlayerNum + 1, gNumRealPlayers, gCommandLine.smokeTestFrames);
+		SDL_Log("SMOKE: net race track %d player %d/%d simulated %d frames with %d cars, %u CPU POW uses",
+				gTrackNum + 1, gMyNetworkPlayerNum + 1, gNumRealPlayers, gCommandLine.smokeTestFrames, gNumTotalPlayers,
+				(unsigned) Net_GetCPUPOWUses());
 		if (gIsNetworkClient)
 		{
 			gSmokeTestPassed = true;

@@ -253,6 +253,8 @@ static PendingEventSlot sHostPendingEvents[NET_MAX_PENDING_EVENTS];
 typedef struct { uint32_t effectiveFrame; uint8_t type; int8_t playerNum; uint16_t pad; Boolean applied; Boolean valid; } FrameEventEntry;
 static FrameEventEntry sFrameEventTable[NET_MAX_PENDING_EVENTS];
 
+static uint32_t sCPUPOWUses;				// kEvCpuThrow events applied this game (smoke runs compare peers)
+
 // Connection-liveness badge (host: per-player slot; client: gNetBadge[0] = host link).
 static Boolean		gNetBadge[MAX_PLAYERS];
 static uint32_t		gLastNetSendMs = 0;			// keepalive throttle, bumped whenever we send anything
@@ -323,6 +325,7 @@ void ResetNetGameTransientState(void)
 	gPlayerSyncMask = 0;
 	gReadinessStartedMs = 0;
 	gNetGameCPUFill = false;				// until the host's game config decides it
+	sCPUPOWUses = 0;
 	ResetClientHostRing();					// CMR7 Stage 3: empty the client host-packet ring + reset hold timers
 }
 
@@ -486,6 +489,12 @@ static void ApplyCPUPOW(int playerNum, uint16_t pad, uint32_t frame)
 	gPlayerInfo[playerNum].net.cpuPOWType = powType;
 	gPlayerInfo[playerNum].net.cpuPOWBackward = backward;
 	gPlayerInfo[playerNum].net.cpuPOWFrame = frame;
+	sCPUPOWUses++;
+}
+
+uint32_t Net_GetCPUPOWUses(void)
+{
+	return sCPUPOWUses;
 }
 
 // HOST: map a leave message's NSpPlayerID to a dense player index and schedule its become-bot.
@@ -1304,7 +1313,8 @@ NetConfigMessage		message;
 
 	int p = 1;														// start assigning player nums at 1 since Host is always #0
 
-	gNetGameCPUFill = gGamePrefs.cpuFill && CPUFillAppliesToMode(gGameMode);	// the host decides for every peer
+	gNetGameCPUFill = (gGamePrefs.cpuFill || gCommandLine.smokeCPUFill)		// the host decides for every peer
+		&& CPUFillAppliesToMode(gGameMode);
 
 	for (int i = 0; i < gNumRealPlayers; i++)
 	{

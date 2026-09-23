@@ -67,7 +67,7 @@ def main() -> None:
     if len(filled_grids) != 1 or min(filled_grids) <= 4:
         raise AssertionError(f"CPU fill should race one full grid every time, got {filled_grids} cars")
     run(binary, ["--track", "1", "--smoke-test-frames", "3", "--smoke-cpu-fill"],
-        rejection="--smoke-cpu-fill requires --smoke-local-players")
+        rejection="--smoke-cpu-fill requires --smoke-local-players or --smoke-net-players")
     for players in ("1", "5", "garbage"):
         run(binary, ["--track", "1", "--smoke-test-frames", "3", "--smoke-local-players", players],
             rejection="Invalid --smoke-local-players")
