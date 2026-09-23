@@ -87,8 +87,24 @@ static void TestPOWRespawn(void)
 	}
 }
 
+static void TestEliminationTagTime(void)
+{
+	// Six players or fewer keep the whole allowance, to the bit.
+	for (int n = 0; n <= TUNED_NUM_CARS; n++)
+		CHECK(SameBits(GetEliminationTagTimeScale(n), 1.0f));
+
+	// Above six, (players-1) allowances add up to what five did with six players.
+	for (int n = TUNED_NUM_CARS + 1; n <= 16; n++)
+	{
+		const float total = (float)(n - 1) * GetEliminationTagTimeScale(n);
+		CHECK(total > (float)(TUNED_NUM_CARS - 1) - 0.001f && total < (float)(TUNED_NUM_CARS - 1) + 0.001f);
+	}
+	CHECK(SameBits(GetEliminationTagTimeScale(12), 5.0f / 11.0f));
+}
+
 int main(void)
 {
+	TestEliminationTagTime();
 	TestSixCarsOrFewerKeepTheOriginalStep();
 	TestLargerFieldsShareTheSixCarRange();
 	TestPOWRespawn();

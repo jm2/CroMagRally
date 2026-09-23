@@ -4,7 +4,9 @@
 
 #define	MAX_TOKENS		8
 
-#define	TAG_TIME_LIMIT	((float)(gTagDuration) * 60.0)			// n minutes
+// n minutes per player; in elimination tag, shorter above six players (car_count_tuning.h)
+#define	TAG_TIME_LIMIT	((float)(gTagDuration) * 60.0 \
+						* (gGameMode == GAME_MODE_TAG1 ? GetEliminationTagTimeScale(gNumTotalPlayers) : 1.0f))
 
 #define	MAX_PLACE_DIGITS	3				// places past the number sprites are drawn with font digits
 #define	PLACE_DIGIT_SCALE	1.4f			// the font's digits are ~56 units tall, the place sprites ~79

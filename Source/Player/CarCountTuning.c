@@ -33,3 +33,17 @@ float GetPOWRespawnScale(int numCars)
 
 	return (float)TUNED_NUM_CARS / (float)numCars;
 }
+
+
+/******************** GET ELIMINATION TAG TIME SCALE ***********************/
+//
+// Same shape as the catch-up scale: exactly 1.0f up to TUNED_NUM_CARS players, so
+// those games keep their allowance to the bit.
+//
+
+float GetEliminationTagTimeScale(int numPlayers)
+{
+	if (numPlayers <= TUNED_NUM_CARS)
+		return 1.0f;
+	return (float)(TUNED_NUM_CARS - 1) / (float)(numPlayers - 1);
+}

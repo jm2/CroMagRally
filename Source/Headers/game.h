@@ -31,6 +31,7 @@
 #include "metaobjects.h"
 #include "sprites.h"
 #include "triggers.h"
+#include "car_count_tuning.h"
 #include "infobar.h"
 #include "liquids.h"
 #include "splineitems.h"

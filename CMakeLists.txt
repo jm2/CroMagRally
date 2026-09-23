@@ -719,7 +719,7 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 		if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 			add_executable(CroMagRallyNetworkReadinessTests Tests/NetworkReadinessTests.c
 				Source/Network/NetValidation.c Source/System/TextUtils.c
-				Source/Player/Player.c Source/Player/VehiclePicker.c Source/Player/DriverLooks.c Source/System/Main.c
+				Source/Player/Player.c Source/Player/VehiclePicker.c Source/Player/DriverLooks.c Source/Player/CarCountTuning.c Source/System/Main.c
 				Source/System/DeterministicMath.c)
 			target_include_directories(CroMagRallyNetworkReadinessTests PRIVATE ${GAME_GENERATED_INCLUDE_DIR} ${GAME_SRCDIR}/Headers)
 			target_link_libraries(CroMagRallyNetworkReadinessTests PRIVATE Pomme SDL3::SDL3)
