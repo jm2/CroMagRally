@@ -237,6 +237,11 @@ typedef struct
 	float				oldPositionTimer;							// used for seeing if need to check player stuck/stopped
 	OGLPoint3D			oldPosition;								// where it was last time we checked
 	float				reverseTimer;
+	float				rescueTimer;								// seconds without forward race progress (CPU rescue)
+	int					rescueProgress;								// best CPURaceProgress reached
+	float				rescueBestDist;								// closest to the next checkpoint since reaching it
+	float				rescueX, rescueZ;							// where it last crossed a checkpoint going forward
+	float				rescueDirX, rescueDirZ;						// ...and the way it was driving
 	float				attackTimer;
 	short				targetedPlayer;								// player currently targeted
 	float				targetingTimer;								// how long player has been targeted

@@ -28,6 +28,7 @@ static void RotateCar(ObjNode *theNode);
 static void DoCarMotion(ObjNode *theNode);
 static Boolean DoVehicleCollisionDetect(ObjNode *vehicle);
 static void DoCPUControl_Car(ObjNode *theNode);
+static void RescueStrandedCPUCar(ObjNode *theNode, float dt);
 static void DoCPUWeaponLogic_Standard(ObjNode *carObj, short playerNum, short powType);
 static void DoCPUPOWLogic_Nitro(ObjNode *carObj, short playerNum);
 static void DoPlayerControl_Car(ObjNode *theNode);
@@ -543,6 +544,64 @@ const VehicleMotionState	startState = GetVehicleMotionState(theNode, gPlayerInfo
 	gFramesPerSecondFrac = oldFPSFrac;
 
 	KeepCarMotionFinite(theNode, &startState);
+	RescueStrandedCPUCar(theNode, oldFPSFrac);
+}
+
+
+/******************** RESCUE STRANDED CPU CAR ***********************/
+//
+// See CPU_RESCUE_TIME (cpu_driver.h). Once per frame, after the car's move, for cars
+// the AI drives, in races only. The car moves with its old position and collision
+// boxes, so the move itself never crosses a checkpoint or sweeps through anything.
+// It reads only simulation state, so every network peer rescues the same bots alike.
+//
+
+static void RescueStrandedCPUCar(ObjNode *theNode, float dt)
+{
+short			p = theNode->PlayerNum;
+PlayerInfoType	*pinfo = &gPlayerInfo[p];
+OGLPoint3D		others[MAX_PLAYERS];
+int				numOthers = 0;
+
+	if (!pinfo->isComputer && !gAutoPilot)								// humans drive themselves
+		return;
+
+	const Boolean raceMode = gGameMode == GAME_MODE_PRACTICE || gGameMode == GAME_MODE_TOURNAMENT
+		|| gGameMode == GAME_MODE_MULTIPLAYERRACE;
+	const Boolean racing = raceMode && gNumCheckpoints > 0 && !gNoCarControls && !pinfo->raceComplete;
+	const int progress = CPURaceProgress(pinfo->lapNum, pinfo->checkpointNum, gNumCheckpoints);
+
+	if (!UpdateCPURescueTimer(pinfo, progress, pinfo->distToNextCheckpoint, racing, dt))
+		return;
+
+	for (int i = 0; i < gNumTotalPlayers; i++)
+	{
+		if (i != p && gPlayerInfo[i].objNode)
+			others[numOthers++] = gPlayerInfo[i].objNode->Coord;
+	}
+
+	const CPURescueSpot spot = FindCPURescueSpot(pinfo, others, numOthers);
+
+	SDL_Log("CPU rescue: player %d from (%.0f, %.0f, %.0f) back to checkpoint %d, lap %d",
+			p, theNode->Coord.x, theNode->Coord.y, theNode->Coord.z, pinfo->checkpointNum, pinfo->lapNum);
+
+	gCoord.x = spot.x;
+	gCoord.z = spot.z;
+	gCoord.y = GetTerrainY(spot.x, spot.z) + 100;						// as InitPlayer_Car places a new car
+	gDelta.x = gDelta.y = gDelta.z = 0;
+	theNode->Rot.x = theNode->Rot.z = 0;
+	theNode->Rot.y = spot.rotY;
+	theNode->DeltaRot.x = theNode->DeltaRot.y = theNode->DeltaRot.z = 0;
+	UpdateObject(theNode);
+	KeepOldCollisionBoxes(theNode);
+
+	theNode->Speed2D = theNode->Speed3D = 0;
+	pinfo->coord = gCoord;
+	pinfo->rescueBestDist = CPU_RESCUE_NO_DIST;									// measure progress from here
+	pinfo->reverseTimer = 0;											// start the stuck check afresh
+	pinfo->oldPosition = gCoord;
+	pinfo->oldPositionTimer = POSITION_TIMER;
+	AlignWheelsAndHeadOnCar(theNode);
 }
 
 

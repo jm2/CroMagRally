@@ -10,6 +10,7 @@
 /****************************/
 
 #include "game.h"
+#include "cpu_driver.h"
 #include "cpu_fill.h"
 #include "vehicle_picker.h"
 #include "driver_looks.h"
@@ -382,6 +383,13 @@ SharedCPUVehicleSeed	sharedCPUVehicleSeed;
 		gPlayerInfo[i].oldPosition.y	= 0;
 		gPlayerInfo[i].oldPosition.z	= 0;
 		gPlayerInfo[i].reverseTimer		= 0;
+		gPlayerInfo[i].rescueTimer		= 0;
+		gPlayerInfo[i].rescueProgress	= -1;					// lap -1, checkpoint N-1 (CPURaceProgress)
+		gPlayerInfo[i].rescueBestDist	= CPU_RESCUE_NO_DIST;
+		gPlayerInfo[i].rescueX			= gPlayerInfo[i].startX;		// until it crosses a checkpoint: its grid slot
+		gPlayerInfo[i].rescueZ			= gPlayerInfo[i].startZ;
+		gPlayerInfo[i].rescueDirX		= -sinf(gPlayerInfo[i].startRotY);
+		gPlayerInfo[i].rescueDirZ		= -cosf(gPlayerInfo[i].startRotY);
 		gPlayerInfo[i].attackTimer		= 2;					// dont attack for the first few seconds
 		gPlayerInfo[i].targetedPlayer	= -1;					// no players targeted yet
 		gPlayerInfo[i].targetingTimer	= 0;
