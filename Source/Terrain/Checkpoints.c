@@ -283,7 +283,7 @@ void PlayerCompletedRace(short playerNum)
 		Byte	results[MAX_PLAYERS];
 
 		if (DecideMultiplayerRaceFinish(gPlayerInfo, gNumTotalPlayers, playerNum,
-				gTrackCompleted, gCPUFillThisRace, results))
+				gTrackCompleted, results))
 		{
 			for (short i = 0; i < gNumTotalPlayers; i++)
 			{

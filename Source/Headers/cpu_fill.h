@@ -45,9 +45,10 @@ void DressNetworkFillCPUs(PlayerInfoType players[], short numHumans, short numPl
 
 // finisher just completed a multiplayer race. Returns true if that ends the race,
 // and then sets results[p] for each of the numPlayers players.
-// Without CPU fill the first car home wins and everyone else loses, as always (that
-// includes a network bot). With CPU fill, CPU cars race for places but never end the
-// race: the first human home wins, the other humans lose, and CPUs get no result.
+// Only humans contest a multiplayer race: CPU cars (fill) and network bots (players who
+// left) race for places but never end it. The first human home wins, the other humans
+// lose, and computer-driven cars get no result. Without fill or departures this is the
+// original rule: the first car home wins and everyone else loses.
 // raceDecided: an earlier finish already ended the race.
 Boolean DecideMultiplayerRaceFinish(const PlayerInfoType players[], short numPlayers, short finisher,
-		Boolean raceDecided, Boolean cpuFill, Byte results[]);
+		Boolean raceDecided, Byte results[]);

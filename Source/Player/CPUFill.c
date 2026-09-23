@@ -148,19 +148,19 @@ void DressNetworkFillCPUs(PlayerInfoType players[], short numHumans, short numPl
 //
 
 Boolean DecideMultiplayerRaceFinish(const PlayerInfoType players[], short numPlayers, short finisher,
-		Boolean raceDecided, Boolean cpuFill, Byte results[])
+		Boolean raceDecided, Byte results[])
 {
 	if (raceDecided || finisher < 0 || finisher >= numPlayers)
 		return false;
 
-	if (cpuFill && players[finisher].isComputer)					// CPU finishes don't end a filled race
+	if (players[finisher].isComputer)								// CPUs and network bots never end the race
 		return false;
 
 	for (short p = 0; p < numPlayers; p++)
 	{
 		if (p == finisher)
 			results[p] = kRaceResult_Won;
-		else if (cpuFill && players[p].isComputer)					// only humans contest a filled race
+		else if (players[p].isComputer)								// only humans contest the race
 			results[p] = kRaceResult_None;
 		else
 			results[p] = kRaceResult_Lost;
