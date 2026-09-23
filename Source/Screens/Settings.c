@@ -203,6 +203,19 @@ const MenuItem gSettingsMenuTree[] =
 			}
 		}
 	},
+#if MAX_PLAYERS == 12									// the 12 choice is MAX_PLAYERS
+	{
+		// Most cars in single-player, split-screen and hosted LAN games (and the LAN lobby size)
+		kMICycler1, STR_PLAYERS, .cycler=
+		{
+			.valuePtr=&gGamePrefs.playerLimit, .choices=
+			{
+				{STR_PLAYERS_6_ORIGINAL, PLAYER_LIMIT_ORIGINAL},
+				{STR_PLAYERS_12, MAX_PLAYERS},
+			}
+		}
+	},
+#endif
 
 	{.id='lang'},
 	{kMIPick, STR_ENGLISH,	.id=LANGUAGE_ENGLISH,	.callback=OnPickLanguage,	.next='BACK'},

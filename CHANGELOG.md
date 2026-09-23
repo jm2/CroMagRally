@@ -10,8 +10,9 @@
     - Snow now falls around every LAN player's camera, whatever their player number.
     - Developers: smoke-only soak flags `--smoke-autopilot`, `--smoke-cars`, `--smoke-fixed-fps`, `--smoke-seed`, `--smoke-until-finish` and `--smoke-metrics`, plus `tools/run_race_metrics.sh` and `tools/analyze_race_metrics.py`, for repeatable whole-race measurements.
     - Add a "CPU cars" option to multiplayer races (split-screen and LAN): empty slots fill with CPU cars, and only the humans' finishes end the race and decide who wins. In LAN games the host decides, every peer seats the same cars and drivers, and the host keeps racing the CPUs if every client leaves. CPU weapon use in LAN games is decided by the host and applied at the same frame on every machine.
+    - Add a "Players" option to Settings > Gameplay: 6 (the original game, and the default) or 12. It sets how many cars race in practice, tournament and CPU-filled multiplayer races, and how many players a LAN host seats: a host in 6-player mode turns the 7th player away as full. LAN clients follow the host's setting for that game; their own is left unchanged.
     - Only humans can win a multiplayer race: a player who leaves a LAN race keeps racing as a bot but no longer ends the race or wins it.
-    - Preferences move to a v2 layout for the new option; existing settings carry over. An older build that reads the new file resets to defaults.
+    - Preferences move to a v2 layout for the new options; existing settings carry over. An older build that reads the new file resets to defaults.
     - Fix a possible LAN desync when a setting was changed from a network game's pause menu (menu sounds drew from the synced random number generator).
     - Developers: smoke-only `--smoke-local-players N` and `--smoke-cpu-fill` for headless split-screen and filled LAN races, `Tests/NetworkSmokeTests.py --cpu-fill`, and a test that fails if unreviewed code draws the synced random number generator.
     - Restore six-player LAN and Wi-Fi games (host plus five clients), as in the original game.
