@@ -18,6 +18,13 @@ typedef struct
 	void*						randomContext;
 } CPUVehiclePickRules;
 
+// What a network game's CPU picks may depend on: only state every peer shares.
+typedef struct
+{
+	uint32_t					key;				// the track and the humans' cars
+	int							firstCPUSlot;		// player slot of the CPU with cpuIndex 0
+} SharedCPUVehicleSeed;
+
 // The best land car type unlocked after agesCompleted ages.
 int GetBestUnlockedLandCarType(int agesCompleted);
 
@@ -25,3 +32,12 @@ int GetBestUnlockedLandCarType(int agesCompleted);
 // depend on how many CPUs follow it, so callers may pick lazily between other synced
 // RNG draws. The result is always within 0...GetBestUnlockedLandCarType(agesCompleted).
 int PickCPUVehicle(const CPUVehiclePickRules* rules, int cpuIndex);
+
+// Rules for the CPU cars that fill a network race, which every peer must pick alike:
+// the humans' cars (humanCars[0...numHumans-1], slots 0...numHumans-1, including players
+// who left since), the whole land roster whatever this machine has unlocked, and on
+// DIFFICULTY_HARD a stateless draw keyed on the track, the humans' cars and the CPU's
+// slot instead of the synced RNG. CPU cpuIndex sits in slot numHumans + cpuIndex.
+// seed must outlive rules.
+void InitSharedCPUVehiclePickRules(CPUVehiclePickRules* rules, SharedCPUVehicleSeed* seed,
+		const short humanCars[], int numHumans, int difficulty, int trackNum);

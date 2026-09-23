@@ -516,11 +516,13 @@ OSErr LoadPrefs(void)
 	InitDefaultPrefs();
 	PrefsType defaultPrefs = gGamePrefs;
 
-	OSErr err = LoadUserDataFile(PREFS_FILENAME, PREFS_MAGIC, sizeof(loadedPrefs), (Ptr) &loadedPrefs);
+	Boolean upgraded = false;
+	OSErr err = LoadPrefsFile(PREFS_FILENAME, &loadedPrefs, &defaultPrefs, &upgraded);
 
 	if (err == noErr)
 	{
-		gPrefsNeedSave = SanitizePrefs(&loadedPrefs, &defaultPrefs);
+		gPrefsNeedSave = SanitizePrefs(&loadedPrefs, &defaultPrefs)
+			|| upgraded;									// write an upgraded file back in the current layout
 		gGamePrefs = loadedPrefs;
 	}
 	else

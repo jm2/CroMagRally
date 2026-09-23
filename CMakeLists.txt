@@ -613,14 +613,15 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 	endfunction()
 	cmr_add_gameplay_test(CroMagRallyPathTests paths Tests/PathTests.c Source/Terrain/Paths.c)
 	cmr_add_gameplay_test(CroMagRallyVehiclePickerTests vehicle_picker Tests/VehiclePickerTests.c
-		Source/Player/VehiclePicker.c)
+		Source/Player/VehiclePicker.c Source/System/DeterministicMath.c)
 	cmr_add_gameplay_test(CroMagRallyDriverLooksTests driver_looks Tests/DriverLooksTests.c
 		Source/Player/DriverLooks.c)
 	cmr_add_gameplay_test(CroMagRallyPlayerLimitTests player_limits Tests/PlayerLimitTests.c
 		Source/Terrain/TerrainResidency.c Source/Screens/InfobarPlace.c Source/System/CollisionList.c)
 	if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-		# Linker section GC keeps only the place calculation from Checkpoints.c.
-		cmr_add_gameplay_test(CroMagRallyRacePlaceTests race_places Tests/RacePlaceTests.c Source/Terrain/Checkpoints.c)
+		# Linker section GC keeps only the place and race-completion code from Checkpoints.c.
+		cmr_add_gameplay_test(CroMagRallyRacePlaceTests race_places Tests/RacePlaceTests.c Source/Terrain/Checkpoints.c
+			Source/Player/CPUFill.c)
 		target_compile_options(CroMagRallyRacePlaceTests PRIVATE -ffunction-sections -fdata-sections)
 		target_link_options(CroMagRallyRacePlaceTests PRIVATE -Wl,--gc-sections)
 		# Likewise only snowfall and its particle groups from Effects.c.
@@ -636,6 +637,7 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 	cmr_add_gameplay_test(CroMagRallyStartSlotTests start_slots Tests/StartSlotTests.c
 		Source/Terrain/StartSlots.c Source/Terrain/StartSlotTable.c)
 	cmr_add_gameplay_test(CroMagRallyRaceMetricsTests race_metrics Tests/RaceMetricsTests.c Source/System/RaceMetrics.c)
+	cmr_add_gameplay_test(CroMagRallyCPUFillTests cpu_fill Tests/CPUFillTests.c Source/Player/CPUFill.c)
 	add_executable(CroMagRallyValidationTests
 		Tests/ValidationTests.c
 		Source/Network/NetValidation.c
@@ -719,7 +721,7 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 		if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 			add_executable(CroMagRallyNetworkReadinessTests Tests/NetworkReadinessTests.c
 				Source/Network/NetValidation.c Source/System/TextUtils.c
-				Source/Player/Player.c Source/Player/VehiclePicker.c Source/Player/DriverLooks.c Source/Player/CarCountTuning.c Source/System/Main.c
+				Source/Player/Player.c Source/Player/VehiclePicker.c Source/Player/DriverLooks.c Source/Player/CarCountTuning.c Source/Player/CPUFill.c Source/System/Main.c
 				Source/System/DeterministicMath.c)
 			target_include_directories(CroMagRallyNetworkReadinessTests PRIVATE ${GAME_GENERATED_INCLUDE_DIR} ${GAME_SRCDIR}/Headers)
 			target_link_libraries(CroMagRallyNetworkReadinessTests PRIVATE Pomme SDL3::SDL3)
@@ -767,6 +769,21 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 	endif()
 	add_test(NAME tvos_legacy_migration COMMAND ${Python3_EXECUTABLE}
 		${CMAKE_SOURCE_DIR}/Tests/RunWithScratch.py $<TARGET_FILE:CroMagRallyMigrationTests>)
+	# The same prefs upgrade tests against plain prefs-folder files (every other platform).
+	add_executable(CroMagRallyPrefsMigrationTests Tests/UserDataMigrationTests.cpp Source/System/UserDataFiles.c)
+	target_include_directories(CroMagRallyPrefsMigrationTests PRIVATE
+		${GAME_GENERATED_INCLUDE_DIR} ${GAME_SRCDIR}/Headers)
+	target_compile_definitions(CroMagRallyPrefsMigrationTests PRIVATE CMR_TEST_PREFS_FOLDER="${GAME_TARGET}")
+	target_link_libraries(CroMagRallyPrefsMigrationTests PRIVATE Pomme SDL3::SDL3)
+	if(MSVC)
+		target_compile_definitions(CroMagRallyPrefsMigrationTests PRIVATE WIN32_LEAN_AND_MEAN NOGDI NOUSER)
+	endif()
+	if(SANITIZE)
+		target_compile_options(CroMagRallyPrefsMigrationTests PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+		target_link_options(CroMagRallyPrefsMigrationTests PRIVATE -fsanitize=address,undefined)
+	endif()
+	add_test(NAME prefs_migration COMMAND ${Python3_EXECUTABLE}
+		${CMAKE_SOURCE_DIR}/Tests/RunWithScratch.py $<TARGET_FILE:CroMagRallyPrefsMigrationTests>)
 	add_test(
 		NAME version_metadata
 		COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/Tests/VersionMetadataTests.py ${CMAKE_SOURCE_DIR})
@@ -777,6 +794,9 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 		NAME start_slot_table
 		COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/Tests/StartSlotTableTests.py ${CMAKE_SOURCE_DIR})
 	set_tests_properties(start_slot_table PROPERTIES TIMEOUT 600)
+	add_test(
+		NAME synced_random
+		COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/Tests/SyncedRandomTests.py ${CMAKE_SOURCE_DIR})
 	if(WIN32)
 		add_custom_command(TARGET CroMagRallyAssetExtractionTests POST_BUILD
 			COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -785,6 +805,10 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 		add_custom_command(TARGET CroMagRallyMigrationTests POST_BUILD
 			COMMAND ${CMAKE_COMMAND} -E copy_if_different
 				$<TARGET_RUNTIME_DLLS:CroMagRallyMigrationTests> $<TARGET_FILE_DIR:CroMagRallyMigrationTests>
+			COMMAND_EXPAND_LISTS)
+		add_custom_command(TARGET CroMagRallyPrefsMigrationTests POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E copy_if_different
+				$<TARGET_RUNTIME_DLLS:CroMagRallyPrefsMigrationTests> $<TARGET_FILE_DIR:CroMagRallyPrefsMigrationTests>
 			COMMAND_EXPAND_LISTS)
 		# Keep the runtime-DLL staging hook beside the executable it belongs to so
 		# target existence and directory scope are unambiguous at configure time.

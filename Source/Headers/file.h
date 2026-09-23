@@ -77,11 +77,39 @@ typedef struct
 
 	TournamentProgression tournamentProgression;
 	char	playerName[32];
+
+			/* ADDED IN V2 */
+
+	Boolean	cpuFill;					// fill empty multiplayer race slots with CPU cars
 }PrefsType;
+
+// The v1 prefs payload: PrefsType before v2 appended its fields. Frozen so that
+// v1 files can be upgraded (LoadPrefsFile); never edit it.
+typedef struct
+{
+	Byte	difficulty;
+	Byte	splitScreenMode2P;
+	Byte	splitScreenMode3P;
+	Byte	language;
+	Byte	tagDuration;
+	Byte	antialiasingLevel;
+	Boolean	fullscreen;
+	Byte	displayNumMinus1;
+	Byte	musicVolumePercent;
+	Byte	sfxVolumePercent;
+	Byte	raceTimer;
+
+	InputBinding bindings[NUM_CONTROL_NEEDS];
+	Boolean	gamepadRumble;
+
+	TournamentProgression tournamentProgression;
+	char	playerName[32];
+}PrefsTypeV1;
 
 #define PREFS_FOLDER_NAME "CroMagRally"
 
-#define PREFS_MAGIC "CMR Prefs v1   "
+#define PREFS_MAGIC "CMR Prefs v2   "
+#define PREFS_MAGIC_V1 "CMR Prefs v1   "
 #define PREFS_FILENAME "Prefs"
 
 
@@ -113,7 +141,7 @@ typedef struct
 
 		/* COMMAND-LINE OPTIONS */
 
-#define	SMOKE_TEST_MAX_FRAMES		600			// --smoke-test-frames limit for CI smoke runs
+#define	SMOKE_TEST_MAX_FRAMES		36000		// --smoke-test-frames limit without soak flags (long LAN fill soaks)
 #define	SMOKE_SOAK_MAX_FRAMES		100000		// ...and with a practice soak flag (--smoke-cars, --smoke-metrics...)
 #define	SMOKE_MIN_FIXED_FPS			9			// --smoke-fixed-fps range: NET_MIN_FPS..MAX_GAME_FPS
 
@@ -131,6 +159,8 @@ typedef struct
 	bool	smokeAutopilot;			// smoke soak: the CPU AI drives player 1, who still counts as the human
 	bool	smokeUntilFinish;		// smoke soak: end the race when player 1 finishes
 	bool	smokeMetrics;			// smoke soak: log METRICS lines at the end of the race (race_metrics.h)
+	int		smokeLocalPlayers;		// smoke only: race --track as a split-screen multiplayer race with this many humans
+	bool	smokeCPUFill;			// smoke only: the local race, or the hosted network race, fills its empty slots with CPU cars
 	int		car;
 	bool	netHost;
 	bool	netJoin;
@@ -148,6 +178,7 @@ SkeletonDefType *LoadSkeletonFile(short skeletonType);
 
 OSErr LoadUserDataFile(const char* path, const char* magic, long payloadLength, Ptr payloadPtr);
 OSErr SaveUserDataFile(const char* path, const char* magic, long payloadLength, Ptr payloadPtr);
+OSErr LoadPrefsFile(const char* path, PrefsType* prefs, const PrefsType* defaults, Boolean* upgraded);
 
 Boolean SanitizePrefs(PrefsType* prefs, const PrefsType* defaults);
 Boolean SanitizeScoreboard(Scoreboard* scoreboard);

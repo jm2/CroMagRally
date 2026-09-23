@@ -10,6 +10,7 @@
 /****************************/
 
 #include "game.h"
+#include "network.h"
 #include "cpu_driver.h"
 #include "finite_guard.h"
 #include "car_count_tuning.h"
@@ -2378,10 +2379,56 @@ float			tx,tz, angle, cross;
 
 
 /****************** DO CPU POWERUP LOGIC ************************/
+//
+// In a network game only the host decides when a CPU car (a fill CPU, or the bot that
+// replaced a player who left) uses its POW: the decision reads positions that can differ
+// slightly between peers. The host schedules each use as a kEvCpuThrow frame event, and
+// every machine, the host included, makes that car use it at that frame. POW pickups
+// can still differ between peers, exactly as they can for humans; a car that no longer
+// holds the POW at that frame doesn't use anything.
+//
+
+// Returns true if the car uses a POW this frame.
+static Boolean UseScheduledCPUPOW(short playerNum)
+{
+PlayerInfoType	*player = &gPlayerInfo[playerNum];
+short			powType = player->net.cpuPOWType;
+
+	if (powType == POW_TYPE_NONE || gPlayerMultiPassCount > 0)	// CheckPOWControls only acts on the first pass
+		return false;
+	player->net.cpuPOWType = POW_TYPE_NONE;
+
+	if (player->net.cpuPOWFrame != gHostSendCounter - 1			// only in the frame it was scheduled for
+		|| player->powType != powType
+		|| player->powQuantity <= 0)
+	{
+		return false;
+	}
+
+	if (powType == POW_TYPE_NITRO)								// as DoCPUPOWLogic_Nitro does locally
+		ActivateNitroPOW(playerNum);
+	else
+	if (player->net.cpuPOWBackward)
+		player->controlBits_New |= (1L << kControlBit_ThrowBackward);
+	else
+		player->controlBits_New |= (1L << kControlBit_ThrowForward);
+	return true;
+}
 
 void DoCPUPowerupLogic(ObjNode *carObj, short playerNum)
 {
 short	powType;
+const Boolean	hostDecides = gNetGameInProgress && gPlayerInfo[playerNum].isComputer;
+
+	if (hostDecides)
+	{
+		if (UseScheduledCPUPOW(playerNum)								// the host decides again next frame
+			|| !gIsNetworkHost
+			|| Net_IsCPUPOWPending(playerNum))							// one use in flight per car
+		{
+			return;
+		}
+	}
 
 	if (gDifficulty <= DIFFICULTY_EASY)						// CPU doesn't shoot in easy mode
 		return;
@@ -2420,6 +2467,19 @@ short	powType;
 		default:
 				DoCPUWeaponLogic_Standard(carObj, playerNum, powType);
 	}
+
+			/* THE HOST SENDS ITS DECISION TO EVERY MACHINE */
+
+	if (hostDecides)
+	{
+		const uint32_t	throwBits = (1L << kControlBit_ThrowForward) | (1L << kControlBit_ThrowBackward);
+		const uint32_t	decided = gPlayerInfo[playerNum].controlBits_New & throwBits;
+
+		gPlayerInfo[playerNum].controlBits_New &= ~throwBits;
+		// A throw decided on a later pass is lost, as CheckPOWControls ignores it locally too.
+		if (decided && (powType == POW_TYPE_NITRO || gPlayerMultiPassCount == 0))
+			Host_ScheduleCPUPOW(playerNum, powType, !(decided & (1L << kControlBit_ThrowForward)));
+	}
 }
 
 
@@ -2444,7 +2504,10 @@ static void DoCPUPOWLogic_Nitro(ObjNode *carObj, short playerNum)
 	if (gPlayerInfo[playerNum].distToFloor > 10.0f)						// if off ground, then dont
 		return;
 
-	ActivateNitroPOW(playerNum);
+	if (gNetGameInProgress && gPlayerInfo[playerNum].isComputer)		// the host schedules it for every machine
+		gPlayerInfo[playerNum].controlBits_New |= (1L << kControlBit_ThrowForward);
+	else
+		ActivateNitroPOW(playerNum);
 }
 
 

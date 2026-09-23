@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """Race a host and its LAN clients on loopback, headless, and refuse one join too many.
 
-usage: NetworkSmokeTests.py BINARY [PLAYERS] [--track N] [--frames K] [--verbose]
+usage: NetworkSmokeTests.py BINARY [PLAYERS] [--track N] [--frames K] [--cpu-fill] [--verbose]
 
 Every instance is a real game process (use a sanitizer build). Clients join with
 --join-address, so no LAN discovery is involved. PLAYERS counts the host and
 defaults to the most the binary seats (--print-max-net-players). At that
-capacity, one more client is started and must be turned away as full.
+capacity, one more client is started and must be turned away as full. With
+--cpu-fill the host fills the rest of the grid with CPU cars. Any sanitizer
+report or network fatal error (a seed desync included) fails the run.
 """
 
 import argparse
 import os
 from pathlib import Path
+import re
 import socket
 import subprocess
 import sys
@@ -20,8 +23,10 @@ import threading
 import time
 
 FAILURE_MARKERS = ("ERROR: AddressSanitizer", "ERROR: LeakSanitizer", "runtime error:",
-                   "Game Fatal Alert:")
+                   "Game Fatal Alert:", "NetGameFatalError", "SEED DESYNC", "POSITION DESYNC")
 TIMEOUT_SECONDS = 300
+GRID = re.compile(r"SMOKE: net race track \d+ player \d+/\d+ simulated \d+ frames with (\d+) cars, "
+                  r"(\d+) CPU POW uses")
 
 
 class Instance:
@@ -64,13 +69,13 @@ class Instance:
                 self.lobby_or_exit.set()
         self.lobby_or_exit.set()
 
-    def wait(self, deadline: float) -> None:
+    def wait(self, deadline: float, timeout: float = TIMEOUT_SECONDS) -> None:
         try:
             self.process.wait(timeout=max(1.0, deadline - time.monotonic()))
         except subprocess.TimeoutExpired:
             self.process.kill()
             self.process.wait()
-            self.lines.append(f"<killed after {TIMEOUT_SECONDS} s>\n")
+            self.lines.append(f"<killed after {timeout:.0f} s>\n")
             self.stamped.append(self.lines[-1])
         self.reader.join()
 
@@ -98,11 +103,12 @@ def free_port() -> int:
 
 
 def race(binary: Path, players: int, capacity: int, track: int, frames: int,
-         verbose: bool) -> None:
+         cpu_fill: bool, verbose: bool) -> None:
     refuse = players == capacity  # only a full game turns joins away
     port = free_port()
     started = time.monotonic()
-    deadline = started + TIMEOUT_SECONDS
+    timeout = max(TIMEOUT_SECONDS, 60 + frames / 10)  # long races run at most 60 frames a second
+    deadline = started + timeout
     instances: list[Instance] = []
     with tempfile.TemporaryDirectory(prefix="cmr-netsmoke-",
                                      dir=os.environ.get("TMPDIR") or "/var/tmp") as scratch:
@@ -111,6 +117,8 @@ def race(binary: Path, players: int, capacity: int, track: int, frames: int,
                          "--smoke-test-frames", str(frames), "--smoke-net-players", str(players)]
             if refuse:
                 host_args += ["--smoke-net-refusals", "1"]
+            if cpu_fill:
+                host_args += ["--smoke-cpu-fill"]
             host = Instance("host", binary, host_args, Path(scratch), started)
             instances.append(host)
             host.lobby_or_exit.wait(timeout=max(1.0, deadline - time.monotonic()))
@@ -124,8 +132,8 @@ def race(binary: Path, players: int, capacity: int, track: int, frames: int,
                 instances.append(Instance(f"client{number}", binary, client_args, Path(scratch),
                                           started))
             for instance in instances:
-                instance.wait(deadline)
-            check(instances, players, track, frames, refuse)
+                instance.wait(deadline, timeout)
+            cars, uses = check(instances, players, capacity, track, frames, refuse, cpu_fill)
             if verbose:
                 for instance in instances:
                     sys.stdout.write(instance.report())
@@ -133,16 +141,19 @@ def race(binary: Path, players: int, capacity: int, track: int, frames: int,
             for instance in instances:
                 if instance.process.poll() is None:
                     instance.process.kill()
-                    instance.wait(deadline)
+                    instance.wait(deadline, timeout)
             for instance in instances:
                 sys.stderr.write(instance.report())
             raise
-    print(f"PASS: {players}-player LAN race on track {track}, {frames} frames"
+    print(f"PASS: {players}-player LAN race on track {track}, {frames} frames, {cars} cars, "
+          f"{uses} CPU POW uses"
           f"{', one extra join refused' if refuse else ''} ({time.monotonic() - started:.1f} s)",
           flush=True)
 
 
-def check(instances: list[Instance], players: int, track: int, frames: int, refuse: bool) -> None:
+def check(instances: list[Instance], players: int, capacity: int, track: int, frames: int,
+          refuse: bool, cpu_fill: bool) -> tuple[int, int]:
+    """Returns how many cars raced and how many POW uses the host scheduled for CPU cars."""
     for instance in instances:
         for marker in FAILURE_MARKERS:
             if marker in instance.output:
@@ -160,10 +171,19 @@ def check(instances: list[Instance], players: int, track: int, frames: int, refu
     if numbers != list(range(2, players + 1)) or len(seated) != players - 1:
         raise AssertionError(f"expected clients 2..{players} to race, got {numbers}")
 
+    # Every peer seats the same grid, the humans plus CPU cars in every other slot with
+    # fill, and has them use the POWs the host scheduled.
+    grids = {(int(m.group(1)), int(m.group(2))) for i in [host, *seated] for m in GRID.finditer(i.output)}
+    if len(grids) != 1:
+        raise AssertionError(f"peers raced different grids (cars, CPU POW uses): {sorted(grids)}")
+    cars, uses = grids.pop()
+    if (cars < players or (cars > players) != (cpu_fill and players < capacity)):
+        raise AssertionError(f"{players} players {'with' if cpu_fill else 'without'} CPU fill raced {cars} cars")
+
     if not refuse:
         if refused:
             raise AssertionError(f"{refused[0].name} failed")
-        return
+        return cars, uses
     if "A new client wants to connect, but the game is full!" not in host.output:
         raise AssertionError("host did not report the extra join as full")
     # The extra client leaves cleanly: an ordinary nonzero exit (not a signal) that
@@ -172,6 +192,7 @@ def check(instances: list[Instance], players: int, track: int, frames: int, refu
             or "SMOKE: net session ended: THE GAME IS FULL." not in refused[0].output
             or "SMOKE: net race" in refused[0].output):
         raise AssertionError("expected exactly one client to be refused cleanly as full")
+    return cars, uses
 
 
 def main() -> None:
@@ -181,6 +202,7 @@ def main() -> None:
                         help="host plus clients (default: the most the binary seats)")
     parser.add_argument("--track", type=int, default=1, help="race track 1..9 (default 1)")
     parser.add_argument("--frames", type=int, default=120, help="race frames per instance")
+    parser.add_argument("--cpu-fill", action="store_true", help="the host fills empty slots with CPU cars")
     parser.add_argument("--verbose", action="store_true", help="print every instance's output")
     args = parser.parse_args()
 
@@ -189,7 +211,7 @@ def main() -> None:
     players = capacity if args.players is None else args.players
     if not 2 <= players <= capacity:
         parser.error(f"players must be 2..{capacity}")
-    race(binary, players, capacity, args.track, args.frames, args.verbose)
+    race(binary, players, capacity, args.track, args.frames, args.cpu_fill, args.verbose)
 
 
 if __name__ == "__main__":
