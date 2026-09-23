@@ -4,7 +4,7 @@ This branch implements charter §4 (12 players) on top of `fix/player-limit-gaps
 (PR #42, merged to master as `c92e559`). Work stopped part-way when the session's
 usage quota ran low. **`MAX_PLAYERS` is now 12** (commit "Raise the player limit to
 twelve"); every earlier change is written for any `MAX_PLAYERS` and is a no-op, or
-bit-identical, at 6 cars. Delete this file (and `docs/wip/`) before merging.
+bit-identical, at 6 cars. Delete this file before merging.
 
 The protocol cookie stays `CMR8`: it is unreleased (v3.1.x ship `CMR7`), so
 branch 2 doesn't bump it (owner decision, 2026-09-22).
@@ -103,17 +103,16 @@ StartupSmoke PASS lines, MalformedAssetTests PASS. GitHub CI on PR #43 passes on
      (host + 11 clients, 600 frames, plus a 13th join that must be refused) passes on Desert,
      Egypt and Atlantis, in about 16 s each. The in-process readiness and lifecycle tests run
      at `MAX_CLIENTS` = 12 in ctest.
-5. **Start-slot CTF balance** (minor, from the last verification). Red and green
-   extras on TarPits, Ramps, Celtic and Spiral differ by ≈1.8–2.3k in drivable
-   path to their torches. There is a work-in-progress generator change in
-   `docs/wip/start-slots-ctf-balance.patch`. It is unverified: the table was not
-   regenerated with it.
+5. **Start-slot CTF balance: dropped by the owner.** Red and green extras on TarPits, Ramps,
+   Celtic and Spiral differ by ≈1.8–2.3k in drivable path to their torches (under a second of
+   driving). Revisit after live testing; the unfinished generator change was removed.
 6. ~~CHANGELOG entry for branch 2~~ done (Unreleased section).
 
 ## Owner decisions (2026-09-22)
 
 - Tournament `placeToWin`: **kept as is** until live testing.
-- Battle length at 12 players: **still open** (a recommendation is in the PR thread).
+- Battle length at 12 players: **elimination tag scaled** so a 12-player game lasts as long as a
+  6-player one; stampede tag, survival and CTF unchanged. Done.
 - Minimap: **six more colours** in the current style (violet, magenta, yellow, cyan, dark
   green, navy for the second wearer of brown, green, blue, gray, red and white). Done.
 - Spanish, German and Swedish ordinals: **kept** as they are (original behaviour).
@@ -123,7 +122,11 @@ StartupSmoke PASS lines, MalformedAssetTests PASS. GitHub CI on PR #43 passes on
 - Skid-mark pool: **raised** to 40 per car (240 at 6, 480 at 12). Done.
 - Scoreboard: **fixed bound** of 16 places, so 6- and 12-player builds share records. Done.
 - CPU rescue for cars wedged on fences: **deferred**.
-- CTF start-slot balance: **pending** more context (explained in the PR thread).
+- CTF start-slot balance: **dropped** (under a second of driving; revisit after live testing).
+  The unfinished generator patch was removed.
+- LAN smoke in CI: **added** (six players, 300 frames, Linux/GCC sanitizer job).
+- Submarine collision, latched planing/grease afloat, and the displacement-based stuck check:
+  **left as they are** (the stuck check goes with the deferred fence rescue).
 
 ## Pre-existing issues noticed (not changed)
 
