@@ -1314,10 +1314,13 @@ static void PlayArea(void)
 
 	gIsInGame = false;
 
-	if (gCommandLine.smokeTestFrames && gGameMode == GAME_MODE_PRACTICE && !gSmokeTestPassed
-		&& gTrackCompleted && !gGameOver)											// smoke soak: the race ended before the frame cap
+	const Boolean localRace = gGameMode == GAME_MODE_PRACTICE
+		|| (gGameMode == GAME_MODE_MULTIPLAYERRACE && !gNetGameInProgress);
+	if (gCommandLine.smokeTestFrames && localRace && !gSmokeTestPassed
+		&& gTrackCompleted && !gGameOver)											// smoke run: the race ended before the frame cap
 	{
-		SDL_Log("SMOKE: practice track %d race completed after %u frames", gTrackNum + 1, (unsigned) gSimulationFrame);
+		SDL_Log("SMOKE: %s track %d race completed after %u frames",
+				gGameMode == GAME_MODE_PRACTICE ? "practice" : "local", gTrackNum + 1, (unsigned) gSimulationFrame);
 		ReportSmokeRaceMetrics("race-complete");
 		gSmokeTestPassed = true;
 	}
@@ -1426,7 +1429,8 @@ short				numPanes;
 
 			/* INIT SOME PRELIM STUFF */
 
-	if ((!gIsSelfRunningDemo) && (gGameMode != GAME_MODE_PRACTICE))				// dont reset random seed for SRD - we want variety!
+	if ((!gIsSelfRunningDemo) && (gGameMode != GAME_MODE_PRACTICE)				// dont reset random seed for SRD - we want variety!
+		&& (gNetGameInProgress || !gCommandLine.hasSmokeSeed))						// a local smoke run keeps its pinned --smoke-seed
 		InitMyRandomSeed();
 	InitControlBits();
 
