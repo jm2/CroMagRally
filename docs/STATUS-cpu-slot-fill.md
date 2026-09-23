@@ -130,24 +130,18 @@ network unit's `CMR9 -> CMRB` commit was deliberately left out.
    `Player_Car.c` isn't in the readiness harness. The LAN soak's per-peer POW-use
    counts cover it.
 
-## Open decisions for the owner
+## Owner decisions (2026-09-22)
 
-- Translations of `STR_CPU_CARS` / `STR_CPU_CARS_HELP` (FR/DE/ES/IT/SV) were
-  written without native review. Keep them, get them reviewed, or leave them blank
-  (blank cells fall back to English)?
-- Prefs downgrade: an older build reading v2 prefs resets them to defaults, as
-  with any prefs format change. Alternatively the new option could live in a
-  separate file.
-- UI placement: the step after RACE (split-screen and LAN host), or Settings?
-- Scoreboard: filled races are recorded like any multiplayer race, with the
-  human's overall place among all cars. Records don't say whether CPUs were present.
-- Win screen: YOU WIN / YOU LOSE plus the live HUD place. No final-place banner,
-  because it overlaps the win text. Is that enough for "each human still sees
-  their overall place"?
-- With fill on, a network player who left and became a bot can no longer win a
-  filled race; without fill a bot can still win, as before. Intended?
-- When every client leaves a filled LAN race, the host's game still ends
-  ("everybody left"), as it does without fill. Should the host keep racing the CPUs?
+- Translations of `STR_CPU_CARS` / `STR_CPU_CARS_HELP`: **pending** (context in the PR thread).
+- Prefs downgrade (an older build resets v2 prefs to defaults): **accepted**.
+- UI placement: **the step after picking RACE** (as implemented).
+- Scoreboard records for filled races: **accepted**.
+- Win screen: **matches existing behaviour** (multiplayer races never showed a final-place
+  banner), so kept.
+- Bots of departed players: **only humans decide a multiplayer race**, with or without fill.
+  Done ("Let only humans decide a multiplayer race...").
+- Host alone in a filled race: **keeps racing the CPUs and bots**. Done ("Keep a filled LAN
+  race going...").
 
 ## Known gaps
 
