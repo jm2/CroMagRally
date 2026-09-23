@@ -25,10 +25,11 @@ network unit's `CMR9 -> CMRB` commit was deliberately left out.
   MAX_PLAYERS` for `GAME_MODE_MULTIPLAYERRACE`; humans take slots `0..n-1`; CPU
   cars come from branch 1's picker.
 - **CPU drivers look distinct from the humans.**
-- **UI** (§5.1): a small step after picking RACE in the multiplayer game-type
-  menu (split-screen, or hosting a LAN game), with a help line, a "CPU CARS:
-  OFF/ON" cycler bound to the saved pref, and OK. It never appears for battle modes
-  or for LAN clients, who follow the host.
+- **UI** (§5.1): Settings > GAMEPLAY (a new submenu beside Controls, Sound and
+  Graphics) holds the help line and a "CPU CARS: OFF/ON" cycler bound to the saved pref
+  (owner decision, 2026-09-23; it was first a step after picking RACE). Split-screen
+  races use this machine's setting; a LAN host's setting travels in its game config and
+  clients never use their own. Battle modes ignore it.
 - **Shared network CPU cars and looks:** `InitSharedCPUVehiclePickRules` (a pure
   function of the humans' cars, difficulty, track and slot over the whole land
   roster; Hard uses `DeterministicStableFloat`; no synced RNG) and
@@ -134,7 +135,7 @@ network unit's `CMR9 -> CMRB` commit was deliberately left out.
 
 - Translations of `STR_CPU_CARS` / `STR_CPU_CARS_HELP`: **kept** as written (FR/DE/ES/IT/SV).
 - Prefs downgrade (an older build resets v2 prefs to defaults): **accepted**.
-- UI placement: **the step after picking RACE** (as implemented).
+- UI placement: **Settings > Gameplay** (moved there on 2026-09-23); network games follow the LAN host's setting.
 - Scoreboard records for filled races: **accepted**.
 - Win screen: **matches existing behaviour** (multiplayer races never showed a final-place
   banner), so kept.
