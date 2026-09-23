@@ -1010,6 +1010,12 @@ static Boolean UpdateSmokeTestFrame(void)
 		}
 		gSmokeHostLingerDeadline = SDL_GetTicks() + SMOKE_NET_HOST_LINGER_MS;
 	}
+	else if (gSmokeHostLingerDeadline && Net_GetNumHumansInGame() <= 1)	// a filled race goes on without its clients
+	{
+		SDL_Log("SMOKE: net race host saw all clients leave");
+		gSmokeTestPassed = true;
+		return true;
+	}
 	else if (gSmokeHostLingerDeadline && SDL_GetTicks() >= gSmokeHostLingerDeadline)
 	{
 		SDL_Log("SMOKE: net race host gave up waiting for its clients to leave");

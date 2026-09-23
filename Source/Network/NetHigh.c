@@ -492,6 +492,11 @@ static void ApplyCPUPOW(int playerNum, uint16_t pad, uint32_t frame)
 	sCPUPOWUses++;
 }
 
+int Net_GetNumHumansInGame(void)
+{
+	return gNumGatheredPlayers;
+}
+
 uint32_t Net_GetCPUPOWUses(void)
 {
 	return sCPUPOWUses;
@@ -535,7 +540,8 @@ static void ApplyBecomeBot(int i)
 	// Use gNumGatheredPlayers (the live human count) here, NOT gNumRealPlayers (kept stable for the
 	// split-screen layout). Both host and client decrement identically at this frame, so gGameOver fires
 	// in lockstep.
-	if (gNumGatheredPlayers <= 1)								// see if nobody to play with
+	if (gNumGatheredPlayers <= 1								// see if nobody to play with
+		&& !(gCPUFillThisRace && gIsInGame))					// a filled race goes on with the host, its CPUs and the bots
 	{
 		gGameOver = true;
 		if (gNetSequenceState < kNetSequence_Error)				// don't stomp a more specific post-match error

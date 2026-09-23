@@ -189,6 +189,7 @@ void ApplyPendingFrameEvents(void);				// CMR7 Stage 4: apply frame-aligned even
 Boolean Host_ScheduleCPUPOW(short playerNum, short powType, Boolean backward);	// every machine's CPU car uses this POW at one later frame
 Boolean Net_IsCPUPOWPending(short playerNum);	// a CPU car's scheduled POW use is not applied yet
 uint32_t Net_GetCPUPOWUses(void);				// CPU POW uses applied so far this game
+int Net_GetNumHumansInGame(void);				// network humans still in the game (host included)
 void NetCheck_ConnectionTimeouts(void);			// CMR7 Stage 4: per-frame lastHeard badge/drop policy (host + client)
 void Net_MaybeSendKeepAlive(void);				// CMR7 Stage 4: throttled header-only heartbeat (lobby/barriers keep radios awake)
 void Net_RefreshLastHeard(void);				// CMR7 Stage 4: reset all liveness clocks to now (game-loop entry)

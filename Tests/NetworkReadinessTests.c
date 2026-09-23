@@ -211,6 +211,35 @@ static void LastPeerTimeout(void)
     DisposeClients(peers);
 }
 
+// In a race with CPU fill the host keeps racing the CPUs and bots once every client has
+// left; without fill, or before the race starts, being alone still ends the game.
+static void FilledRaceOutlivesItsClients(void)
+{
+    for (int fill = 0; fill <= 1; fill++)
+    {
+        for (int inGame = 0; inGame <= 1; inGame++)
+        {
+            NSpGame* peers[MAX_CLIENTS];
+            BeginSession(SMALL_SESSION, peers);
+            gCPUFillThisRace = fill;
+            gIsInGame = inGame;
+            gNetSequenceState = kNetSequence_GameLoop;
+            ApplyBecomeBot(1);
+            CHECK(!gGameOver && gNumGatheredPlayers == SMALL_SESSION - 1);
+            ApplyBecomeBot(2);
+            CHECK(gNumGatheredPlayers == 1);
+            const Boolean goesOn = fill && inGame;
+            CHECK(gGameOver == !goesOn);
+            CHECK((gNetSequenceState == kNetSequence_OfflineEverybodyLeft) == !goesOn);
+            CHECK(gPlayerInfo[1].isComputer && gPlayerInfo[2].isComputer);
+            EndSession(peers);
+        }
+    }
+    gCPUFillThisRace = false;
+    gIsInGame = false;
+    gGameOver = false;
+}
+
 static void SelectorResumesAfterTeardown(void)
 {
     NSpGame* peers[MAX_CLIENTS];
@@ -1256,6 +1285,7 @@ int main(void)
     Readiness(LEVEL_READY_TIMEOUT_MS, kNetSequence_HostWaitForPlayersToPrepareLevel, kNetSequence_GameLoop);
     DelayedReady();
     LastPeerTimeout();
+    FilledRaceOutlivesItsClients();
     SelectorResumesAfterTeardown();
     SurvivalReadinessRemoval(false);
     SurvivalReadinessRemoval(true);
