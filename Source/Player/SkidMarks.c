@@ -26,10 +26,11 @@ static int StartNewSkidMark(ObjNode *owner, short subID);
 // One pool for every car's skids. A skidding car lays a skid under each tire, starts
 // a fresh one every MAX_SKID_SEGMENTS or whenever it lifts, and each lingers ~5 s
 // while it fades, so racing CPUs want more than any fixed pool: headless full races
-// peak at 120-230 live skids with 6 cars and past 256 with 12. A full pool only skips
-// new skids, which is cosmetic and already routine with the original 60 at 6 cars,
-// so keep that per-car share as the player count grows (1.6 KB per skid).
-#define	MAX_SKIDMARKS		(10 * MAX_PLAYERS)
+// peak at 120-230 live skids with 6 cars and past 256 with 12. A full pool skips new
+// skids, so with the original 60 cars stopped leaving marks for most of a busy race.
+// 40 per car covers the measured peaks (240 at 6 cars, 480 at 12; 1.6 KB per skid,
+// and only live skids are drawn).
+#define	MAX_SKIDMARKS		(40 * MAX_PLAYERS)
 #define	MAX_SKID_SEGMENTS	40								// max segments in skid
 
 #define	SKID_START_ALPHA	.7f
@@ -53,7 +54,6 @@ typedef struct
 }SkidMarkType;
 
 _Static_assert(MAX_SKIDMARKS >= 4 * MAX_PLAYERS, "every car must be able to lay a skid under each tire at once");
-_Static_assert(MAX_PLAYERS != 6 || MAX_SKIDMARKS == 60, "6-player builds keep the original skid pool");
 
 
 /*********************/
