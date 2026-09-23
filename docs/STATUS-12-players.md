@@ -9,6 +9,10 @@ bit-identical, at 6 cars. Delete this file before merging.
 The protocol cookie stays `CMR8`: it is unreleased (v3.1.x ship `CMR7`), so
 branch 2 doesn't bump it (owner decision, 2026-09-22).
 
+**Stacked on #44** (owner decision, 2026-09-23): `feat/cpu-slot-fill` is merged into this
+branch so the player-limit setting can share its prefs layout, config message and
+Settings > Gameplay menu. Merge #44 first; this PR's diff then shrinks to its own work.
+
 ## Done (in commit order)
 
 - **Places 7th–12th** (§4.3):
@@ -51,7 +55,20 @@ branch 2 doesn't bump it (owner decision, 2026-09-22).
   - Two adversarial verification rounds were run. The last one found no blockers
     in the 150 generated slots.
   - Previews (for a PR description, not the repo) are in `/var/tmp/cmr-slot-previews/`.
-- **Smoke-only soak flags** (§6; two self-contained, droppable commits at the tip):
+- **6 / 12 players setting** (owner request, 2026-09-23): Settings > GAMEPLAY > PLAYERS,
+  "6 [ORIGINAL]" (default) or "12" (the game fonts have no parentheses). Single-player,
+  split-screen with CPU fill, and LAN hosts use it; a LAN host sends it in its game
+  config (`NetConfigMessage.playerLimit`) and caps its lobby at it, and clients use the
+  host's value for that match only. Stored in prefs v2 (unreleased, so no v3; a dev build
+  of #44 alone resets its prefs once). The demo always uses 6.
+- **CPU rescue** (owner decision, 2026-09-23): a car the AI drives that goes 20 s without
+  forward progress (no new checkpoint, never 500 units closer to the next) is put back
+  just past where it last crossed a checkpoint going forward, facing that way. Soak (9
+  tracks × 50/60/72 Hz × 12 and 6 cars): stranded CPUs 1 → 0, time stuck −12%, worst
+  car's share 18% → 13%, lap times unchanged; 197 rescues in 54 races (a few cars loop
+  2–9 times on one segment before getting through). Checkpoint midpoints and AI path
+  points were tried first as rescue spots and trapped cars again.
+- **Smoke-only soak flags** (§6; two self-contained, droppable commits):
   - Flags: `--smoke-autopilot`, `--smoke-cars`, `--smoke-fixed-fps`,
     `--smoke-seed`, `--smoke-until-finish`, `--smoke-metrics`.
   - Scripts: `tools/run_race_metrics.sh` and `tools/analyze_race_metrics.py`.
@@ -69,18 +86,7 @@ StartupSmoke PASS lines, MalformedAssetTests PASS. GitHub CI on PR #43 passes on
    for the 628 B host control message, an 80 KB send ring (~2 s of host messages at
    60 fps), and updated README and netcode notes. No 4CC change. CI-equivalent run:
    27/27 ctest normal and sanitizer, 101 StartupSmoke PASS lines, MalformedAssetTests PASS.
-2. **CPU strandings on fences (known issue, deferred by the owner on 2026-09-22).** After a
-   jump or a hard knock, a CPU occasionally lands on or behind a fence. Path-following then
-   steers it into the fence forever, and the 1 s displacement stuck check either never fires
-   (the car slides back and forth) or reversing can't free it (the car is wedged).
-   - Jungle, 12 cars, 60 Hz, seed 12345: CPU 11 lands on the fence near checkpoint 4 at
-     ≈(41500, 3390, 80800) after a 7000 u/s jump, and stays there 246 s of 280.
-   - Scandinavia, prototype measurement build: the autopilot car ends up on the ridge south
-     of the checkpoint-44 fence at ≈(90300, 3800, 30800). It didn't recur on this branch.
-
-   Renders and a per-car trace patch are in `/var/tmp/cmr-b2-stuck-evidence/`. The robust
-   fix is a deterministic CPU rescue that returns the car to its last checkpoint after about
-   20 s without progress. That is a visible gameplay change, left for a later decision.
+2. ~~CPU strandings on fences~~ **done**: the CPU rescue above.
 3. **§4.8 LAN at 12 humans:** a 12-human race runs clean on loopback (item 4). The
    bandwidth figures are computed, not measured: the host sends one 628 B control message
    per client per frame, which is ≈3.3 Mbit/s and ≈660 packets/s each way with 11 clients at
@@ -121,7 +127,7 @@ StartupSmoke PASS lines, MalformedAssetTests PASS. GitHub CI on PR #43 passes on
 - Particle groups: **proportional** (70 per six players, so 140 at 12). Done.
 - Skid-mark pool: **raised** to 40 per car (240 at 6, 480 at 12). Done.
 - Scoreboard: **fixed bound** of 16 places, so 6- and 12-player builds share records. Done.
-- CPU rescue for cars wedged on fences: **deferred**.
+- CPU rescue for cars wedged on fences: **implemented** (2026-09-23).
 - CTF start-slot balance: **dropped** (under a second of driving; revisit after live testing).
   The unfinished generator patch was removed.
 - LAN smoke in CI: **added** (six players, 300 frames, Linux/GCC sanitizer job).
