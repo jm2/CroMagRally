@@ -124,12 +124,24 @@ static void TestCPUCarsMakeNoSnow(void)
 	CHECK(gNumActiveParticleGroups == 1);
 	DeleteAllParticleGroups();
 
-	// Split-screen: each local pane gets snow, the CPU cars still none.
-	StartRace(MAX_PLAYERS, false, 0, 2);
-	Snow(10);
-	CheckOnlyLocalPanesMakeSnow(2);
-	DeleteAllParticleGroups();
-	CHECK(gNumActiveParticleGroups == 0);
+	// Split-screen: every local pane gets its own snow, the CPU cars still none. A pane whose
+	// timer isn't due no longer ends the snow for the panes after it.
+	for (int panes = 2; panes <= MAX_LOCAL_PLAYERS; panes++)
+	{
+		StartRace(MAX_PLAYERS, false, 0, panes);
+		gPlayerInfo[0].snowTimer = 1000;				// the first pane waits the whole time
+		Snow(10);
+		CHECK(gPlayerInfo[0].snowParticleGroup == -1);
+		for (short p = 1; p < gNumTotalPlayers; p++)
+		{
+			if (p < panes)
+				CHECK(CountFlakes(gPlayerInfo[p].snowParticleGroup) >= 3 * kFlakesPerBurst);
+			else
+				CHECK(gPlayerInfo[p].snowParticleGroup == -1 && gPlayerInfo[p].snowTimer == 0.0f);
+		}
+		DeleteAllParticleGroups();
+		CHECK(gNumActiveParticleGroups == 0);
+	}
 }
 
 int main(void)

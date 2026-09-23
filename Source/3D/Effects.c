@@ -1167,8 +1167,8 @@ short				p;
 			/* CHECK IF SNOW NOW */
 
 		gPlayerInfo[p].snowTimer -= gFramesPerSecondFrac;
-		if (gPlayerInfo[p].snowTimer > 0.0f)
-			return;
+		if (gPlayerInfo[p].snowTimer > 0.0f)							// not this pane's turn: the next pane may be due
+			continue;
 		gPlayerInfo[p].snowTimer += .05f;
 
 				/* GET GROUP */
@@ -1189,8 +1189,8 @@ short				p;
 
 			gPlayerInfo[p].snowParticleGroup = NewParticleGroup(&gNewParticleGroupDef);
 		}
-		if (gPlayerInfo[p].snowParticleGroup == -1)									// still no group, so bail
-			return;
+		if (gPlayerInfo[p].snowParticleGroup == -1)									// still no group: skip this pane
+			continue;
 
 
 				/******************/
@@ -1230,8 +1230,8 @@ short				p;
 			newParticleDef.alpha		= FULL_ALPHA;
 			if (AddParticleToGroup(&newParticleDef))
 			{
-				gPlayerInfo[p].snowParticleGroup = -1;								// this group is full
-				return;
+				gPlayerInfo[p].snowParticleGroup = -1;								// this group is full: done with this pane
+				break;
 			}
 		}
 	}
