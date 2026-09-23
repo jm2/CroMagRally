@@ -5,10 +5,12 @@ usage: NetworkSmokeTests.py BINARY [PLAYERS] [--track N] [--frames K] [--cpu-fil
 
 Every instance is a real game process (use a sanitizer build). Clients join with
 --join-address, so no LAN discovery is involved. PLAYERS counts the host and
-defaults to the most the binary seats (--print-max-net-players). At that
-capacity, one more client is started and must be turned away as full. With
---cpu-fill the host fills the rest of the grid with CPU cars. Any sanitizer
-report or network fatal error (a seed desync included) fails the run.
+defaults to the most the binary seats (--print-max-net-players). The host seats
+the smallest player limit (the 6/12 players setting: 6 or that capacity) that
+holds PLAYERS. When PLAYERS fills it, one more client is started and must be
+turned away as full. With --cpu-fill the host fills the rest of its limit with
+CPU cars. Any sanitizer report or network fatal error (a seed desync included)
+fails the run.
 """
 
 import argparse
@@ -25,6 +27,7 @@ import time
 FAILURE_MARKERS = ("ERROR: AddressSanitizer", "ERROR: LeakSanitizer", "runtime error:",
                    "Game Fatal Alert:", "NetGameFatalError", "SEED DESYNC", "POSITION DESYNC")
 TIMEOUT_SECONDS = 300
+PLAYER_LIMIT_ORIGINAL = 6  # the original game's grid, and the 6/12 players setting's default
 GRID = re.compile(r"SMOKE: net race track \d+ player \d+/\d+ simulated \d+ frames with (\d+) cars, "
                   r"(\d+) CPU POW uses")
 
@@ -102,9 +105,15 @@ def free_port() -> int:
         return probe.getsockname()[1]
 
 
+def player_limit(players: int, capacity: int) -> int:
+    """The smallest supported player limit that seats players, as a smoke host picks it."""
+    return PLAYER_LIMIT_ORIGINAL if players <= PLAYER_LIMIT_ORIGINAL else capacity
+
+
 def race(binary: Path, players: int, capacity: int, track: int, frames: int,
          cpu_fill: bool, verbose: bool) -> None:
-    refuse = players == capacity  # only a full game turns joins away
+    limit = player_limit(players, capacity)
+    refuse = players == limit  # only a full game turns joins away
     port = free_port()
     started = time.monotonic()
     timeout = max(TIMEOUT_SECONDS, 60 + frames / 10)  # long races run at most 60 frames a second
@@ -125,7 +134,7 @@ def race(binary: Path, players: int, capacity: int, track: int, frames: int,
             if not host.lobby_open:
                 raise AssertionError("host lobby never opened")
 
-            # Start every client at once; at capacity one of them finds no seat left.
+            # Start every client at once; in a full game one of them finds no seat left.
             client_args = ["--join-address", f"127.0.0.1:{port}", "--no-vsync",
                            "--smoke-test-frames", str(frames)]
             for number in range(1, players + (1 if refuse else 0)):
@@ -133,7 +142,7 @@ def race(binary: Path, players: int, capacity: int, track: int, frames: int,
                                           started))
             for instance in instances:
                 instance.wait(deadline, timeout)
-            cars, uses = check(instances, players, capacity, track, frames, refuse, cpu_fill)
+            cars, uses = check(instances, players, limit, track, frames, refuse, cpu_fill)
             if verbose:
                 for instance in instances:
                     sys.stdout.write(instance.report())
@@ -151,7 +160,7 @@ def race(binary: Path, players: int, capacity: int, track: int, frames: int,
           flush=True)
 
 
-def check(instances: list[Instance], players: int, capacity: int, track: int, frames: int,
+def check(instances: list[Instance], players: int, limit: int, track: int, frames: int,
           refuse: bool, cpu_fill: bool) -> tuple[int, int]:
     """Returns how many cars raced and how many POW uses the host scheduled for CPU cars."""
     for instance in instances:
@@ -171,13 +180,13 @@ def check(instances: list[Instance], players: int, capacity: int, track: int, fr
     if numbers != list(range(2, players + 1)) or len(seated) != players - 1:
         raise AssertionError(f"expected clients 2..{players} to race, got {numbers}")
 
-    # Every peer seats the same grid, the humans plus CPU cars in every other slot with
-    # fill, and has them use the POWs the host scheduled.
+    # Every peer seats the same grid, the humans plus CPU cars in every other slot up to
+    # the host's player limit with fill, and has them use the POWs the host scheduled.
     grids = {(int(m.group(1)), int(m.group(2))) for i in [host, *seated] for m in GRID.finditer(i.output)}
     if len(grids) != 1:
         raise AssertionError(f"peers raced different grids (cars, CPU POW uses): {sorted(grids)}")
     cars, uses = grids.pop()
-    if (cars < players or (cars > players) != (cpu_fill and players < capacity)):
+    if cars != (limit if cpu_fill else players):
         raise AssertionError(f"{players} players {'with' if cpu_fill else 'without'} CPU fill raced {cars} cars")
 
     if not refuse:

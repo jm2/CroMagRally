@@ -224,14 +224,15 @@ static Boolean PlayGame(void)
 			/* DECIDE PLAYER LIMIT */
 			//
 			// Once per game (a tournament's races share it), before InitPlayerInfo_Game counts
-			// the cars. Local games take the pref. A network game every peer races with 12 cars.
-			// The self-running demo is the original game's.
+			// the cars. Local games take the pref. Network games take the host's limit (its pref
+			// when it started hosting), which a client gets from the game config and never
+			// from its own pref. The self-running demo is the original game's.
 			//
 
 	if (gIsSelfRunningDemo)
 		gPlayerLimitThisGame = PLAYER_LIMIT_ORIGINAL;
 	else
-		gPlayerLimitThisGame = DecidePlayerLimitThisGame(gNetGameInProgress, MAX_PLAYERS, gGamePrefs.playerLimit);
+		gPlayerLimitThisGame = DecidePlayerLimitThisGame(gNetGameInProgress, gNetGamePlayerLimit, gGamePrefs.playerLimit);
 
 	if (!gIsSelfRunningDemo && gNumLocalPlayers > 1)
 	{

@@ -39,6 +39,8 @@ typedef struct
 	uint8_t				tagDuration;						// # minutes in tag game
 	uint8_t				cpuFill;							// host's CPU slot fill choice: 1 only in race mode (CMR7: was useRedundancy)
 	uint16_t			targetFPS;							// The FPS cap for the game (min of all players)
+	uint8_t				playerLimit;						// host's 6/12 players setting: most cars in this game, >= numPlayers
+	uint8_t				pad;								// always 0
 }NetConfigMessage;
 _Static_assert(sizeof(NetConfigMessage) <= kNSpMaxMessageLength, "config msg fits");
 
@@ -203,6 +205,7 @@ Boolean GetVehicleSelectionFromNetPlayers(void);
 void EndNetworkGame(void);
 
 extern Boolean gNetGameCPUFill;					// this network game's CPU slot fill, as the host's config set it
+extern Byte gNetGamePlayerLimit;				// this network game's player limit: the host's own, or its config's on a client
 
 //===============================================================================
 

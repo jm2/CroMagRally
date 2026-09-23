@@ -30,6 +30,10 @@ Boolean DecideCPUFillThisRace(int gameMode, Boolean netGame, Boolean hostConfigC
 // Anything but a supported limit (IS_SUPPORTED_PLAYER_LIMIT) gives the original 6.
 Byte DecidePlayerLimitThisGame(Boolean netGame, int hostConfigLimit, int prefLimit);
 
+// The smallest supported player limit that seats numPlayers (smoke hosts): the
+// original 6, else MAX_PLAYERS.
+Byte SmallestPlayerLimitFor(int numPlayers);
+
 // How many cars race in a game. Humans take slots 0..numRealPlayers-1 and CPU cars
 // the rest, up to playerLimit (never fewer cars than humans). Single-player races use every slot;
 // multiplayer races only with CPU fill (Pangea's had none); battle modes never seat

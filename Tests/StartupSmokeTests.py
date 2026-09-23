@@ -164,8 +164,9 @@ def main() -> None:
             (["--track", "1", "--smoke-test-frames", "3", "--smoke-net-players", "2"],
              "--smoke-net-players requires --host and --smoke-test-frames"),
             ([*host, "--smoke-net-refusals", "1"], "--smoke-net-refusals requires --smoke-net-players"),
+            # A full lobby holds a supported player limit: 6 (original) or the capacity.
             ([*host, "--smoke-net-players", str(capacity - 1), "--smoke-net-refusals", "1"],
-             f"--smoke-net-refusals requires --smoke-net-players {capacity}")):
+             "--smoke-net-refusals requires --smoke-net-players 6")):
         run(binary, args, rejection=message)
 
     check_soak_flags(binary, capacity)

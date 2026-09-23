@@ -320,11 +320,14 @@ static void ParseCommandLine(int argc, char **argv) {
   if (gCommandLine.smokeCPUFill && !gCommandLine.smokeLocalPlayers && !gCommandLine.smokeNetPlayers) {
     throw std::invalid_argument("--smoke-cpu-fill requires --smoke-local-players or --smoke-net-players");
   }
-  // Joins are only refused once every seat is taken.
-  if (gCommandLine.smokeNetRefusals &&
-      gCommandLine.smokeNetPlayers != NSpGame_GetMaxPlayers()) {
-    throw std::invalid_argument("--smoke-net-refusals requires --smoke-net-players " +
-                                std::to_string(NSpGame_GetMaxPlayers()));
+  // Joins are only refused once every seat is taken: a smoke host seats the smallest
+  // supported player limit (the 6/12 players setting) that holds its --smoke-net-players.
+  if (gCommandLine.smokeNetRefusals && !IS_SUPPORTED_PLAYER_LIMIT(gCommandLine.smokeNetPlayers)) {
+    std::string limits = std::to_string(PLAYER_LIMIT_ORIGINAL);
+    if (MAX_PLAYERS != PLAYER_LIMIT_ORIGINAL) {
+      limits += " or " + std::to_string(MAX_PLAYERS);
+    }
+    throw std::invalid_argument("--smoke-net-refusals requires --smoke-net-players " + limits);
   }
   // Soak flags shape one unattended practice race; a net game would desync.
   if (soakFlag && (!gCommandLine.smokeTestFrames || !gCommandLine.bootToTrack ||

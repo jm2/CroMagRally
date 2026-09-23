@@ -123,7 +123,10 @@ Boolean NetValidateConfigPayload(const NetConfigMessage* message)
 		&& message->targetFPS >= NET_MIN_FPS
 		&& message->targetFPS <= MAX_GAME_FPS
 		&& message->cpuFill <= 1
-		&& (!message->cpuFill || message->gameMode == GAME_MODE_MULTIPLAYERRACE);	// arenas have no AI paths
+		&& (!message->cpuFill || message->gameMode == GAME_MODE_MULTIPLAYERRACE)	// arenas have no AI paths
+		&& IS_SUPPORTED_PLAYER_LIMIT(message->playerLimit)
+		&& message->numPlayers <= message->playerLimit						// the host seats no more than its limit
+		&& message->pad == 0;
 }
 
 Boolean NetValidateSyncPayload(NetInboundRole role, const NetSyncMessage* message)

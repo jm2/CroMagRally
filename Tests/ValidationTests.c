@@ -268,6 +268,7 @@ static void TestConfigValidation(void)
 	message.numPlayers = 2;
 	message.difficulty = 0;
 	message.targetFPS = 60;
+	message.playerLimit = MAX_PLAYERS;
 	assert(NetValidateConfigPayload(&message));
 
 	message.numPlayers = MAX_CLIENTS;						// full lobby: host + MAX_CLIENTS-1 clients
@@ -311,6 +312,38 @@ static void TestConfigValidation(void)
 				== (fill == 0 || (fill == 1 && mode == GAME_MODE_MULTIPLAYERRACE)));
 		}
 	}
+
+	// The host's 6/12 players setting: a supported limit that seats every network
+	// player. The pad byte is always 0.
+	message.gameMode = GAME_MODE_MULTIPLAYERRACE;
+	message.trackNum = 0;
+	message.cpuFill = 1;
+	message.numPlayers = 2;
+	message.playerNum = 1;
+	for (int limit = 0; limit <= 255; limit++)
+	{
+		message.playerLimit = limit;
+		assert(NetValidateConfigPayload(&message) == (limit == PLAYER_LIMIT_ORIGINAL || limit == MAX_PLAYERS));
+	}
+	message.playerLimit = PLAYER_LIMIT_ORIGINAL;
+	message.numPlayers = PLAYER_LIMIT_ORIGINAL;					// a full 6-player lobby
+	message.playerNum = PLAYER_LIMIT_ORIGINAL - 1;
+	assert(NetValidateConfigPayload(&message));
+	message.numPlayers = PLAYER_LIMIT_ORIGINAL + 1;				// more players than the host's limit
+	message.playerNum = 1;
+	assert(!NetValidateConfigPayload(&message));
+	message.playerLimit = MAX_PLAYERS;
+	assert(NetValidateConfigPayload(&message) == (PLAYER_LIMIT_ORIGINAL + 1 <= MAX_CLIENTS));
+	message.numPlayers = MAX_CLIENTS;
+	assert(NetValidateConfigPayload(&message));
+	message.numPlayers = 2;
+	for (int pad = 1; pad <= 255; pad++)
+	{
+		message.pad = pad;
+		assert(!NetValidateConfigPayload(&message));
+	}
+	message.pad = 0;
+	assert(NetValidateConfigPayload(&message));
 }
 
 static void TestSyncMaskValidation(void)
@@ -331,6 +364,7 @@ static void TestNetworkFPSValidation(void)
 	NetConfigMessage config = {0};
 	config.gameMode = GAME_MODE_MULTIPLAYERRACE;
 	config.numPlayers = 2;
+	config.playerLimit = PLAYER_LIMIT_ORIGINAL;
 	NetPlayerCharTypeMessage character = ValidCharMessage();
 	NetSyncMessage sync = {0};
 

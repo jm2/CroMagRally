@@ -70,6 +70,7 @@ Boolean		gIsNetworkHost = false;
 Boolean		gIsNetworkClient = false;
 Boolean		gNetGameInProgress = false;
 Boolean		gNetGameCPUFill = false;
+Byte		gNetGamePlayerLimit = PLAYER_LIMIT_ORIGINAL;
 
 NSpGameReference	gNetGame = nil;
 NSpSearchReference	gNetSearch = nil;
@@ -325,6 +326,7 @@ void ResetNetGameTransientState(void)
 	gPlayerSyncMask = 0;
 	gReadinessStartedMs = 0;
 	gNetGameCPUFill = false;				// until the host's game config decides it
+	gNetGamePlayerLimit = PLAYER_LIMIT_ORIGINAL;	// until SetupNetworkHosting or the host's game config decides it
 	sCPUPOWUses = 0;
 	ResetClientHostRing();					// CMR7 Stage 3: empty the client host-packet ring + reset hold timers
 }
@@ -1162,6 +1164,25 @@ bool UpdateNetSequence(void)
 
 /****************** SETUP NETWORK HOSTING *********************/
 //
+/****************** HOST APPLY PLAYER LIMIT *********************/
+//
+// Once per hosted game: the 6/12 players setting caps the lobby (later joins are refused
+// as full), and HostSendGameConfigInfo sends it to every client. A smoke host picks the
+// smallest limit that seats its --smoke-net-players.
+//
+
+static void HostApplyPlayerLimit(NSpGameReference game)
+{
+	if (gCommandLine.smokeNetPlayers)
+		gNetGamePlayerLimit = SmallestPlayerLimitFor(gCommandLine.smokeNetPlayers);
+	else
+		gNetGamePlayerLimit = DecidePlayerLimitThisGame(false, 0, gGamePrefs.playerLimit);
+
+	int status = NSpGame_SetMaxPlayers(game, gNetGamePlayerLimit);
+	GAME_ASSERT(status == kNSpRC_OK);						// a supported limit always fits MAX_CLIENTS
+}
+
+
 // Called when this computer's user has selected to be a host for a net game.
 //
 // OUTPUT:  true == cancelled.
@@ -1192,7 +1213,8 @@ Boolean SetupNetworkHosting(void)
 	//status = NSpGame_Host(&gNetGame, theList, MAX_PLAYERS, gameName, password, gNetPlayerName, 0, kNSpClientServer, 0);
 	gNetGame = NSpGame_Host();
 
-
+	if (gNetGame)
+		HostApplyPlayerLimit(gNetGame);					// seat no more than the 6/12 players setting
 
 	if (!gNetGame)
 	{
@@ -1347,6 +1369,8 @@ NetConfigMessage		message;
 			message.tagDuration		= gTagDuration;					// set tag duration
 			message.targetFPS		= gTargetFPS;					// Set the global target FPS
 			message.cpuFill			= gNetGameCPUFill;				// CPU cars in the empty race slots
+			message.playerLimit		= gNetGamePlayerLimit;			// the host's 6/12 players setting
+			message.pad				= 0;
 
 			status = NSpMessage_Send(gNetGame, &message.h, kNSpSendFlag_Registered);	// send message
 			if (status)
@@ -1388,6 +1412,7 @@ static Boolean HandleGameConfigMessage(NetConfigMessage* inMessage)
 	gTagDuration		= inMessage->tagDuration;
 	gTargetFPS			= inMessage->targetFPS;
 	gNetGameCPUFill		= inMessage->cpuFill;				// never this machine's own pref: every peer seats the same cars
+	gNetGamePlayerLimit	= inMessage->playerLimit;			// likewise the host's 6/12 players setting, for this game only
 
 	printf("Join Config Received. TargetFPS: %d\n", gTargetFPS);
 

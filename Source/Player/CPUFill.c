@@ -36,6 +36,14 @@ Byte DecidePlayerLimitThisGame(Boolean netGame, int hostConfigLimit, int prefLim
 }
 
 
+/******************** SMALLEST PLAYER LIMIT FOR *********************/
+
+Byte SmallestPlayerLimitFor(int numPlayers)
+{
+	return numPlayers <= PLAYER_LIMIT_ORIGINAL ? PLAYER_LIMIT_ORIGINAL : MAX_PLAYERS;
+}
+
+
 /******************** COUNT PLAYERS IN GAME *********************/
 
 short CountPlayersInGame(int gameMode, short numRealPlayers, Boolean cpuFill, short playerLimit)

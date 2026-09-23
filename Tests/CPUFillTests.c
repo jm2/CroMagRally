@@ -88,6 +88,16 @@ static void TestPlayerLimits(void)
 	CHECK(DecidePlayerLimitThisGame(false, PLAYER_LIMIT_ORIGINAL, MAX_PLAYERS) == MAX_PLAYERS);	// a host's pref
 	CHECK(DecidePlayerLimitThisGame(true, PLAYER_LIMIT_ORIGINAL, MAX_PLAYERS) == PLAYER_LIMIT_ORIGINAL);	// a client's
 	CHECK(DecidePlayerLimitThisGame(true, MAX_PLAYERS, PLAYER_LIMIT_ORIGINAL) == MAX_PLAYERS);
+
+	// A smoke host seats the smallest supported limit that holds its players.
+	for (int players = 1; players <= MAX_PLAYERS; players++)
+	{
+		Byte limit = SmallestPlayerLimitFor(players);
+		CHECK(IS_SUPPORTED_PLAYER_LIMIT(limit) && limit >= players);
+		CHECK(limit == PLAYER_LIMIT_ORIGINAL || players > PLAYER_LIMIT_ORIGINAL);
+	}
+	CHECK(SmallestPlayerLimitFor(2) == PLAYER_LIMIT_ORIGINAL && SmallestPlayerLimitFor(6) == PLAYER_LIMIT_ORIGINAL);
+	CHECK(SmallestPlayerLimitFor(7) == MAX_PLAYERS && SmallestPlayerLimitFor(MAX_PLAYERS) == MAX_PLAYERS);
 }
 
 static void TestPlayerCounts(void)

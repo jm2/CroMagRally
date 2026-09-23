@@ -122,6 +122,7 @@ typedef struct NSpGame
 	int							nextPollIndex;
 
 	int							numRefusedClients;	// joins turned away because every slot was taken
+	int							maxPlayers;		// host: most players (itself included) it seats: its game's player limit, <= MAX_CLIENTS
 
 	SendRing					clientSendRing;	// client-side outbound queue for clientToHostSocket (zero-init by AllocPtrClear in NSpGame_Alloc)
 
@@ -577,8 +578,16 @@ NSpPlayerID NSpGame_AcceptNewClient(NSpGameReference gameRef)
 	// Apply all performance/robustness socket options
 	ApplyTCPSocketOptions(newSocket);
 
-	// Find vacant player slot
-	for (int i = 0; i < MAX_CLIENTS; i++)		// players[] is sized MAX_CLIENTS, not MAX_PLAYERS — iterating to MAX_PLAYERS read/wrote past the array
+	// Find vacant player slot, unless the game's player limit is reached (a host in
+	// 6-player mode turns the 7th player away like a full 12-player lobby)
+	int numSeated = 0;
+	for (int i = 0; i < MAX_CLIENTS; i++)
+	{
+		if (game->players[i].state != kNSpPlayerState_Offline)
+			numSeated++;
+	}
+
+	for (int i = 0; i < MAX_CLIENTS && numSeated < game->maxPlayers; i++)		// players[] is sized MAX_CLIENTS, not MAX_PLAYERS — iterating to MAX_PLAYERS read/wrote past the array
 	{
 		if (game->players[i].state == kNSpPlayerState_Offline)
 		{
@@ -1233,6 +1242,7 @@ NSpGameReference NSpGame_Host(void)
 	game = NSpGame_Unbox(gameRef);
 	game->isHosting				= true;
 	game->myID					= kNSpHostID;
+	game->maxPlayers			= MAX_CLIENTS;		// until NSpGame_SetMaxPlayers lowers it
 
 	game->hostListenSocket		= CreateTCPSocket(true);
 
@@ -1645,6 +1655,26 @@ int NSpGame_Dispose(NSpGameReference inGame, int disposeFlags)
 int NSpGame_GetMaxPlayers(void)
 {
 	return MAX_CLIENTS;
+}
+
+int NSpGame_SetMaxPlayers(NSpGameReference gameRef, int maxPlayers)
+{
+	NSpGame* game = NSpGame_Unbox(gameRef);
+
+	if (!game)
+	{
+		return kNSpRC_NoGame;
+	}
+
+	GAME_ASSERT(game->isHosting);
+
+	if (maxPlayers < 2 || maxPlayers > MAX_CLIENTS)		// the host and at least one client
+	{
+		return kNSpRC_Failed;
+	}
+
+	game->maxPlayers = maxPlayers;		// players already seated stay
+	return kNSpRC_OK;
 }
 
 int NSpGame_GetNumRefusedClients(NSpGameReference gameRef)
