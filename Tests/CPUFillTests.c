@@ -60,33 +60,76 @@ static void TestFillDecision(void)
 	}
 }
 
+// Only the original 6 and every slot this build has are offered.
+static void TestPlayerLimits(void)
+{
+	for (int limit = -1; limit <= 256; limit++)
+		CHECK(IS_SUPPORTED_PLAYER_LIMIT(limit) == (limit == PLAYER_LIMIT_ORIGINAL || limit == MAX_PLAYERS));
+	CHECK(IS_SUPPORTED_PLAYER_LIMIT(6));
+	CHECK(IS_SUPPORTED_PLAYER_LIMIT(MAX_PLAYERS));
+	CHECK(!IS_SUPPORTED_PLAYER_LIMIT(0) && !IS_SUPPORTED_PLAYER_LIMIT(7) && !IS_SUPPORTED_PLAYER_LIMIT(MAX_PLAYERS + 1));
+
+	// A local game takes this machine's pref; a network game only the host's config.
+	// Unsupported values (never from sanitized prefs or a validated config) fall back to 6.
+	static const int kValues[] = { 0, 1, PLAYER_LIMIT_ORIGINAL, 7, MAX_PLAYERS, MAX_PLAYERS + 1, 255 };
+	const int numValues = (int) (sizeof(kValues) / sizeof(kValues[0]));
+	for (int netGame = 0; netGame <= 1; netGame++)
+	{
+		for (int h = 0; h < numValues; h++)
+		{
+			for (int p = 0; p < numValues; p++)
+			{
+				int chosen = netGame ? kValues[h] : kValues[p];
+				int expected = IS_SUPPORTED_PLAYER_LIMIT(chosen) ? chosen : PLAYER_LIMIT_ORIGINAL;
+				CHECK(DecidePlayerLimitThisGame(netGame, kValues[h], kValues[p]) == expected);
+			}
+		}
+	}
+	CHECK(DecidePlayerLimitThisGame(false, PLAYER_LIMIT_ORIGINAL, MAX_PLAYERS) == MAX_PLAYERS);	// a host's pref
+	CHECK(DecidePlayerLimitThisGame(true, PLAYER_LIMIT_ORIGINAL, MAX_PLAYERS) == PLAYER_LIMIT_ORIGINAL);	// a client's
+	CHECK(DecidePlayerLimitThisGame(true, MAX_PLAYERS, PLAYER_LIMIT_ORIGINAL) == MAX_PLAYERS);
+}
+
 static void TestPlayerCounts(void)
 {
-	for (int mode = 0; mode < NUM_GAME_MODES; mode++)
+	static const short kLimits[] = { PLAYER_LIMIT_ORIGINAL, MAX_PLAYERS };
+	for (int l = 0; l < 2; l++)
 	{
-		for (short humans = 1; humans <= MAX_PLAYERS; humans++)
+		const short limit = kLimits[l];
+		for (int mode = 0; mode < NUM_GAME_MODES; mode++)
 		{
-			for (int fill = 0; fill <= 1; fill++)
+			for (short humans = 1; humans <= MAX_PLAYERS; humans++)
 			{
-				short count = CountPlayersInGame(mode, humans, fill);
-				switch (mode)
+				const short fullGrid = humans > limit ? humans : limit;	// every human races
+				for (int fill = 0; fill <= 1; fill++)
 				{
-					case GAME_MODE_PRACTICE:						// single-player races use every slot
-					case GAME_MODE_TOURNAMENT:
-						CHECK(count == MAX_PLAYERS);
-						break;
+					short count = CountPlayersInGame(mode, humans, fill, limit);
+					switch (mode)
+					{
+						case GAME_MODE_PRACTICE:					// single-player races use every slot
+						case GAME_MODE_TOURNAMENT:
+							CHECK(count == fullGrid);
+							break;
 
-					case GAME_MODE_MULTIPLAYERRACE:					// CPU cars only with fill
-						CHECK(count == (fill ? MAX_PLAYERS : humans));
-						break;
+						case GAME_MODE_MULTIPLAYERRACE:				// CPU cars only with fill
+							CHECK(count == (fill ? fullGrid : humans));
+							break;
 
-					default:										// battle modes: humans only
-						CHECK(count == humans);
-						break;
+						default:									// battle modes: humans only
+							CHECK(count == humans);
+							break;
+					}
 				}
 			}
 		}
 	}
+
+	CHECK(CountPlayersInGame(GAME_MODE_PRACTICE, 1, false, PLAYER_LIMIT_ORIGINAL) == 6);		// the original grid
+	CHECK(CountPlayersInGame(GAME_MODE_TOURNAMENT, 1, false, MAX_PLAYERS) == MAX_PLAYERS);
+	CHECK(CountPlayersInGame(GAME_MODE_MULTIPLAYERRACE, 2, true, PLAYER_LIMIT_ORIGINAL) == 6);
+	CHECK(CountPlayersInGame(GAME_MODE_MULTIPLAYERRACE, 2, true, MAX_PLAYERS) == MAX_PLAYERS);
+	CHECK(CountPlayersInGame(GAME_MODE_MULTIPLAYERRACE, 2, false, MAX_PLAYERS) == 2);
+	CHECK(CountPlayersInGame(GAME_MODE_SURVIVAL, 3, true, MAX_PLAYERS) == 3);
 }
 
 #define NUM_LOOKS			(2 * NUM_CAVEMAN_SKINS)
@@ -376,6 +419,7 @@ int main(void)
 {
 	TestModes();
 	TestFillDecision();
+	TestPlayerLimits();
 	TestPlayerCounts();
 	TestDriverLooks();
 	TestNetworkFillLooks();

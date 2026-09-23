@@ -880,13 +880,15 @@ static void StartHeightSampling(void)
 }
 
 // A local split-screen race: humans take the first slots and panes, and with CPU fill
-// CPU cars (not on this machine, no pane) take the rest, on the best cars left free.
-static void LocalSplitScreenSeats(void)
+// CPU cars (not on this machine, no pane) take the rest, on the best cars left free,
+// up to the game's player limit (the 6/12 players setting).
+static void LocalSplitScreenSeats(Byte playerLimit)
 {
     for (short humans = 2; humans <= MAX_LOCAL_PLAYERS; humans++)
     {
         for (int fill = 0; fill <= 1; fill++)
         {
+            gPlayerLimitThisGame = playerLimit;
             memset(gPlayerInfo, 0, sizeof(gPlayerInfo));
             gNetGameInProgress = gIsNetworkHost = gIsNetworkClient = false;
             gGameMode = GAME_MODE_MULTIPLAYERRACE;
@@ -894,7 +896,7 @@ static void LocalSplitScreenSeats(void)
             gCPUFillThisRace = fill;
             gMyNetworkPlayerNum = 0;
             InitPlayerInfo_Game();
-            CHECK(gNumTotalPlayers == (fill ? MAX_PLAYERS : humans));
+            CHECK(gNumTotalPlayers == (fill ? playerLimit : humans));
             for (int i = 0; i < gNumTotalPlayers; i++)
             {
                 Boolean human = i < humans;
@@ -921,6 +923,7 @@ static void LocalSplitScreenSeats(void)
         }
     }
     gCPUFillThisRace = false;
+    gPlayerLimitThisGame = PLAYER_LIMIT_ORIGINAL;
     gNumLocalPlayers = gNumRealPlayers = 1;
 }
 
@@ -940,6 +943,7 @@ static void NetworkFillVehicles(void)
                 NSpGame* peers[MAX_CLIENTS];
                 BeginSession(SMALL_SESSION, peers);
                 gCPUFillThisRace = true;
+                gPlayerLimitThisGame = MAX_PLAYERS;                  // every slot this build has
                 gMyNetworkPlayerNum = 0;
                 InitPlayerInfo_Game();
                 CHECK(gNumTotalPlayers == MAX_PLAYERS);
@@ -981,6 +985,7 @@ static void NetworkFillVehicles(void)
     for (int i = SMALL_SESSION; i < MAX_PLAYERS; i++)
         CHECK(picks[0][0][0][i] == bestFree[(i - SMALL_SESSION) % numFree]);
     gCPUFillThisRace = false;
+    gPlayerLimitThisGame = PLAYER_LIMIT_ORIGINAL;
     gNumLocalPlayers = gNumRealPlayers = 1;
 }
 
@@ -994,6 +999,7 @@ static void NetworkFillLooks(void)
         NSpGame* peers[MAX_CLIENTS];
         BeginSession(SMALL_SESSION, peers);
         gCPUFillThisRace = true;
+        gPlayerLimitThisGame = MAX_PLAYERS; // every slot this build has
         gMyNetworkPlayerNum = view; // the host, or the client in slot 1
         InitPlayerInfo_Game();
         for (int i = 0; i < SMALL_SESSION; i++)
@@ -1018,6 +1024,7 @@ static void NetworkFillLooks(void)
     }
     CHECK(!memcmp(looks[0], looks[1], sizeof(looks[0])));
     gCPUFillThisRace = false;
+    gPlayerLimitThisGame = PLAYER_LIMIT_ORIGINAL;
     gNumLocalPlayers = gNumRealPlayers = 1;
     gMyNetworkPlayerNum = 0;
 }
@@ -1028,6 +1035,7 @@ static void SeatNetworkRace(short cars[MAX_PLAYERS], short looks[MAX_PLAYERS])
 {
     static const short humanCars[SMALL_SESSION] = {CAR_TYPE_GEODE, CAR_TYPE_ROCK, CAR_TYPE_GEODE};
     gCPUFillThisRace = DecideCPUFillThisRace(gGameMode, gNetGameInProgress, gNetGameCPUFill, gGamePrefs.cpuFill);
+    gPlayerLimitThisGame = DecidePlayerLimitThisGame(gNetGameInProgress, MAX_PLAYERS, gGamePrefs.playerLimit);
     InitPlayerInfo_Game();
     for (int i = 0; i < gNumRealPlayers; i++)
     {
@@ -1136,6 +1144,7 @@ static void NetworkFillRace(void)
     gGamePrefs.cpuFill = savedPref;
     gNetGameCPUFill = false;
     gCPUFillThisRace = false;
+    gPlayerLimitThisGame = PLAYER_LIMIT_ORIGINAL;
     gGameMode = GAME_MODE_MULTIPLAYERRACE;
     gNumLocalPlayers = gNumRealPlayers = 1;
     gMyNetworkPlayerNum = 0;
@@ -1310,7 +1319,8 @@ int main(void)
     SmokeLobbyAutoStart();
     LocalCPUVehicles();
     StartHeightSampling();
-    LocalSplitScreenSeats();
+    LocalSplitScreenSeats(PLAYER_LIMIT_ORIGINAL);
+    LocalSplitScreenSeats(MAX_PLAYERS);
     NetworkFillVehicles();
     NetworkFillLooks();
     NetworkFillRace();

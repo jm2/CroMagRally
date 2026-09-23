@@ -77,6 +77,7 @@ Boolean SanitizePrefs(PrefsType* prefs, const PrefsType* defaults)
 	REPAIR_FIELD_IF_INVALID(tournamentProgression.numTracksCompleted,
 		prefs->tournamentProgression.numTracksCompleted <= NUM_RACE_TRACKS);
 	REPAIR_FIELD_IF_INVALID(cpuFill, prefs->cpuFill <= 1);
+	REPAIR_FIELD_IF_INVALID(playerLimit, IS_SUPPORTED_PLAYER_LIMIT(prefs->playerLimit));
 
 #undef REPAIR_FIELD_IF_INVALID
 

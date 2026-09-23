@@ -24,10 +24,17 @@ Boolean CPUFillAppliesToMode(int gameMode);
 // pref) on every peer, so a client's own pref never changes which cars race.
 Boolean DecideCPUFillThisRace(int gameMode, Boolean netGame, Boolean hostConfigCPUFill, Boolean prefCPUFill);
 
+// The 6/12 players setting for one game: the most cars it races. A local game takes
+// this machine's pref. A network game takes the host's limit from its game config
+// (the host sends its own pref) on every peer, so a client's own pref never applies.
+// Anything but a supported limit (IS_SUPPORTED_PLAYER_LIMIT) gives the original 6.
+Byte DecidePlayerLimitThisGame(Boolean netGame, int hostConfigLimit, int prefLimit);
+
 // How many cars race in a game. Humans take slots 0..numRealPlayers-1 and CPU cars
-// the rest. Single-player races use every slot; multiplayer races only with CPU fill
-// (Pangea's had none); battle modes never seat CPU cars.
-short CountPlayersInGame(int gameMode, short numRealPlayers, Boolean cpuFill);
+// the rest, up to playerLimit (never fewer cars than humans). Single-player races use every slot;
+// multiplayer races only with CPU fill (Pangea's had none); battle modes never seat
+// CPU cars.
+short CountPlayersInGame(int gameMode, short numRealPlayers, Boolean cpuFill, short playerLimit);
 
 // Keeps CPU drivers from looking like the humans or each other, while looks (sex and
 // skin) are left. Humans keep what they picked, and so does every CPU whose look is

@@ -26,19 +26,31 @@ Boolean DecideCPUFillThisRace(int gameMode, Boolean netGame, Boolean hostConfigC
 }
 
 
+/******************** DECIDE PLAYER LIMIT THIS GAME *********************/
+
+Byte DecidePlayerLimitThisGame(Boolean netGame, int hostConfigLimit, int prefLimit)
+{
+	int limit = netGame ? hostConfigLimit : prefLimit;
+
+	return (Byte) (IS_SUPPORTED_PLAYER_LIMIT(limit) ? limit : PLAYER_LIMIT_ORIGINAL);
+}
+
+
 /******************** COUNT PLAYERS IN GAME *********************/
 
-short CountPlayersInGame(int gameMode, short numRealPlayers, Boolean cpuFill)
+short CountPlayersInGame(int gameMode, short numRealPlayers, Boolean cpuFill, short playerLimit)
 {
+	short	fullGrid = playerLimit > numRealPlayers ? playerLimit : numRealPlayers;	// every human races
+
 	switch (gameMode)
 	{
 		case	GAME_MODE_PRACTICE:
 		case	GAME_MODE_TOURNAMENT:
-				return MAX_PLAYERS;
+				return fullGrid;
 
 		default:
 				if (cpuFill && CPUFillAppliesToMode(gameMode))
-					return MAX_PLAYERS;
+					return fullGrid;
 				return numRealPlayers;
 	}
 }

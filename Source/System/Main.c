@@ -90,6 +90,7 @@ int					gTrackNum;
 int					gDifficulty = DIFFICULTY_MEDIUM;
 int					gTagDuration = 3;
 Boolean				gCPUFillThisRace = false;				// CPU cars race in this game's empty slots (see PlayGame)
+Byte				gPlayerLimitThisGame = PLAYER_LIMIT_ORIGINAL;	// most cars in this game (see PlayGame)
 
 
 			/* BATTLE MODE VARS */
@@ -182,6 +183,7 @@ void InitDefaultPrefs(void)
 	gGamePrefs.musicVolumePercent	= 60;			// careful to set these two volumes to one of the
 	gGamePrefs.sfxVolumePercent		= 60;			// the predefined values allowed in the settings menu
 	gGamePrefs.cpuFill				= false;		// multiplayer races are humans only unless asked
+	gGamePrefs.playerLimit			= PLAYER_LIMIT_ORIGINAL;	// the original game's 6 cars unless asked
 
 	SDL_memcpy(&gGamePrefs.bindings, kDefaultInputBindings, sizeof(kDefaultInputBindings));
 }
@@ -218,6 +220,18 @@ static Boolean PlayGame(void)
 			//
 
 	gCPUFillThisRace = DecideCPUFillThisRace(gGameMode, gNetGameInProgress, gNetGameCPUFill, gGamePrefs.cpuFill);
+
+			/* DECIDE PLAYER LIMIT */
+			//
+			// Once per game (a tournament's races share it), before InitPlayerInfo_Game counts
+			// the cars. Local games take the pref. A network game every peer races with 12 cars.
+			// The self-running demo is the original game's.
+			//
+
+	if (gIsSelfRunningDemo)
+		gPlayerLimitThisGame = PLAYER_LIMIT_ORIGINAL;
+	else
+		gPlayerLimitThisGame = DecidePlayerLimitThisGame(gNetGameInProgress, MAX_PLAYERS, gGamePrefs.playerLimit);
 
 	if (!gIsSelfRunningDemo && gNumLocalPlayers > 1)
 	{
@@ -2033,6 +2047,7 @@ void GameMain(void)
 	{
 		gGameMode = GAME_MODE_PRACTICE;
 		gTrackNum = gCommandLine.bootToTrack - 1;
+		gPlayerLimitThisGame = DecidePlayerLimitThisGame(false, 0, gGamePrefs.playerLimit);	// a local game, not via PlayGame
 		if (gCommandLine.smokeLocalPlayers)						// smoke only: a split-screen multiplayer race
 		{
 			gGameMode = GAME_MODE_MULTIPLAYERRACE;

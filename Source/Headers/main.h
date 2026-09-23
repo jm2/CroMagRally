@@ -7,6 +7,10 @@
 #include "Pomme.h"
 
 #define	MAX_PLAYERS			12
+#define	PLAYER_LIMIT_ORIGINAL	6		// the original game's grid and LAN: the default of the 6/12 players setting
+
+		// The 6/12 players setting's choices: the original 6, or every slot this build has
+#define	IS_SUPPORTED_PLAYER_LIMIT(n)	((n) == PLAYER_LIMIT_ORIGINAL || (n) == MAX_PLAYERS)
 #define	MAX_LOCAL_PLAYERS	4
 #define	MAX_GAME_FPS		1000
 

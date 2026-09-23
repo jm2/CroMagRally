@@ -81,6 +81,7 @@ typedef struct
 			/* ADDED IN V2 */
 
 	Boolean	cpuFill;					// fill empty multiplayer race slots with CPU cars
+	Byte	playerLimit;				// most cars in a game and players in a hosted LAN game: 6 (original) or MAX_PLAYERS
 }PrefsType;
 
 // The v1 prefs payload: PrefsType before v2 appended its fields. Frozen so that

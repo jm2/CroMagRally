@@ -728,6 +728,7 @@ static PrefsType ValidPrefs(void)
 	prefs.raceTimer = 1;
 	prefs.gamepadRumble = true;
 	prefs.cpuFill = true;
+	prefs.playerLimit = MAX_PLAYERS;
 	prefs.bindings[0].key[0] = SDL_SCANCODE_SPACE;
 	prefs.bindings[0].pad[0] = (PadBinding){kInputTypeButton, SDL_GAMEPAD_BUTTON_SOUTH};
 	prefs.bindings[1].pad[0] = (PadBinding){kInputTypeAxisPlus, SDL_GAMEPAD_AXIS_LEFTX};
@@ -763,8 +764,17 @@ static void TestPrefsSanitization(void)
 	CHECK_REPAIR(gamepadRumble, 2);
 	CHECK_REPAIR(tournamentProgression.numTracksCompleted, NUM_RACE_TRACKS + 1);
 	CHECK_REPAIR(cpuFill, 2);
+	CHECK_REPAIR(playerLimit, 0);
+	CHECK_REPAIR(playerLimit, PLAYER_LIMIT_ORIGINAL - 1);
+	CHECK_REPAIR(playerLimit, PLAYER_LIMIT_ORIGINAL + 1);
+	CHECK_REPAIR(playerLimit, MAX_PLAYERS + 1);
+	CHECK_REPAIR(playerLimit, 255);
 
 #undef CHECK_REPAIR
+
+	prefs = defaults;
+	prefs.playerLimit = PLAYER_LIMIT_ORIGINAL;								// both choices are kept
+	assert(!SanitizePrefs(&prefs, &defaults) && prefs.playerLimit == PLAYER_LIMIT_ORIGINAL);
 
 	prefs = defaults;
 	prefs.tournamentProgression.tournamentLapTimes[0][0] = NAN;

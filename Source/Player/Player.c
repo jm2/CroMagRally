@@ -151,7 +151,7 @@ short	i;
 			// races only have them with CPU fill; battle modes never do.
 			//
 
-	gNumTotalPlayers = CountPlayersInGame(gGameMode, gNumRealPlayers, gCPUFillThisRace);
+	gNumTotalPlayers = CountPlayersInGame(gGameMode, gNumRealPlayers, gCPUFillThisRace, gPlayerLimitThisGame);
 	if (gCommandLine.smokeCars && (gGameMode == GAME_MODE_PRACTICE || gGameMode == GAME_MODE_TOURNAMENT))
 		gNumTotalPlayers = gCommandLine.smokeCars;			// smoke soak: --smoke-cars sets the field size
 
