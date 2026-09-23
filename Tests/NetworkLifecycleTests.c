@@ -193,7 +193,12 @@ static void Session(void)
     NSpGame* replacement = Join(host);
     CHECK(replacement->myID == 1);
     CHECK(host->players[1].sendRing.used == 0 && !host->players[1].needsLeaveNotify);
-    Drain(second);
+    // Wait for the host's notice to the surviving peer rather than draining whatever has
+    // arrived: on a loaded machine it can still be in flight, and would then be read in
+    // place of the heartbeat below.
+    NSpMessageHeader* joined = WaitMessage(second);
+    CHECK(joined->what == kNSpPlayerJoined && ((NSpPlayerJoinedMessage*)joined)->playerInfo.id == 1);
+    NSpMessage_Release(second, joined);
 
     // Force the actual send path to overflow one ring. The surviving peer and host
     // must each receive one leave while the broadcast as a whole still succeeds.
