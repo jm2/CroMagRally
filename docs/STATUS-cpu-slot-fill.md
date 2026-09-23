@@ -74,7 +74,7 @@ network unit's `CMR9 -> CMRB` commit was deliberately left out.
 
 - CI-equivalent run (`ci.sh all`) before every push: normal build + ctest 23/23,
   `-DSANITIZE=ON` build + ctest 23/23, 76 StartupSmoke PASS lines, MalformedAssetTests
-  PASS. GitHub CI has not run on the branch yet.
+  PASS. GitHub CI on PR #44 passes on every platform (Linux GCC/Clang/ARM64 with the sanitizer smoke, Windows, macOS, iOS/tvOS, Android).
 - New unit coverage:
   - `cpuFill` config validation and `DecideCPUFillThisRace`.
   - A filled network race in the readiness harness: the config round trip for both
