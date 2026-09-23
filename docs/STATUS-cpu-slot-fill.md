@@ -1,10 +1,10 @@
-# feat/cpu-slot-fill: work-in-progress status (2026-09-22)
+# feat/cpu-slot-fill: status (2026-09-22)
 
 This branch implements charter §5 (fill empty multiplayer race slots with CPU cars)
 on top of `fix/player-limit-gaps` (PR #42, merged to master as `c92e559`), written
-against `MAX_PLAYERS` generically. Work stopped part-way when the session's usage
-quota ran low. **Split-screen fill is complete and tested; LAN fill is not wired
-yet.** Delete this file (and `docs/wip/`) before merging.
+against `MAX_PLAYERS` generically. **Split-screen and LAN fill are both wired and
+tested.** What remains is the §5.6 merge check onto `feat/12-players`, a CHANGELOG
+entry and the owner decisions below. Delete this file before merging.
 
 The protocol cookie stays `CMR8` (unreleased; owner decision, 2026-09-22). The
 network unit's `CMR9 -> CMRB` commit was deliberately left out.
@@ -25,52 +25,94 @@ network unit's `CMR9 -> CMRB` commit was deliberately left out.
   MAX_PLAYERS` for `GAME_MODE_MULTIPLAYERRACE`; humans take slots `0..n-1`; CPU
   cars come from branch 1's picker.
 - **CPU drivers look distinct from the humans.**
-- **UI** (§5.1): a small step after picking RACE in the split-screen game-type
-  menu, with a help line, a "CPU CARS: OFF/ON" cycler bound to the saved pref, and
-  OK. It never appears for battle modes.
-- **Network preparation** (§5.4, partial):
-  - `InitSharedCPUVehiclePickRules`: fill CPU cars in a network race are a pure
-    function of the humans' cars, difficulty, track and slot, over the whole land
-    roster. It ignores local unlocks, and Hard uses `DeterministicStableFloat`,
-    with no synced RNG.
-  - `DressNetworkFillCPUs`: fill CPUs get the same looks on every peer.
-  - Both are tested, but no network race seats fill cars yet.
+- **UI** (§5.1): a small step after picking RACE in the multiplayer game-type
+  menu (split-screen, or hosting a LAN game), with a help line, a "CPU CARS:
+  OFF/ON" cycler bound to the saved pref, and OK. It never appears for battle modes
+  or for LAN clients, who follow the host.
+- **Shared network CPU cars and looks:** `InitSharedCPUVehiclePickRules` (a pure
+  function of the humans' cars, difficulty, track and slot over the whole land
+  roster; Hard uses `DeterministicStableFloat`; no synced RNG) and
+  `DressNetworkFillCPUs`.
+- **The host decides** (§5.4): `NetConfigMessage.cpuFill` (the byte CMR7 retired).
+  The host sends its pref in race mode only; the validator accepts 0/1, and 1 only
+  for a race. Clients take `gNetGameCPUFill` from the config, never their own
+  pref (`DecideCPUFillThisRace`). Reviewed with fill slots: the host's input
+  consumer and grace poll skip `isComputer` slots, clients apply the host's bits
+  for all slots, readiness barriers work in NSp-ID space (fill CPUs have none),
+  leaves convert only network players, and `FindHumanByNSpPlayerID` skips CPUs.
+- **Host-authoritative CPU POW use** (§5.4): in a network game only the host runs
+  a CPU car's throw decision, and it schedules the use as `kEvCpuThrow` (POW type
+  and direction in `NetFrameEvent.pad`; still 8 bytes). Every machine, the host
+  included, has the car use that POW at the event's frame if it still holds it.
+  Clients never decide. This also covers **replacement bots** (departed humans), in
+  races with or without fill, for consistency: their decisions read the same
+  positions that can differ between peers. A decision made on a later multipass
+  pass is lost, as it is in a local game. `NET_MAX_PENDING_EVENTS` is
+  `max(8, MAX_PLAYERS - 1)` (8 at six players, 11 at twelve), because each non-host
+  player has at most one event pending. The host reuses a ring slot once its event
+  has applied, and never applies an event it couldn't queue. The validator accepts
+  a POW use for any car except the host's, and still rejects two events of one type
+  for one player. POW pickups can still differ between peers, exactly as they
+  already can for humans.
+- **Seed-desync audit** (§5.4): the simulation draws the synced RNG only in
+  `SetPhysicsForVehicleType` (once per car in slot order at level start; fill seats
+  `MAX_PLAYERS` cars on every peer), `ChooseTaggedPlayer` (tag modes, frame-aligned)
+  and Hard CPU picks in local games. Weapons, traps, items, pickups, effects, sounds
+  and the camera use `VisualRandom*` or `DeterministicSimEventFloat`. **CPU fill
+  adds no draw that depends on local state.** The audit found one unrelated bug and
+  fixed it: menu cycler and slider sounds drew the synced RNG, so changing a setting
+  in a network game's pause menu desynced the seed. `Tests/SyncedRandomTests.py` now
+  fails if any unreviewed function draws the synced RNG.
+- **LAN smoke with fill:** a host flag, `--smoke-cpu-fill` (with
+  `--smoke-net-players`; the host's config carries it and prefs are untouched), and
+  `Tests/NetworkSmokeTests.py --cpu-fill`. `--smoke-test-frames` now allows up to
+  36000 frames. Each peer's smoke line reports its car count and how many CPU POW
+  uses it applied. The script fails unless every peer agrees, and on any sanitizer
+  report, `NetGameFatalError`, or seed or position desync.
 
-The integrated branch passes the CI-equivalent run (normal build + ctest 22/22,
-`-DSANITIZE=ON` build + ctest 22/22, 76 StartupSmoke PASS lines,
-MalformedAssetTests PASS). GitHub CI has not run on it yet.
+## Test results
 
-## Not done (charter §5.4–5.6)
+- CI-equivalent run (`ci.sh all`) before every push: normal build + ctest 23/23,
+  `-DSANITIZE=ON` build + ctest 23/23, 76 StartupSmoke PASS lines, MalformedAssetTests
+  PASS. GitHub CI has not run on the branch yet.
+- New unit coverage:
+  - `cpuFill` config validation and `DecideCPUFillThisRace`.
+  - A filled network race in the readiness harness: the config round trip for both
+    host prefs and a battle mode; identical cars and looks on the host and on each
+    client (set to the opposite local pref); a mid-race leave beside the fill CPUs.
+  - `kEvCpuThrow` encoding, decoding and validation: a full packet at
+    `NET_MAX_PENDING_EVENTS`; rejects the host's car, cars outside the race, and
+    duplicate uses.
+  - Scheduling and apply order:
+    - the host's table and a client's table, rebuilt from repeated packets, apply
+      identically at the same frame;
+    - one use per car is in flight;
+    - a slot is reused in the frame its event applied;
+    - a full ring schedules and applies nothing.
+- LAN soak, sanitizer build, `NetworkSmokeTests.py --cpu-fill --frames 3000`:
+  - host + 1 client + 4 CPUs on all nine tracks: all PASS, 6 cars on every peer, CPU
+    POW uses 7/8/9/12/6/6/12/8/0 (tracks 1-9), the same count on every peer;
+  - host + 2 clients + 3 CPUs on tracks 1, 5, 8 and 9: all PASS, 9/7/7/0 uses;
+  - Atlantis (track 9) CPU subs used no POW in 3000 frames, so it also ran 12000
+    frames (host + 1 client): PASS with 12 uses;
+  - no seed or position desync, `NetGameFatalError`, ASan or UBSan report in any run.
+    Unfilled 3-player and full 6-player (join refused) runs still pass with 0 uses.
 
-1. `NetConfigMessage.reserved` → `cpuFill`: the host fills it from its pref in
-   race mode only; validate 0/1 (and 0 for battle modes) in `NetValidation.c`.
-   Clients set `gCPUFillThisRace` and `gNumTotalPlayers` from it. Today
-   `PlayGame` keeps fill off in network games (`Main.c`, `gCPUFillThisRace =
-   !gNetGameInProgress && ...`).
-2. Host-authoritative CPU POW use:
-   - `kEvCpuThrow` through `Host_ScheduleFrameEvent` → `events[]` →
-     `ApplyPendingFrameEvents`, with the POW type and direction in
-     `NetFrameEvent.pad`;
-   - clients suppress local CPU throw decisions;
-   - update the validator's dedupe rule;
-   - size `NET_MAX_PENDING_EVENTS` for one event per non-host player.
+## Not done
 
-   A half-finished version of the encoder, decoder and validator is in
-   `docs/wip/cpu-fill-kEvCpuThrow.patch`. It is unverified and doesn't build yet:
-   it changes `NetValidateHostControlPayload`'s signature without updating its callers.
-3. Seed-desync audit (`NetHigh.c` `MyRandomLong() != mess->randomSeed`): CPU
-   fill must add no synced-RNG draws that depend on local state (items and traps
-   CPUs trigger, pickups, effects).
-4. Tests:
-   - `cpuFill` config validation;
-   - readiness and lifecycle tests with fill on;
-   - an in-process multi-peer race with CPUs, with no seed or position desync;
-   - `Tests/NetworkSmokeTests.py --cpu-fill` (host + 1 client + CPUs).
-5. §5.6 merge check: test-merge onto `feat/12-players` (4 split-screen humans + 8
-   CPUs; host + 1 client + 10 CPUs). The two branches overlap in `Player.c`
-   (driver looks: keep one of `ResolveCPUDriverLooks` / the fill dressing),
-   `Boot.cpp` and `file.h` (smoke flags), and `BUILD.md`.
-6. CHANGELOG entry for branch 3.
+1. §5.6 merge check: test-merge onto `feat/12-players` (4 split-screen humans + 8
+   CPUs; host + 1 client + 10 CPUs). The branches overlap in:
+   - `Player.c` (driver looks: keep either `ResolveCPUDriverLooks` or the fill dressing);
+   - `Boot.cpp` and `file.h` (smoke flags);
+   - `BUILD.md`;
+   - `Tests/ValidationTests.c`.
+
+   At 12 players `NET_MAX_PENDING_EVENTS` becomes 11. A static assert checks the
+   host message still fits in `kNSpMaxMessageLength`.
+2. CHANGELOG entry for branch 3, left for the owner as instructed.
+3. No test drives `DoCPUPowerupLogic`'s network path in-process, because
+   `Player_Car.c` isn't in the readiness harness. The LAN soak's per-peer POW-use
+   counts cover it.
 
 ## Open decisions for the owner
 
@@ -80,7 +122,7 @@ MalformedAssetTests PASS). GitHub CI has not run on it yet.
 - Prefs downgrade: an older build reading v2 prefs resets them to defaults, as
   with any prefs format change. Alternatively the new option could live in a
   separate file.
-- UI placement: the step after RACE, or Settings?
+- UI placement: the step after RACE (split-screen and LAN host), or Settings?
 - Scoreboard: filled races are recorded like any multiplayer race, with the
   human's overall place among all cars. Records don't say whether CPUs were present.
 - Win screen: YOU WIN / YOU LOSE plus the live HUD place. No final-place banner,
@@ -88,19 +130,22 @@ MalformedAssetTests PASS). GitHub CI has not run on it yet.
   their overall place"?
 - With fill on, a network player who left and became a bot can no longer win a
   filled race; without fill a bot can still win, as before. Intended?
+- When every client leaves a filled LAN race, the host's game still ends
+  ("everybody left"), as it does without fill. Should the host keep racing the CPUs?
 
 ## Known gaps
 
 - No automated test drives the new menu step, because the menu system has no
-  input harness. It was checked with screenshots from a measurement build.
-- CI smoke runs stop at 600 frames, so no race ends in CI. The race-end rule is
-  covered by unit and wiring tests plus uncommitted measurement runs.
+  input harness. The split-screen step was checked with screenshots from a
+  measurement build; the LAN host step (the same menu page) was not.
+- CI smoke runs stop at 600 frames and CI doesn't run `NetworkSmokeTests.py`, so no
+  race ends in CI. The race-end rule is covered by unit and wiring tests.
 - Long measurement races showed CPU stalls (Scandinavia 79 s; Ice ≈200 s for an
   autopilot car). This is the pre-existing land-car stranding tracked on
   `feat/12-players`, not fill-specific.
 
 ## Local artifacts (this machine)
 
-- Worktrees: `/var/tmp/cmr-wt/b3-local`, `/var/tmp/cmr-wt/b3-net` (local branches `wip/b3-local`, `wip/b3-net`).
-- The last `wip/b3-net` commit holds the uncommitted work shown in `docs/wip/`.
-- Unit report: `/var/tmp/cmr-tools/stageA-results.json`.
+- Worktrees `/var/tmp/cmr-wt/b3-local` and `/var/tmp/cmr-wt/b3-net` (local branches
+  `wip/b3-local`, `wip/b3-net`) are superseded by the pushed branch.
+- Soak logs: `/var/tmp/cmr-wt/b3/build-cmr-logs/soak/`.
