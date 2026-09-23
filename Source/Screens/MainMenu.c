@@ -93,29 +93,11 @@ static const MenuItem gMainMenuTree[] =
 	{kMIPick, STR_HELP,				.id=MENU_EXITCODE_HELP,		.next='EXIT' },
 
 	{ .id='mpgm' },
-	{kMIPick, STR_RACE,			.callback=OnPickGameMode, .id=GAME_MODE_MULTIPLAYERRACE,	.next='mprc' },
+	{kMIPick, STR_RACE,			.callback=OnPickGameMode, .id=GAME_MODE_MULTIPLAYERRACE,	.next='EXIT' },
 	{kMIPick, STR_TAG1,			.callback=OnPickGameMode, .id=GAME_MODE_TAG1,				.next='tag1' },
 	{kMIPick, STR_TAG2,			.callback=OnPickGameMode, .id=GAME_MODE_TAG2,				.next='tag2' },
 	{kMIPick, STR_SURVIVAL,		.callback=OnPickGameMode, .id=GAME_MODE_SURVIVAL,			.next='EXIT' },
 	{kMIPick, STR_CAPTUREFLAG,	.callback=OnPickGameMode, .id=GAME_MODE_CAPTUREFLAG,		.next='EXIT' },
-
-	// Multiplayer race setup, split-screen or LAN host. A LAN host's game config carries
-	// the choice to its clients, whose own pref never applies.
-	{ .id='mprc' },
-	{kMILabel, .text=STR_CPU_CARS_HELP },
-	{kMISpacer, .text=STR_NULL, .customHeight=1 },
-	{
-		kMICycler1, STR_CPU_CARS, .cycler=
-		{
-			.valuePtr=&gGamePrefs.cpuFill, .choices=
-			{
-				{STR_OFF, 0},
-				{STR_ON, 1},
-			}
-		}
-	},
-	{kMISpacer, .text=STR_NULL, .customHeight=.5 },
-	{kMIPick, STR_OK, .next='EXIT' },
 
 	{ .id='spgm' },
 	{kMIPick, STR_PRACTICE,		.callback=OnPickGameMode, .id=GAME_MODE_PRACTICE,			.next='EXIT' },
