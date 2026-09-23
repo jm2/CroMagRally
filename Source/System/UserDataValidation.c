@@ -1,6 +1,8 @@
 #include "game.h"
 #include <string.h>
 
+_Static_assert(MAX_PLAYERS <= SCOREBOARD_MAX_PLACES, "every place a race can finish in fits the scoreboard format");
+
 static Boolean IsValidVolume(Byte volume)
 {
 	return volume <= 100 && volume % 20 == 0;
@@ -179,11 +181,10 @@ static Boolean IsValidScoreboardRecord(const ScoreboardRecord* record, int track
 			|| record->gameMode == GAME_MODE_TOURNAMENT
 			|| record->gameMode == GAME_MODE_MULTIPLAYERRACE)
 		&& record->vehicleType < NUM_CAR_TYPES_TOTAL
-		// The place bound is this build's MAX_PLAYERS, not a fixed file-format limit.
-		// A build with fewer players than the one that wrote the scoreboard (e.g. a
-		// 6-player build reading a 12-player build's 7th-12th place) drops those
-		// records, and LoadScoreboardFile then saves the scoreboard without them.
-		&& record->place < MAX_PLAYERS
+		// A fixed file-format bound, not this build's MAX_PLAYERS, so builds with
+		// different player limits share scoreboards: a 6-player build keeps a
+		// 12-player build's 7th-12th place records (the place is never displayed).
+		&& record->place < SCOREBOARD_MAX_PLACES
 		&& record->sex <= 1
 		&& record->skin < NUM_CAVEMAN_SKINS;
 }

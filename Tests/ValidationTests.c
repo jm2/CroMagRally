@@ -749,10 +749,11 @@ static void TestScoreboardSanitization(void)
 
 static void TestScoreboardPlaceBound(void)
 {
-	// Places are checked against this build's MAX_PLAYERS. Every place this build can
-	// finish in is kept; a record from a build with more players (up to a 12-player
-	// build's 12th place) is discarded, not clamped, and the next record moves up.
-	for (int place = 0; place < 12; place++)
+	// Places are checked against the fixed SCOREBOARD_MAX_PLACES, so builds with different
+	// player limits keep each other's records (a 6-player build keeps a 12-player build's
+	// 7th-12th places). A place past the format bound is discarded, not clamped, and the
+	// next record moves up.
+	for (int place = 0; place < SCOREBOARD_MAX_PLACES + 2; place++)
 	{
 		Scoreboard scoreboard = {0};
 		ScoreboardRecord next = ValidScoreboardRecord(0);
@@ -761,20 +762,13 @@ static void TestScoreboardPlaceBound(void)
 		scoreboard.records[0][0].place = (Byte) place;
 		scoreboard.records[0][1] = next;
 
-		const Boolean kept = place < MAX_PLAYERS;
+		const Boolean kept = place < SCOREBOARD_MAX_PLACES;
 		assert(SanitizeScoreboard(&scoreboard) == !kept);
 		assert(scoreboard.records[0][0].timestamp == (kept ? 1 : 2));
 		assert(scoreboard.records[0][0].place == (kept ? place : 0));
 		assert(scoreboard.records[0][1].timestamp == (kept ? 2 : 0));
 	}
-
-	Scoreboard scoreboard = {0};
-	scoreboard.records[0][0] = ValidScoreboardRecord(0);
-	scoreboard.records[0][0].place = MAX_PLAYERS - 1;
-	assert(!SanitizeScoreboard(&scoreboard));
-	scoreboard.records[0][0].place = MAX_PLAYERS;
-	assert(SanitizeScoreboard(&scoreboard));
-	assert(scoreboard.records[0][0].timestamp == 0);
+	assert(MAX_PLAYERS <= SCOREBOARD_MAX_PLACES && 12 <= SCOREBOARD_MAX_PLACES);
 }
 
 static void TestBoneNormalCoverage(void)

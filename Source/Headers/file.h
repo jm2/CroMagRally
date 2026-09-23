@@ -106,6 +106,7 @@ typedef struct
 } Scoreboard;
 
 #define SCOREBOARD_MAGIC "CMR Scores v0  "
+#define SCOREBOARD_MAX_PLACES 16		// file-format bound on ScoreboardRecord.place, independent of MAX_PLAYERS
 
 #define MAX_SAVED_LAP_TIME_SECONDS (24.0f * 60.0f * 60.0f)
 
