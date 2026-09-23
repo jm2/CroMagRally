@@ -63,7 +63,7 @@ branch 2 doesn't bump it (owner decision, 2026-09-22).
 Each unit passed the CI-equivalent run (normal build + ctest, `-DSANITIZE=ON`
 build + ctest, `StartupSmokeTests.py`, `MalformedAssetTests.py`) on its own branch.
 The integrated branch passes it too: 27/27 ctest normal and sanitizer, 101
-StartupSmoke PASS lines, MalformedAssetTests PASS. GitHub CI has not run on it yet.
+StartupSmoke PASS lines, MalformedAssetTests PASS. GitHub CI on PR #43 passes on every platform (Linux GCC/Clang/ARM64 with the sanitizer smoke, Windows, macOS, iOS/tvOS, Android).
 
 ## Not done (charter §4)
 
