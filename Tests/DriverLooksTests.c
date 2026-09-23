@@ -481,22 +481,9 @@ static void TestTwelveCarScreens(void)
 }
 
 
-/********************* MINIMAP BLIP MARKERS ************************/
+/********************* MINIMAP BLIP COLORS ************************/
 
-static float Luminance(float r, float g, float b)
-{
-	float c[3] = { r, g, b };
-	for (int i = 0; i < 3; i++)
-		c[i] = c[i] <= 0.04045f ? c[i] / 12.92f : powf((c[i] + 0.055f) / 1.055f, 2.4f);
-	return 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2];
-}
-
-static float Contrast(float l1, float l2)
-{
-	return l1 > l2 ? (l1 + 0.05f) / (l2 + 0.05f) : (l2 + 0.05f) / (l1 + 0.05f);
-}
-
-static void TestBlipMarkers(void)
+static void TestBlipColors(void)
 {
 	DriverLook looks[MAX_TEST_PLAYERS];
 
@@ -505,7 +492,7 @@ static void TestBlipMarkers(void)
 	for (int i = 0; i < ORIGINAL_NUM_PLAYERS; i++)
 		CHECK(GetDriverOutfitRank(looks, i) == 0);
 
-	// Twelve cars: the first six keep plain blips and the second wave is marked.
+	// Twelve cars: the first six keep their colours and the second wave takes partner colours.
 	GetDefaultLooks(looks, NUM_LOOKS);
 	for (int i = 0; i < NUM_LOOKS; i++)
 		CHECK(GetDriverOutfitRank(looks, i) == (i < ORIGINAL_NUM_PLAYERS ? 0 : 1));
@@ -534,18 +521,30 @@ static void TestBlipMarkers(void)
 		CHECK(marked == NUM_LOOKS - NUM_CAVEMAN_SKINS);
 	}
 
-	// The marker stands out from every outfit colour: at least the 3:1 contrast WCAG asks
-	// of graphics, black on the light colours and white on blue.
+	// First wearers keep the original colours; later wearers take the partner colour. Every
+	// new colour is at least 0.5 (RGB distance) from all eleven others, further apart than the
+	// closest original pair (brown and gray, 0.36), and 0.75 from its partner.
+	OGLColorRGB colors[2 * NUM_CAVEMAN_SKINS];
 	for (int skin = 0; skin < NUM_CAVEMAN_SKINS; skin++)
 	{
-		const OGLColorRGB fill = kCavemanSkinColors[skin];
-		const float shade = GetBlipMarkerShade(fill.r, fill.g, fill.b);
-		CHECK(shade == 0.0f || shade == 1.0f);
-		CHECK(Contrast(Luminance(fill.r, fill.g, fill.b), Luminance(shade, shade, shade)) >= 3.0f);
-		CHECK(shade == (skin == CAVEMAN_SKIN_BLUE ? 1.0f : 0.0f));
+		const OGLColorRGB first = GetDriverBlipColor(skin, 0), second = GetDriverBlipColor(skin, 1);
+		CHECK(!memcmp(&first, &kCavemanSkinColors[skin], sizeof(first)));
+		CHECK(!memcmp(&second, &kRepeatOutfitColors[skin], sizeof(second)));
+		const OGLColorRGB third = GetDriverBlipColor(skin, 2);
+		CHECK(!memcmp(&third, &second, sizeof(third)));
+		colors[skin] = first;
+		colors[NUM_CAVEMAN_SKINS + skin] = second;
 	}
-	CHECK(GetBlipMarkerShade(0, 0, 0) == 1.0f);
-	CHECK(GetBlipMarkerShade(1, 1, 1) == 0.0f);
+	for (int a = NUM_CAVEMAN_SKINS; a < 2 * NUM_CAVEMAN_SKINS; a++)
+		for (int b = 0; b < 2 * NUM_CAVEMAN_SKINS; b++)
+		{
+			if (a == b)
+				continue;
+			const float dr = colors[a].r - colors[b].r, dg = colors[a].g - colors[b].g, db = colors[a].b - colors[b].b;
+			CHECK(dr * dr + dg * dg + db * db >= 0.25f);
+			if (b == a - NUM_CAVEMAN_SKINS)
+				CHECK(dr * dr + dg * dg + db * db >= 0.5f);
+		}
 }
 
 
@@ -556,7 +555,7 @@ int main(void)
 	TestCycleDriverSkin();
 	TestSixCarScreensMatchOriginal();
 	TestTwelveCarScreens();
-	TestBlipMarkers();
+	TestBlipColors();
 	puts("driver looks tests passed");
 	return 0;
 }

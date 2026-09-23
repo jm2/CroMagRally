@@ -52,7 +52,6 @@ static void MovePressAnyKey(ObjNode *theNode);
 #define PLAYER_NAME_SAFE_CHARSET " .0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 #define OVERHEAD_MAP_REFERENCE_SIZE 256.0f
-#define BLIP_MARKER_SCALE	0.4f				// marker inside a repeated outfit's minimap blip
 
 #define INFOBAR_SPRITE_FLAGS (kTextMeshAlignCenter | kTextMeshAlignMiddle | kTextMeshKeepCurrentProjection)
 
@@ -832,7 +831,6 @@ static void Infobar_DrawMap(Byte whichPane)
 
 			/* SET COLOR */
 
-		Boolean marked = false;
 
 		switch(gGameMode)
 		{
@@ -845,9 +843,10 @@ static void Infobar_DrawMap(Byte whichPane)
 					break;
 
 			default:
-					gGlobalColorFilter = kCavemanSkinColors[gPlayerInfo[i].skin];
-					if (gGameMode != GAME_MODE_CAPTUREFLAG)			// CTF outfits are team colours, not drivers
-						marked = GetPlayerOutfitRank(i) > 0;
+					if (gGameMode == GAME_MODE_CAPTUREFLAG)			// CTF outfits are team colours, not drivers
+						gGlobalColorFilter = kCavemanSkinColors[gPlayerInfo[i].skin];
+					else
+						gGlobalColorFilter = GetDriverBlipColor(gPlayerInfo[i].skin, GetPlayerOutfitRank(i));
 		}
 
 		
@@ -860,29 +859,6 @@ static void Infobar_DrawMap(Byte whichPane)
 			scaleBasis,
 			rot,
 			INFOBAR_SPRITE_FLAGS);
-
-			/* HOLLOW OUT A REPEATED OUTFIT'S BLIP */
-			//
-			// Past six cars every outfit colour is worn twice. A dark (or, on a dark colour,
-			// light) centre marks the later driver, so the first six keep their original blips
-			// and no new colours are added for colour-blind players to confuse.
-			//
-
-		if (marked)
-		{
-			const float shade = GetBlipMarkerShade(gGlobalColorFilter.r, gGlobalColorFilter.g, gGlobalColorFilter.b);
-			gGlobalColorFilter = (OGLColorRGB) { shade, shade, shade };
-
-			DrawSprite2(
-				SPRITE_GROUP_INFOBAR,
-				INFOBAR_SObjType_PlayerBlip,
-				x,
-				z,
-				scaleBasis * BLIP_MARKER_SCALE,
-				scaleBasis * BLIP_MARKER_SCALE,
-				rot,
-				INFOBAR_SPRITE_FLAGS);
-		}
 	}
 
 	gGlobalColorFilter = (OGLColorRGB) {1,1,1};

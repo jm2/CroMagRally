@@ -292,21 +292,24 @@ int	rank = 0;
 }
 
 
-/******************** GET BLIP MARKER SHADE ***********************/
+/******************** GET DRIVER BLIP COLOR ***********************/
 //
-// Picks black or white by WCAG contrast against the fill's relative luminance.
+// Minimap blips are coloured by outfit. Past six cars every outfit is worn twice, so the
+// later wearer takes that outfit's partner colour, chosen in the same saturated style and
+// far from its partner: the first six keep their original colours.
 //
 
-static float LinearizeSRGB(float c)
+const OGLColorRGB kRepeatOutfitColors[NUM_CAVEMAN_SKINS] =
 {
-	return c <= 0.04045f ? c / 12.92f : powf((c + 0.055f) / 1.055f, 2.4f);
-}
+	[CAVEMAN_SKIN_BROWN]	=	{.55,.3, 1},		// violet
+	[CAVEMAN_SKIN_GREEN]	=	{ 1, 0, 1},			// magenta
+	[CAVEMAN_SKIN_BLUE]		=	{ 1, 1, 0},			// yellow
+	[CAVEMAN_SKIN_GRAY]		=	{ 0, 1, 1},			// cyan
+	[CAVEMAN_SKIN_RED]		=	{ 0,.45, 0},		// dark green
+	[CAVEMAN_SKIN_WHITE]	=	{ 0, 0,.45},		// navy
+};
 
-float GetBlipMarkerShade(float r, float g, float b)
+OGLColorRGB GetDriverBlipColor(int skin, int outfitRank)
 {
-	const float luminance = 0.2126f * LinearizeSRGB(r) + 0.7152f * LinearizeSRGB(g) + 0.0722f * LinearizeSRGB(b);
-	const float contrastWithBlack = (luminance + 0.05f) / 0.05f;
-	const float contrastWithWhite = 1.05f / (luminance + 0.05f);
-
-	return contrastWithWhite > contrastWithBlack ? 1.0f : 0.0f;
+	return outfitRank > 0 ? kRepeatOutfitColors[skin] : kCavemanSkinColors[skin];
 }

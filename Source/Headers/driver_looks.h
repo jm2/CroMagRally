@@ -56,9 +56,9 @@ void ChangeDriverBody(DriverLook looks[], int numPlayers, int whichPlayer, short
 int ResolveCPUDriverLooks(DriverLook looks[], int numPlayers, int numFixed);
 
 // How many of players 0...playerNum-1 wear playerNum's outfit. Minimap blips are coloured by
-// outfit (kCavemanSkinColors), so from rank 1 on a blip needs a marker to stand apart.
+// outfit (kCavemanSkinColors), so from rank 1 on a blip takes the outfit's partner colour.
 int GetDriverOutfitRank(const DriverLook looks[], int playerNum);
 
-// Grey level (0 = black, 1 = white) for a marker drawn over a blip of this fill colour:
-// whichever contrasts more with it.
-float GetBlipMarkerShade(float r, float g, float b);
+// Minimap blip colour for an outfit and its rank among the players wearing it.
+extern const OGLColorRGB kRepeatOutfitColors[NUM_CAVEMAN_SKINS];
+OGLColorRGB GetDriverBlipColor(int skin, int outfitRank);
