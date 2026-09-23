@@ -31,8 +31,6 @@ static void OnPickClearSavedGame(const MenuItem* mi);
 static void OnPickTagDuration(const MenuItem* mi);
 
 static int IsClearSavedGameAvailable(const MenuItem* mi);
-static int ShowInLocalGamesOnly(const MenuItem* mi);
-static int ShowInNetGamesOnly(const MenuItem* mi);
 static int IsTournamentAgeAvailable(const MenuItem* mi);
 static int GetLayoutFlagsForTournamentObjective(const MenuItem* mi);
 
@@ -95,15 +93,14 @@ static const MenuItem gMainMenuTree[] =
 	{kMIPick, STR_HELP,				.id=MENU_EXITCODE_HELP,		.next='EXIT' },
 
 	{ .id='mpgm' },
-	{kMIPick, STR_RACE,			.callback=OnPickGameMode, .id=GAME_MODE_MULTIPLAYERRACE,	.next='mprc', .getLayoutFlags=ShowInLocalGamesOnly },
-	{kMIPick, STR_RACE,			.callback=OnPickGameMode, .id=GAME_MODE_MULTIPLAYERRACE,	.next='EXIT', .getLayoutFlags=ShowInNetGamesOnly },
+	{kMIPick, STR_RACE,			.callback=OnPickGameMode, .id=GAME_MODE_MULTIPLAYERRACE,	.next='mprc' },
 	{kMIPick, STR_TAG1,			.callback=OnPickGameMode, .id=GAME_MODE_TAG1,				.next='tag1' },
 	{kMIPick, STR_TAG2,			.callback=OnPickGameMode, .id=GAME_MODE_TAG2,				.next='tag2' },
 	{kMIPick, STR_SURVIVAL,		.callback=OnPickGameMode, .id=GAME_MODE_SURVIVAL,			.next='EXIT' },
 	{kMIPick, STR_CAPTUREFLAG,	.callback=OnPickGameMode, .id=GAME_MODE_CAPTUREFLAG,		.next='EXIT' },
 
-	// Split-screen race setup. Network races skip it until the host's config can carry
-	// the CPU fill choice to the clients (PlayGame keeps it off in network games).
+	// Multiplayer race setup, split-screen or LAN host. A LAN host's game config carries
+	// the choice to its clients, whose own pref never applies.
 	{ .id='mprc' },
 	{kMILabel, .text=STR_CPU_CARS_HELP },
 	{kMISpacer, .text=STR_NULL, .customHeight=1 },
@@ -491,18 +488,6 @@ static int IsClearSavedGameAvailable(const MenuItem* mi)
 		return 0;
 	else
 		return kMILayoutFlagDisabled;
-}
-
-static int ShowInLocalGamesOnly(const MenuItem* mi)
-{
-	(void) mi;
-	return gNetGameInProgress ? kMILayoutFlagHidden : 0;
-}
-
-static int ShowInNetGamesOnly(const MenuItem* mi)
-{
-	(void) mi;
-	return gNetGameInProgress ? 0 : kMILayoutFlagHidden;
 }
 
 static int IsTournamentAgeAvailable(const MenuItem* mi)
