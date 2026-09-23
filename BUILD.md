@@ -177,8 +177,8 @@ binds a fixed UDP port. These developer options let them meet directly:
 [--frames K]` uses these options to race a host and its clients on loopback,
 headless, and checks that one join too many is refused. PLAYERS defaults to the
 most the binary seats. Use a sanitizer build: it is how out-of-bounds HUD or
-network state for high player numbers shows up. CI doesn't run this script yet;
-a six-player run takes about 15–30 seconds.
+network state for high player numbers shows up. CI runs it on the Linux
+sanitizer build with six players; a six-player run takes about 15–30 seconds.
 
 ## Race-metrics soaks
 
