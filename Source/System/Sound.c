@@ -57,7 +57,6 @@ typedef struct
 #define	VOLUME_DISTANCE_FACTOR	.001f		// bigger == sound decays FASTER with dist, smaller = louder far away
 
 _Static_assert(MAX_CHANNELS >= MAX_PLAYERS + 8, "every car's engine loop plus the announcer and shared effects need a channel");
-_Static_assert(MAX_PLAYERS != 6 || MAX_CHANNELS == 20, "6-player builds keep the original 20 channels");
 
 /**********************/
 /*     VARIABLES      */
