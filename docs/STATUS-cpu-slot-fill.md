@@ -132,7 +132,7 @@ network unit's `CMR9 -> CMRB` commit was deliberately left out.
 
 ## Owner decisions (2026-09-22)
 
-- Translations of `STR_CPU_CARS` / `STR_CPU_CARS_HELP`: **pending** (context in the PR thread).
+- Translations of `STR_CPU_CARS` / `STR_CPU_CARS_HELP`: **kept** as written (FR/DE/ES/IT/SV).
 - Prefs downgrade (an older build resets v2 prefs to defaults): **accepted**.
 - UI placement: **the step after picking RACE** (as implemented).
 - Scoreboard records for filled races: **accepted**.
