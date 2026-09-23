@@ -469,6 +469,18 @@ DriverLook	looks[MAX_PLAYERS];
 }
 
 
+/******************** NUM PLAYERS TO DRESS ***********************/
+//
+// Character select swaps looks only among the cars in this game (InitPlayerInfo_Game has
+// counted them), so a slot the race won't use never holds on to an outfit.
+//
+
+static int NumPlayersToDress(short whichPlayer)
+{
+	return SDL_clamp((int) gNumTotalPlayers, whichPlayer + 1, MAX_PLAYERS);
+}
+
+
 /******************** CYCLE PLAYER OUTFIT ***********************/
 //
 // Character select: steps whichPlayer to the next outfit. Players in playersDone keep their
@@ -483,7 +495,7 @@ DriverLook	looks[MAX_PLAYERS];
 	GAME_ASSERT(whichPlayer >= 0 && whichPlayer < MAX_PLAYERS);
 
 	GetPlayerDriverLooks(looks);
-	const short newSkin = CycleDriverOutfit(looks, MAX_PLAYERS, whichPlayer, delta, playersDone, dressOthers);
+	const short newSkin = CycleDriverOutfit(looks, NumPlayersToDress(whichPlayer), whichPlayer, delta, playersDone, dressOthers);
 	SetPlayerDriverLooks(looks);
 
 	return newSkin;
@@ -502,7 +514,7 @@ DriverLook	looks[MAX_PLAYERS];
 	GAME_ASSERT(whichPlayer >= 0 && whichPlayer < MAX_PLAYERS);
 
 	GetPlayerDriverLooks(looks);
-	ChangeDriverBody(looks, MAX_PLAYERS, whichPlayer, sex, playersDone, dressOthers);
+	ChangeDriverBody(looks, NumPlayersToDress(whichPlayer), whichPlayer, sex, playersDone, dressOthers);
 	SetPlayerDriverLooks(looks);
 }
 
