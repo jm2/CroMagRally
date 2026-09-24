@@ -68,8 +68,10 @@ def main() -> None:
         if string_id not in string_ids:
             fail(f"LocStrID has no {string_id}")
         row = localized_rows[string_ids.index(string_id) - 1]
-        if row[0] != english:
-            fail(f"{string_id} reads {row[0]!r} in strings.csv, expected {english!r}")
+        # A Windows checkout can turn the line break inside a quoted field into CRLF.
+        text = row[0].replace("\r\n", "\n")
+        if text != english:
+            fail(f"{string_id} reads {text!r} in strings.csv, expected {english!r}")
 
 
 if __name__ == "__main__":
