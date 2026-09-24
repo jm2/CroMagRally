@@ -107,7 +107,6 @@ typedef struct
 	int displayedValue;
 	int state;
 	int pane;				// split-screen pane that shows this icon (node->PlayerNum is the player it tracks)
-	bool hiddenForGood;		// hidden by ShowFinalPlace: a move call that sets its own visibility must not show it again
 } InfobarIconData;
 CheckSpecialDataStruct(InfobarIconData);
 #define GetInfobarIconData(node) GetSpecialData(node, InfobarIconData)
@@ -235,7 +234,7 @@ static void HideIconObjects(int playerNum, int iconType)
 		if (icon)
 		{
 			SetObjectVisible(icon, false);
-			GetInfobarIconData(icon)->hiddenForGood = true;
+			icon->StatusBits |= STATUS_BIT_NOMOVE;				// its move call sets its own visibility, so stop it for good
 		}
 	}
 }
@@ -945,9 +944,6 @@ static void Infobar_MovePlace(ObjNode* node)
 	int sex = gPlayerInfo[playerNum].sex;
 
 	InfobarIconData* special = GetInfobarIconData(node);
-
-	if (special->hiddenForGood)							// ShowFinalPlace took over
-		return;
 
 	if (special->displayedValue != place)
 	{
