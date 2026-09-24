@@ -56,6 +56,8 @@ typedef struct
 
 #define	VOLUME_DISTANCE_FACTOR	.001f		// bigger == sound decays FASTER with dist, smaller = louder far away
 
+_Static_assert(MAX_CHANNELS >= MAX_PLAYERS + 8, "every car's engine loop plus the announcer and shared effects need a channel");
+
 /**********************/
 /*     VARIABLES      */
 /**********************/
@@ -862,6 +864,12 @@ uint32_t		lv2,rv2;
 	theChan = FindSilentChannel();
 	if (theChan == -1)
 	{
+		static Boolean warnedFull = false;
+		if (!warnedFull)
+		{
+			SDL_Log("WARNING: all %d effect channels busy; skipping sound effects", gMaxChannels);
+			warnedFull = true;
+		}
 		return(-1);
 	}
 

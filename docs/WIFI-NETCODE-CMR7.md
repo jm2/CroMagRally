@@ -22,6 +22,11 @@ play-test verification under the redesign).
 > describe that cap, not current builds. CMR8 has not shipped yet, so the raised cap keeps
 > the CMR8 cookie.
 >
+> **Twelve players.** `MAX_PLAYERS` (and so `MAX_CLIENTS`) is now 12. The host control
+> message is 628 B (40 B per player slot, 8 B per event slot, `NET_MAX_PENDING_EVENTS` 12),
+> so `kNSpMaxPayloadLength` is 1024 and each send ring holds 80 KB (about 2 s of host
+> messages at 60 fps). Still the unreleased CMR8 cookie.
+>
 > **The protocol-specification numbers below are NOT authoritative for the wire format.**
 > `Source/Headers/network.h` is the single source of truth, and it differs from this plan in
 > several places the design pre-sized differently, e.g. the drop timeout is

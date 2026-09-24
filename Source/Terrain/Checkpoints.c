@@ -8,6 +8,7 @@
 /***************/
 
 #include "game.h"
+#include "cpu_driver.h"
 #include "cpu_fill.h"
 
 
@@ -103,9 +104,15 @@ OGLVector2D	checkToCheck,aim,deltaVec;
 
 		if (IntersectLineSegments(playerFromX, playerFromZ, playerToX, playerToZ,x1,z1,x2,z2,&intersectX, &intersectZ))
     	{
+			const int oldProgress = CPURaceProgress(gPlayerInfo[p].lapNum, gPlayerInfo[p].checkpointNum, gNumCheckpoints);
+
 			if (CrossCheckpoint(gPlayerInfo[p].lapNum, &gPlayerInfo[p].checkpointNum,
 					gPlayerInfo[p].checkpointTagged, gNumCheckpoints, c))
 				NextLap(p);
+
+			if (CPURaceProgress(gPlayerInfo[p].lapNum, gPlayerInfo[p].checkpointNum, gNumCheckpoints) > oldProgress)
+				RecordCPURescueCrossing(&gPlayerInfo[p], intersectX, intersectZ,			// where a stranded CPU goes back to
+						playerToX - playerFromX, playerToZ - playerFromZ);
 			break;
 		}
 	}

@@ -20,8 +20,15 @@
 /*    CONSTANTS             */
 /****************************/
 
+// Budget for one HandleCollisions call. Its up-to-3 passes append to the same list,
+// so a car re-adds whatever it still touches on each pass. Headless full races peak
+// at 10 entries with 6 or 12 cars, so 60 stays: even a car pressed against every
+// other car on all three passes fits. A full list keeps the first hits and drops
+// the rest, logged once (AddCollision).
 #define	MAX_COLLISIONS				60
 #define	MAX_TEMP_COLL_TRIANGLES		300
+
+_Static_assert(MAX_COLLISIONS >= 3 * (MAX_PLAYERS - 1), "a car touching every other car on each of HandleCollisions' 3 passes must fit");
 
 enum
 {

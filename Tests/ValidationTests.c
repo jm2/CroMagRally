@@ -268,6 +268,7 @@ static void TestConfigValidation(void)
 	message.numPlayers = 2;
 	message.difficulty = 0;
 	message.targetFPS = 60;
+	message.playerLimit = MAX_PLAYERS;
 	assert(NetValidateConfigPayload(&message));
 
 	message.numPlayers = MAX_CLIENTS;						// full lobby: host + MAX_CLIENTS-1 clients
@@ -311,6 +312,38 @@ static void TestConfigValidation(void)
 				== (fill == 0 || (fill == 1 && mode == GAME_MODE_MULTIPLAYERRACE)));
 		}
 	}
+
+	// The host's 6/12 players setting: a supported limit that seats every network
+	// player. The pad byte is always 0.
+	message.gameMode = GAME_MODE_MULTIPLAYERRACE;
+	message.trackNum = 0;
+	message.cpuFill = 1;
+	message.numPlayers = 2;
+	message.playerNum = 1;
+	for (int limit = 0; limit <= 255; limit++)
+	{
+		message.playerLimit = limit;
+		assert(NetValidateConfigPayload(&message) == (limit == PLAYER_LIMIT_ORIGINAL || limit == MAX_PLAYERS));
+	}
+	message.playerLimit = PLAYER_LIMIT_ORIGINAL;
+	message.numPlayers = PLAYER_LIMIT_ORIGINAL;					// a full 6-player lobby
+	message.playerNum = PLAYER_LIMIT_ORIGINAL - 1;
+	assert(NetValidateConfigPayload(&message));
+	message.numPlayers = PLAYER_LIMIT_ORIGINAL + 1;				// more players than the host's limit
+	message.playerNum = 1;
+	assert(!NetValidateConfigPayload(&message));
+	message.playerLimit = MAX_PLAYERS;
+	assert(NetValidateConfigPayload(&message) == (PLAYER_LIMIT_ORIGINAL + 1 <= MAX_CLIENTS));
+	message.numPlayers = MAX_CLIENTS;
+	assert(NetValidateConfigPayload(&message));
+	message.numPlayers = 2;
+	for (int pad = 1; pad <= 255; pad++)
+	{
+		message.pad = pad;
+		assert(!NetValidateConfigPayload(&message));
+	}
+	message.pad = 0;
+	assert(NetValidateConfigPayload(&message));
 }
 
 static void TestSyncMaskValidation(void)
@@ -331,6 +364,7 @@ static void TestNetworkFPSValidation(void)
 	NetConfigMessage config = {0};
 	config.gameMode = GAME_MODE_MULTIPLAYERRACE;
 	config.numPlayers = 2;
+	config.playerLimit = PLAYER_LIMIT_ORIGINAL;
 	NetPlayerCharTypeMessage character = ValidCharMessage();
 	NetSyncMessage sync = {0};
 
@@ -728,6 +762,7 @@ static PrefsType ValidPrefs(void)
 	prefs.raceTimer = 1;
 	prefs.gamepadRumble = true;
 	prefs.cpuFill = true;
+	prefs.playerLimit = MAX_PLAYERS;
 	prefs.bindings[0].key[0] = SDL_SCANCODE_SPACE;
 	prefs.bindings[0].pad[0] = (PadBinding){kInputTypeButton, SDL_GAMEPAD_BUTTON_SOUTH};
 	prefs.bindings[1].pad[0] = (PadBinding){kInputTypeAxisPlus, SDL_GAMEPAD_AXIS_LEFTX};
@@ -763,8 +798,17 @@ static void TestPrefsSanitization(void)
 	CHECK_REPAIR(gamepadRumble, 2);
 	CHECK_REPAIR(tournamentProgression.numTracksCompleted, NUM_RACE_TRACKS + 1);
 	CHECK_REPAIR(cpuFill, 2);
+	CHECK_REPAIR(playerLimit, 0);
+	CHECK_REPAIR(playerLimit, PLAYER_LIMIT_ORIGINAL - 1);
+	CHECK_REPAIR(playerLimit, PLAYER_LIMIT_ORIGINAL + 1);
+	CHECK_REPAIR(playerLimit, MAX_PLAYERS + 1);
+	CHECK_REPAIR(playerLimit, 255);
 
 #undef CHECK_REPAIR
+
+	prefs = defaults;
+	prefs.playerLimit = PLAYER_LIMIT_ORIGINAL;								// both choices are kept
+	assert(!SanitizePrefs(&prefs, &defaults) && prefs.playerLimit == PLAYER_LIMIT_ORIGINAL);
 
 	prefs = defaults;
 	prefs.tournamentProgression.tournamentLapTimes[0][0] = NAN;
@@ -830,6 +874,30 @@ static void TestScoreboardSanitization(void)
 	assert(!SanitizeScoreboard(&scoreboard));
 }
 
+static void TestScoreboardPlaceBound(void)
+{
+	// Places are checked against the fixed SCOREBOARD_MAX_PLACES, so builds with different
+	// player limits keep each other's records (a 6-player build keeps a 12-player build's
+	// 7th-12th places). A place past the format bound is discarded, not clamped, and the
+	// next record moves up.
+	for (int place = 0; place < SCOREBOARD_MAX_PLACES + 2; place++)
+	{
+		Scoreboard scoreboard = {0};
+		ScoreboardRecord next = ValidScoreboardRecord(0);
+		next.timestamp = 2;
+		scoreboard.records[0][0] = ValidScoreboardRecord(0);
+		scoreboard.records[0][0].place = (Byte) place;
+		scoreboard.records[0][1] = next;
+
+		const Boolean kept = place < SCOREBOARD_MAX_PLACES;
+		assert(SanitizeScoreboard(&scoreboard) == !kept);
+		assert(scoreboard.records[0][0].timestamp == (kept ? 1 : 2));
+		assert(scoreboard.records[0][0].place == (kept ? place : 0));
+		assert(scoreboard.records[0][1].timestamp == (kept ? 2 : 0));
+	}
+	assert(MAX_PLAYERS <= SCOREBOARD_MAX_PLACES && 12 <= SCOREBOARD_MAX_PLACES);
+}
+
 static void TestBoneNormalCoverage(void)
 {
 	DecomposedPointType points[2] = {
@@ -877,6 +945,7 @@ int main(void)
 	TestPlaceholderFormatting();
 	TestPrefsSanitization();
 	TestScoreboardSanitization();
+	TestScoreboardPlaceBound();
 	puts("Validation tests passed.");
 	return 0;
 }

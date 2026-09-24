@@ -13,6 +13,7 @@
 #include "cpu_fill.h"
 #include "miscscreens.h"
 #include "network.h"
+#include "race_metrics.h"
 #include <SDL3/SDL.h>
 #if defined(__ANDROID__)
 #include <jni.h>
@@ -89,6 +90,7 @@ int					gTrackNum;
 int					gDifficulty = DIFFICULTY_MEDIUM;
 int					gTagDuration = 3;
 Boolean				gCPUFillThisRace = false;				// CPU cars race in this game's empty slots (see PlayGame)
+Byte				gPlayerLimitThisGame = PLAYER_LIMIT_ORIGINAL;	// most cars in this game (see PlayGame)
 
 
 			/* BATTLE MODE VARS */
@@ -181,6 +183,7 @@ void InitDefaultPrefs(void)
 	gGamePrefs.musicVolumePercent	= 60;			// careful to set these two volumes to one of the
 	gGamePrefs.sfxVolumePercent		= 60;			// the predefined values allowed in the settings menu
 	gGamePrefs.cpuFill				= false;		// multiplayer races are humans only unless asked
+	gGamePrefs.playerLimit			= PLAYER_LIMIT_ORIGINAL;	// the original game's 6 cars unless asked
 
 	SDL_memcpy(&gGamePrefs.bindings, kDefaultInputBindings, sizeof(kDefaultInputBindings));
 }
@@ -217,6 +220,19 @@ static Boolean PlayGame(void)
 			//
 
 	gCPUFillThisRace = DecideCPUFillThisRace(gGameMode, gNetGameInProgress, gNetGameCPUFill, gGamePrefs.cpuFill);
+
+			/* DECIDE PLAYER LIMIT */
+			//
+			// Once per game (a tournament's races share it), before InitPlayerInfo_Game counts
+			// the cars. Local games take the pref. Network games take the host's limit (its pref
+			// when it started hosting), which a client gets from the game config and never
+			// from its own pref. The self-running demo is the original game's.
+			//
+
+	if (gIsSelfRunningDemo)
+		gPlayerLimitThisGame = PLAYER_LIMIT_ORIGINAL;
+	else
+		gPlayerLimitThisGame = DecidePlayerLimitThisGame(gNetGameInProgress, gNetGamePlayerLimit, gGamePrefs.playerLimit);
 
 	if (!gIsSelfRunningDemo && gNumLocalPlayers > 1)
 	{
@@ -979,6 +995,13 @@ static void CheckCheats(void)
 static int		gSmokeFramesRemaining;
 static uint64_t	gSmokeHostLingerDeadline;
 
+// --smoke-metrics: log the practice race's METRICS lines (race_metrics.h).
+static void ReportSmokeRaceMetrics(const char *why)
+{
+	if (gRaceMetricsEnabled)
+		ReportRaceMetrics(why, gTrackNum + 1, gPlayerInfo, gNumTotalPlayers, gNumCheckpoints);
+}
+
 static Boolean UpdateSmokeTestFrame(void)
 {
 	if (gSmokeFramesRemaining > 0)
@@ -992,6 +1015,7 @@ static Boolean UpdateSmokeTestFrame(void)
 						gTrackNum + 1, gNumRealPlayers, gNumTotalPlayers, gCommandLine.smokeTestFrames);
 			else
 				SDL_Log("SMOKE: practice track %d rendered %d frames", gTrackNum + 1, gCommandLine.smokeTestFrames);
+			ReportSmokeRaceMetrics("frame-cap");
 			gSmokeTestPassed = true;
 			return true;
 		}
@@ -1067,6 +1091,8 @@ static void PlayArea(void)
 	gNoCarControls = true;									// no control when starting light is going
 	gDisableHiccupTimer = true;
 	gIsInGame = true;
+	if (gRaceMetricsEnabled)
+		ResetRaceMetrics();
 
 		/******************/
 		/* MAIN GAME LOOP */
@@ -1123,6 +1149,16 @@ static void PlayArea(void)
 
 			StepGameSimulation(true);
 			terrainUpdatedThisFrame = true;
+
+			if (gRaceMetricsEnabled && !gNoCarControls)			// smoke soak: sample each step once racing starts
+				SampleRaceMetrics(gPlayerInfo, gNumTotalPlayers, gNumCheckpoints, gFramesPerSecondFrac);
+			if (gCommandLine.smokeUntilFinish && gTrackCompleted)	// smoke soak: stop as soon as player 1 finishes
+			{
+				SDL_Log("SMOKE: practice track %d player 1 finished after %u frames", gTrackNum + 1, (unsigned) gSimulationFrame);
+				ReportSmokeRaceMetrics("player1-finished");
+				gSmokeTestPassed = true;
+				break;
+			}
 		}
 		else if (gIsNetworkClient)
 		{
@@ -1278,6 +1314,17 @@ static void PlayArea(void)
 
 	gIsInGame = false;
 
+	const Boolean localRace = gGameMode == GAME_MODE_PRACTICE
+		|| (gGameMode == GAME_MODE_MULTIPLAYERRACE && !gNetGameInProgress);
+	if (gCommandLine.smokeTestFrames && localRace && !gSmokeTestPassed
+		&& gTrackCompleted && !gGameOver)											// smoke run: the race ended before the frame cap
+	{
+		SDL_Log("SMOKE: %s track %d race completed after %u frames",
+				gGameMode == GAME_MODE_PRACTICE ? "practice" : "local", gTrackNum + 1, (unsigned) gSimulationFrame);
+		ReportSmokeRaceMetrics("race-complete");
+		gSmokeTestPassed = true;
+	}
+
 	if (gSmokeHostLingerDeadline && gNetSequenceState == kNetSequence_OfflineEverybodyLeft)	// smoke host: every client left after its frames
 	{
 		SDL_Log("SMOKE: net race host saw all clients leave");
@@ -1382,7 +1429,8 @@ short				numPanes;
 
 			/* INIT SOME PRELIM STUFF */
 
-	if ((!gIsSelfRunningDemo) && (gGameMode != GAME_MODE_PRACTICE))				// dont reset random seed for SRD - we want variety!
+	if ((!gIsSelfRunningDemo) && (gGameMode != GAME_MODE_PRACTICE)				// dont reset random seed for SRD - we want variety!
+		&& (gNetGameInProgress || !gCommandLine.hasSmokeSeed))						// a local smoke run keeps its pinned --smoke-seed
 		InitMyRandomSeed();
 	InitControlBits();
 
@@ -1972,6 +2020,8 @@ void GameMain(void)
 	{
 		unsigned long someLong;
 		GetDateTime(&someLong);		// init random seed
+		if (gCommandLine.hasSmokeSeed)
+			someLong = gCommandLine.smokeSeed;		// smoke soak: pin the synced RNG
 		SetMyRandomSeed(someLong);
 	}
 
@@ -2002,6 +2052,7 @@ void GameMain(void)
 	{
 		gGameMode = GAME_MODE_PRACTICE;
 		gTrackNum = gCommandLine.bootToTrack - 1;
+		gPlayerLimitThisGame = DecidePlayerLimitThisGame(false, 0, gGamePrefs.playerLimit);	// a local game, not via PlayGame
 		if (gCommandLine.smokeLocalPlayers)						// smoke only: a split-screen multiplayer race
 		{
 			gGameMode = GAME_MODE_MULTIPLAYERRACE;
@@ -2014,6 +2065,9 @@ void GameMain(void)
 		{
 			gPlayerInfo[0].vehicleType = gCommandLine.car - 1;
 		}
+
+		gAutoPilot = gCommandLine.smokeAutopilot;			// smoke soak: the CPU AI drives player 1, who stays the human
+		gRaceMetricsEnabled = gCommandLine.smokeMetrics;
 
 		InitArea();
 		PlayArea();

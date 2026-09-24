@@ -158,6 +158,7 @@ static void TestPrefsMigration()
     PrefsType defaults;
     memset(&defaults, 0, sizeof(defaults));
     defaults.cpuFill = false;
+    defaults.playerLimit = PLAYER_LIMIT_ORIGINAL;
     PrefsType prefs;
     PrefsType reloaded;
     Boolean upgraded = true;
@@ -171,12 +172,15 @@ static void TestPrefsMigration()
     Check(LoadPrefsFile("prefs-test", &prefs, &defaults, &upgraded) == noErr && upgraded, "v1 prefs did not load");
     Check(memcmp(&prefs, &v1, sizeof(v1)) == 0, "the upgrade lost a v1 setting");
     Check(prefs.cpuFill == false, "upgraded prefs must keep CPU fill off");
+    Check(prefs.playerLimit == PLAYER_LIMIT_ORIGINAL, "upgraded prefs must keep the original 6 players");
 
     // The current layout round-trips unchanged.
     prefs.cpuFill = true;
+    prefs.playerLimit = MAX_PLAYERS;
     Check(SaveUserDataFile("prefs-test", PREFS_MAGIC, sizeof(prefs), (Ptr) &prefs) == noErr, "v2 save failed");
     Check(LoadPrefsFile("prefs-test", &reloaded, &defaults, &upgraded) == noErr && !upgraded, "v2 prefs did not load");
-    Check(memcmp(&reloaded, &prefs, sizeof(prefs)) == 0, "v2 prefs did not round-trip");
+    Check(memcmp(&reloaded, &prefs, sizeof(prefs)) == 0 && reloaded.playerLimit == MAX_PLAYERS,
+        "v2 prefs did not round-trip");
 
     // Short, mislabeled or mis-sized saves are rejected, not half-loaded.
     const std::string current = Blob(PREFS_MAGIC, prefs);
@@ -203,7 +207,8 @@ static void TestPrefsMigration()
     WriteFile("prefs-test", old);
     Check(LoadPrefsFile("prefs-test", &prefs, &defaults, &upgraded) == noErr && upgraded,
         "legacy v1 prefs did not load");
-    Check(memcmp(&prefs, &v1, sizeof(v1)) == 0 && prefs.cpuFill == false, "legacy v1 upgrade lost a setting");
+    Check(memcmp(&prefs, &v1, sizeof(v1)) == 0 && prefs.cpuFill == false
+        && prefs.playerLimit == PLAYER_LIMIT_ORIGINAL, "legacy v1 upgrade lost a setting");
     Check(writes == 1 && stored == old, "legacy v1 prefs were not persisted");
     Check(fs::exists(gFolder / "prefs-test"), "legacy prefs file was deleted");
 

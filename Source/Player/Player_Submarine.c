@@ -11,6 +11,7 @@
 
 #include "game.h"
 #include "finite_guard.h"
+#include "car_count_tuning.h"
 #include <SDL3/SDL_scancode.h>
 
 /****************************/
@@ -299,7 +300,8 @@ OGLVector3D		aimVec;
 	}
 	else
 	{
-		float	maxSpeed = gPlayerInfo[playerNum].carStats.maxSpeed + ((float)gPlayerInfo[playerNum].place * 100.0f);
+		float	placeStep = 100.0f * GetCatchUpPlaceScale(gNumTotalPlayers);		// subs in back get a slight edge
+		float	maxSpeed = gPlayerInfo[playerNum].carStats.maxSpeed + ((float)gPlayerInfo[playerNum].place * placeStep);
 
 		if (gPlayerInfo[playerNum].nitroTimer > 0.0f)			// see if give nitro boost
 			maxSpeed *= 1.4f;

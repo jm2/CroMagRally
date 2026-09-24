@@ -8,6 +8,7 @@
 
 #include "game.h"
 #include "mytraps.h"
+#include "startslots.h"
 
 
 /****************************/
@@ -209,55 +210,27 @@ int						total;
 /******************** FIND PLAYER START COORD ITEM *******************/
 //
 // Scans thru item list for item type #14 which is a teleport reciever / start coord,
+// then gives every player without one a slot from the start-slot table or the procedural
+// rule, and keeps humans at the back of a race grid (StartSlots_Place, StartSlots.c).
 //
 
 void FindPlayerStartCoordItems(void)
 {
-long					i;
-TerrainItemEntryType	*itemPtr;
-Boolean                 flags[MAX_PLAYERS];
+bool			isComputer[MAX_PLAYERS];
+StartSlotPose	poses[MAX_PLAYERS];
 
-	for (i = 0; i < MAX_PLAYERS; i++)
-		flags[i] = false;
+	for (int i = 0; i < MAX_PLAYERS; i++)
+		isComputer[i] = gPlayerInfo[i].isComputer;
 
+	if (StartSlots_Place(*gMasterItemList, gNumTerrainItems, gGameMode, (int) gTerrainUnitWidth, (int) gTerrainUnitDepth,
+						isComputer, gNumTotalPlayers, MAX_PLAYERS, poses) >= 0)
+		DoFatalAlert("FindPlayerStartCoordItems:  duplicate start item for player #n");
 
-	itemPtr = *gMasterItemList; 												// get pointer to data inside the LOCKED handle
-
-				/* SCAN FOR "START COORD" ITEM */
-
-	for (i= 0; i < gNumTerrainItems; i++)
+	for (int i = 0; i < MAX_PLAYERS; i++)
 	{
-		if (itemPtr[i].type == MAP_ITEM_MYSTARTCOORD)						// see if it's a MyStartCoord item
-		{
-			short	p;
-
-					/* CHECK FOR BIT INFO */
-
-			if (gGameMode ==GAME_MODE_CAPTUREFLAG)
-			{
-				if (!(itemPtr[i].parm[3] & 1))								// only check ones with bit set
-					continue;
-			}
-			else
-			{
-				if (itemPtr[i].parm[3] & 1)									// skip those with bit set
-					continue;
-			}
-
-
-			p = itemPtr[i].parm[0];											// player # is in parm 0
-
-			if (p >= MAX_PLAYERS)											// skip illegal player #'s
-				continue;
-
-			gPlayerInfo[p].coord.x = gPlayerInfo[p].startX = itemPtr[i].x;
-			gPlayerInfo[p].coord.z = gPlayerInfo[p].startZ = itemPtr[i].y;
-			gPlayerInfo[p].startRotY = PI2 * ((float)itemPtr[i].parm[1] * (1.0f/16.0f));	// calc starting rotation aim
-
-			if (flags[p])                      								// if we already got a coord for this player then err
-                DoFatalAlert("FindPlayerStartCoordItems:  duplicate start item for player #n");
-	        flags[p] = true;
-		}
+		gPlayerInfo[i].coord.x = gPlayerInfo[i].startX = poses[i].x;
+		gPlayerInfo[i].coord.z = gPlayerInfo[i].startZ = poses[i].z;
+		gPlayerInfo[i].startRotY = poses[i].rotY;
 	}
 }
 

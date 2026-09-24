@@ -10,14 +10,18 @@
 /****************************/
 
 #include "game.h"
+#include "cpu_driver.h"
 #include "cpu_fill.h"
 #include "vehicle_picker.h"
+#include "driver_looks.h"
 
 /****************************/
 /*    PROTOTYPES            */
 /****************************/
 
 static uint16_t SyncedCPUVehicleRandom(void* context, int cpuIndex, uint16_t min, uint16_t max);
+static void GetPlayerDriverLooks(DriverLook looks[MAX_PLAYERS]);
+static void SetPlayerDriverLooks(const DriverLook looks[MAX_PLAYERS]);
 
 
 /****************************/
@@ -60,9 +64,11 @@ short	i;
 
 	for (i = 0; i < MAX_PLAYERS; i++)
 	{
+		const DriverLook defaultLook = GetDefaultDriverLook(i);
+
 		gPlayerInfo[i].objNode			= nil;
 
-		gPlayerInfo[i].sex 				= i&1;			// altername male/female
+		gPlayerInfo[i].sex 				= defaultLook.sex;	// alternate male/female, swapped in each further wave of 6
 
 		gPlayerInfo[i].startX 			= 0;
 		gPlayerInfo[i].startZ 			= 0;
@@ -91,7 +97,7 @@ short	i;
 		}
 		else
 		{
-			gPlayerInfo[i].skin = i % NUM_CAVEMAN_SKINS;
+			gPlayerInfo[i].skin = defaultLook.skin;
 		}
 
 
@@ -145,7 +151,9 @@ short	i;
 			// races only have them with CPU fill; battle modes never do.
 			//
 
-	gNumTotalPlayers = CountPlayersInGame(gGameMode, gNumRealPlayers, gCPUFillThisRace);
+	gNumTotalPlayers = CountPlayersInGame(gGameMode, gNumRealPlayers, gCPUFillThisRace, gPlayerLimitThisGame);
+	if (gCommandLine.smokeCars && (gGameMode == GAME_MODE_PRACTICE || gGameMode == GAME_MODE_TOURNAMENT))
+		gNumTotalPlayers = gCommandLine.smokeCars;			// smoke soak: --smoke-cars sets the field size
 
 
 	SafeDisposePtr((Ptr) backup);
@@ -206,17 +214,24 @@ SharedCPUVehicleSeed	sharedCPUVehicleSeed;
 	}
 
 
-		/* KEEP CPU DRIVERS FROM LOOKING LIKE THE HUMANS */
+		/* DONT DRESS A CPU LIKE A HUMAN OR ANOTHER CPU */
 		//
-		// Humans picked their looks after InitPlayerInfo_Game dealt them out. A network
-		// bot keeps the look its peer picked; network fill CPUs are dressed from what every
-		// peer shares, so they look the same on every screen.
+		// Humans (including network players who have since become bots) keep the look they
+		// chose. This reads only state every network peer shares, so they all dress the CPUs
+		// alike. Capture the Flag outfits are team colours, so they repeat on purpose.
 		//
 
-	if (!gNetGameInProgress)
-		MakeCPULooksDistinct(gPlayerInfo, gNumTotalPlayers);
-	else if (gCPUFillThisRace)
+	if (gNetGameInProgress && gCPUFillThisRace)						// start every peer's fill CPUs from the same looks
 		DressNetworkFillCPUs(gPlayerInfo, gNumRealPlayers, gNumTotalPlayers);
+
+	if (gGameMode != GAME_MODE_CAPTUREFLAG)
+	{
+		DriverLook	looks[MAX_PLAYERS];
+
+		GetPlayerDriverLooks(looks);
+		ResolveCPUDriverLooks(looks, gNumTotalPlayers, gNumRealPlayers);
+		SetPlayerDriverLooks(looks);
+	}
 
 
 			/* SET SOME GLOBALS */
@@ -368,6 +383,13 @@ SharedCPUVehicleSeed	sharedCPUVehicleSeed;
 		gPlayerInfo[i].oldPosition.y	= 0;
 		gPlayerInfo[i].oldPosition.z	= 0;
 		gPlayerInfo[i].reverseTimer		= 0;
+		gPlayerInfo[i].rescueTimer		= 0;
+		gPlayerInfo[i].rescueProgress	= -1;					// lap -1, checkpoint N-1 (CPURaceProgress)
+		gPlayerInfo[i].rescueBestDist	= CPU_RESCUE_NO_DIST;
+		gPlayerInfo[i].rescueX			= gPlayerInfo[i].startX;		// until it crosses a checkpoint: its grid slot
+		gPlayerInfo[i].rescueZ			= gPlayerInfo[i].startZ;
+		gPlayerInfo[i].rescueDirX		= -sinf(gPlayerInfo[i].startRotY);
+		gPlayerInfo[i].rescueDirZ		= -cosf(gPlayerInfo[i].startRotY);
 		gPlayerInfo[i].attackTimer		= 2;					// dont attack for the first few seconds
 		gPlayerInfo[i].targetedPlayer	= -1;					// no players targeted yet
 		gPlayerInfo[i].targetingTimer	= 0;
@@ -408,6 +430,94 @@ static uint16_t SyncedCPUVehicleRandom(void* context, int cpuIndex, uint16_t min
 	(void) cpuIndex;
 	return RandomRange(min, max);
 }
+
+
+/******************** GET/SET PLAYER DRIVER LOOKS ***********************/
+
+static void GetPlayerDriverLooks(DriverLook looks[MAX_PLAYERS])
+{
+	for (int i = 0; i < MAX_PLAYERS; i++)
+	{
+		looks[i].sex	= gPlayerInfo[i].sex;
+		looks[i].skin	= gPlayerInfo[i].skin;
+	}
+}
+
+static void SetPlayerDriverLooks(const DriverLook looks[MAX_PLAYERS])
+{
+	for (int i = 0; i < MAX_PLAYERS; i++)
+	{
+		gPlayerInfo[i].sex	= looks[i].sex;
+		gPlayerInfo[i].skin	= looks[i].skin;
+	}
+}
+
+
+/******************** GET PLAYER OUTFIT RANK ***********************/
+//
+// How many lower-numbered players wear playerNum's outfit (see GetDriverOutfitRank).
+//
+
+int GetPlayerOutfitRank(short playerNum)
+{
+DriverLook	looks[MAX_PLAYERS];
+
+	GAME_ASSERT(playerNum >= 0 && playerNum < MAX_PLAYERS);
+
+	GetPlayerDriverLooks(looks);
+	return GetDriverOutfitRank(looks, playerNum);
+}
+
+
+/******************** NUM PLAYERS TO DRESS ***********************/
+//
+// Character select swaps looks only among the cars in this game (InitPlayerInfo_Game has
+// counted them), so a slot the race won't use never holds on to an outfit.
+//
+
+static int NumPlayersToDress(short whichPlayer)
+{
+	return SDL_clamp((int) gNumTotalPlayers, whichPlayer + 1, MAX_PLAYERS);
+}
+
+
+/******************** CYCLE PLAYER OUTFIT ***********************/
+//
+// Character select: steps whichPlayer to the next outfit. Players in playersDone keep their
+// looks; with dressOthers, whoever wore the new look takes the old one so drivers who looked
+// different still do. Returns the new outfit.
+//
+
+short CyclePlayerOutfit(short whichPlayer, int delta, uint32_t playersDone, Boolean dressOthers)
+{
+DriverLook	looks[MAX_PLAYERS];
+
+	GAME_ASSERT(whichPlayer >= 0 && whichPlayer < MAX_PLAYERS);
+
+	GetPlayerDriverLooks(looks);
+	const short newSkin = CycleDriverOutfit(looks, NumPlayersToDress(whichPlayer), whichPlayer, delta, playersDone, dressOthers);
+	SetPlayerDriverLooks(looks);
+
+	return newSkin;
+}
+
+
+/******************** SET PLAYER BODY ***********************/
+//
+// Character select: the body whichPlayer chose, with the same rules as CyclePlayerOutfit.
+//
+
+void SetPlayerBody(short whichPlayer, short sex, uint32_t playersDone, Boolean dressOthers)
+{
+DriverLook	looks[MAX_PLAYERS];
+
+	GAME_ASSERT(whichPlayer >= 0 && whichPlayer < MAX_PLAYERS);
+
+	GetPlayerDriverLooks(looks);
+	ChangeDriverBody(looks, NumPlayersToDress(whichPlayer), whichPlayer, sex, playersDone, dressOthers);
+	SetPlayerDriverLooks(looks);
+}
+
 
 #pragma mark -
 

@@ -102,6 +102,12 @@ jobs:
         if: matrix.platform.name == 'Linux/GCC'
         run: python3 Tests/StartupSmokeTests.py build-sanitize/CroMagRally
 
+      # Six real game instances on loopback (host + five clients, direct join): the only
+      # check that exercises HUD and network state for high player numbers end to end.
+      - name: Race six LAN players with sanitizers
+        if: matrix.platform.name == 'Linux/GCC'
+        run: python3 Tests/NetworkSmokeTests.py build-sanitize/CroMagRally 6 --frames 300
+
       - name: Reject malformed playfield and skeleton fixtures with sanitizers
         if: matrix.platform.name == 'Linux/GCC'
         run: python3 Tests/MalformedAssetTests.py build-sanitize/CroMagRally

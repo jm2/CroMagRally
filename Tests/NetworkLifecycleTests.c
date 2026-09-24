@@ -303,12 +303,53 @@ static void Discovery(void)
     NSpSearch_Dispose(search);
 }
 
+// A host in 6-player mode (the 6/12 players setting) seats the host and five clients,
+// then turns the next join away exactly like a full 12-player lobby. The build's
+// capacity is unchanged.
+static void CappedLobby(void)
+{
+    NSpGame* host = NSpGame_Host();
+    CHECK(host);
+    CHECK(NSpGame_SetMaxPlayers(host, 1) != kNSpRC_OK && NSpGame_SetMaxPlayers(host, MAX_CLIENTS + 1) != kNSpRC_OK);
+    CHECK(NSpGame_SetMaxPlayers(host, PLAYER_LIMIT_ORIGINAL) == kNSpRC_OK);
+    CHECK(NSpGame_GetMaxPlayers() == MAX_CLIENTS);
+    struct sockaddr_in address = Address(host->hostListenSocket);
+
+    int seated[PLAYER_LIMIT_ORIGINAL - 1];
+    for (int i = 0; i < PLAYER_LIMIT_ORIGINAL - 1; i++)
+    {
+        seated[i] = socket(AF_INET, SOCK_STREAM, 0);
+        CHECK(connect(seated[i], (struct sockaddr*)&address, sizeof(address)) == 0);
+        CHECK(AcceptClient(host) == i + 1);
+    }
+
+    for (int attempt = 0; attempt < 2; attempt++)                  // every later join, not just the first
+    {
+        int overflow = socket(AF_INET, SOCK_STREAM, 0);
+        CHECK(connect(overflow, (struct sockaddr*)&address, sizeof(address)) == 0);
+        CHECK(AcceptClient(host) == -1);
+        NSpJoinDeniedMessage denied = {0};
+        WaitReadable(overflow);
+        CHECK(recv(overflow, &denied, sizeof(denied), MSG_WAITALL) == sizeof(denied));
+        CHECK(denied.header.what == kNSpJoinDenied && strcmp(denied.reason, "THE GAME IS FULL.") == 0);
+        CloseSocket(&overflow);
+    }
+    CHECK(NSpGame_GetNumRefusedClients(host) == 2);
+    for (int i = PLAYER_LIMIT_ORIGINAL; i < MAX_CLIENTS; i++)
+        CHECK(host->players[i].state == kNSpPlayerState_Offline);
+
+    for (int i = 0; i < PLAYER_LIMIT_ORIGINAL - 1; i++)
+        CloseSocket(&seated[i]);
+    NSpGame_Dispose(host, 0);
+}
+
 int main(void)
 {
     setvbuf(stdout, NULL, _IONBF, 0); // retain transport diagnostics if CTest times out
     gNetPort = 0;
     Session();
     Session(); // immediately rehost on the same port in the same process
+    CappedLobby();
     Discovery();
     puts("Loopback lifecycle tests passed");
     return 0;

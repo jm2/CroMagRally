@@ -24,10 +24,21 @@ Boolean CPUFillAppliesToMode(int gameMode);
 // pref) on every peer, so a client's own pref never changes which cars race.
 Boolean DecideCPUFillThisRace(int gameMode, Boolean netGame, Boolean hostConfigCPUFill, Boolean prefCPUFill);
 
+// The 6/12 players setting for one game: the most cars it races. A local game takes
+// this machine's pref. A network game takes the host's limit from its game config
+// (the host sends its own pref) on every peer, so a client's own pref never applies.
+// Anything but a supported limit (IS_SUPPORTED_PLAYER_LIMIT) gives the original 6.
+Byte DecidePlayerLimitThisGame(Boolean netGame, int hostConfigLimit, int prefLimit);
+
+// The smallest supported player limit that seats numPlayers (smoke hosts): the
+// original 6, else MAX_PLAYERS.
+Byte SmallestPlayerLimitFor(int numPlayers);
+
 // How many cars race in a game. Humans take slots 0..numRealPlayers-1 and CPU cars
-// the rest. Single-player races use every slot; multiplayer races only with CPU fill
-// (Pangea's had none); battle modes never seat CPU cars.
-short CountPlayersInGame(int gameMode, short numRealPlayers, Boolean cpuFill);
+// the rest, up to playerLimit (never fewer cars than humans). Single-player races use every slot;
+// multiplayer races only with CPU fill (Pangea's had none); battle modes never seat
+// CPU cars.
+short CountPlayersInGame(int gameMode, short numRealPlayers, Boolean cpuFill, short playerLimit);
 
 // Keeps CPU drivers from looking like the humans or each other, while looks (sex and
 // skin) are left. Humans keep what they picked, and so does every CPU whose look is
@@ -36,11 +47,10 @@ short CountPlayersInGame(int gameMode, short numRealPlayers, Boolean cpuFill);
 // leftover CPUs keep theirs. numPlayers must not exceed 32.
 void MakeCPULooksDistinct(PlayerInfoType players[], short numPlayers);
 
-// Network CPU fill: dresses the CPUs in slots numHumans..numPlayers-1 alike on every peer.
-// Each starts from the look InitPlayerInfo_Game dealt its slot, whatever this machine's
-// character screen swapped into it. Then MakeCPULooksDistinct's rule applies, with every
-// human slot keeping its look (a player who has since left included, bot or not).
-// numPlayers must not exceed 32.
+// Network CPU fill: puts the CPUs in slots numHumans..numPlayers-1 back in the look
+// InitPlayerInfo_Game dealt their slots (GetDefaultDriverLook), whatever this machine's
+// character screen swapped into them, so every peer starts alike. Human slots keep their
+// looks. InitPlayersAtStartOfLevel then runs ResolveCPUDriverLooks to keep drivers apart.
 void DressNetworkFillCPUs(PlayerInfoType players[], short numHumans, short numPlayers);
 
 // finisher just completed a multiplayer race. Returns true if that ends the race,

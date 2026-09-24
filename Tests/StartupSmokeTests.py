@@ -11,7 +11,7 @@ import tempfile
 
 
 def run(binary: Path, args: list[str], marker: str | None = None,
-        rejection: str | None = None) -> None:
+        rejection: str | None = None) -> str:
     with tempfile.TemporaryDirectory(prefix="cmr-smoke-", dir=os.environ.get("TMPDIR") or "/var/tmp") as scratch:
         env = os.environ.copy()
         env.update(
@@ -40,6 +40,64 @@ def run(binary: Path, args: list[str], marker: str | None = None,
             raise AssertionError(f"Startup failed for {args} (exit {result.returncode}):\n{output}")
         print(f"PASS: {' '.join(args)}", flush=True)
         return output
+
+
+def metrics_lines(output: str) -> list[dict[str, str]]:
+    """The METRICS lines of a --smoke-metrics run (Source/Headers/race_metrics.h) as key/value dicts."""
+    lines = []
+    for match in re.finditer(r"METRICS (race|car) (.*)", output):
+        fields = dict(re.findall(r"(\w+)=(\S+)", match.group(2)))
+        fields["kind"] = match.group(1)
+        lines.append(fields)
+    return lines
+
+
+def check_soak_flags(binary: Path, capacity: int) -> None:
+    """Practice soak flags (measurement races) are smoke-only and validated strictly."""
+    practice = ["--track", "1", "--smoke-test-frames", "3"]
+    for flag, value in (("--smoke-autopilot", None), ("--smoke-cars", "2"), ("--smoke-fixed-fps", "60"),
+                        ("--smoke-seed", "1"), ("--smoke-until-finish", None), ("--smoke-metrics", None)):
+        option = [flag] if value is None else [flag, value]
+        message = f"{flag} requires --smoke-test-frames and --track, without --host or --join"
+        for args in (["--track", "1"], ["--host", *practice],
+                     ["--join-address", "127.0.0.1", "--smoke-test-frames", "3"]):
+            run(binary, [*args, *option], rejection=message)
+
+    # Every LAN seat needs a car; the upper limit is MAX_PLAYERS.
+    output = run(binary, [*practice, "--smoke-cars", "0"], rejection="Invalid --smoke-cars value '0' (expected 1..")
+    max_cars = int(re.search(r"Invalid --smoke-cars value '0' \(expected 1\.\.(\d+)\)", output).group(1))
+    if max_cars < capacity:
+        raise AssertionError(f"--smoke-cars allows {max_cars} cars but a LAN game seats {capacity}")
+    for flag, values in (("--smoke-cars", (str(max_cars + 1), "-1", "garbage")),
+                         ("--smoke-fixed-fps", ("0", "8", "1001", "60fps")),   # NET_MIN_FPS..MAX_GAME_FPS
+                         ("--smoke-seed", ("-1", "2147483648", "0x10", ""))):
+        for value in values:
+            run(binary, [*practice, flag, value], rejection=f"Invalid {flag} value '{value}'")
+    for flag in ("--smoke-cars", "--smoke-fixed-fps", "--smoke-seed"):
+        run(binary, [*practice, flag], rejection=f"{flag} requires a value")
+
+    # Only soak runs may go past the CI frame limit.
+    run(binary, ["--track", "1", "--smoke-test-frames", "36001"],
+        rejection="Invalid --smoke-test-frames value '36001' (expected 1..36000)")
+    run(binary, ["--track", "1", "--smoke-test-frames", "100001", "--smoke-metrics"],
+        rejection="Invalid --smoke-test-frames value '100001' (expected 1..100000)")
+    run(binary, ["--track", "1", "--smoke-test-frames"], rejection="--smoke-test-frames requires a value")
+
+    # A short soak: 100 frames at a fixed 10 Hz leave a few seconds of racing after the
+    # starting light. The AI drives player 1 over the start line, and a pinned seed and
+    # timestep make the metrics repeat exactly.
+    soak = ["--track", "1", "--no-vsync", "--smoke-test-frames", "100", "--smoke-fixed-fps", "10",
+            "--smoke-seed", "7", "--smoke-autopilot", "--smoke-cars", "2", "--smoke-metrics",
+            "--smoke-until-finish"]
+    runs = [metrics_lines(run(binary, soak, "SMOKE: practice track 1 rendered 100 frames")) for _ in range(2)]
+    race, *cars = runs[0]
+    if (race["kind"] != "race" or (race["track"], race["cars"], race["why"]) != ("1", "2", "frame-cap")
+            or not float(race["racetime"]) > 0 or [car["kind"] for car in cars] != ["car", "car"]
+            or [(car["p"], car["cpu"]) for car in cars] != [("0", "0"), ("1", "1")]
+            or float(cars[0]["lap0"]) < 0):
+        raise AssertionError(f"Unexpected soak metrics: {runs[0]}")
+    if runs[1] != runs[0]:
+        raise AssertionError(f"Soak metrics differ between identical runs:\n{runs[0]}\n{runs[1]}")
 
 
 def main() -> None:
@@ -106,9 +164,12 @@ def main() -> None:
             (["--track", "1", "--smoke-test-frames", "3", "--smoke-net-players", "2"],
              "--smoke-net-players requires --host and --smoke-test-frames"),
             ([*host, "--smoke-net-refusals", "1"], "--smoke-net-refusals requires --smoke-net-players"),
+            # A full lobby holds a supported player limit: 6 (original) or the capacity.
             ([*host, "--smoke-net-players", str(capacity - 1), "--smoke-net-refusals", "1"],
-             f"--smoke-net-refusals requires --smoke-net-players {capacity}")):
+             "--smoke-net-refusals requires --smoke-net-players 6")):
         run(binary, args, rejection=message)
+
+    check_soak_flags(binary, capacity)
 
     # An unattended client that cannot reach a host ends cleanly, with a nonzero exit.
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:

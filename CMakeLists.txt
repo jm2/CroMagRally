@@ -596,6 +596,8 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 		endif()
 		if(MSVC)
 			target_compile_definitions(${target} PRIVATE WIN32_LEAN_AND_MEAN NOGDI NOUSER)
+		else()
+			target_compile_options(${target} PRIVATE -Wno-multichar)	# Pomme's four-char codes, as for the game
 		endif()
 		if(SANITIZE)
 			target_compile_options(${target} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
@@ -612,6 +614,8 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 	cmr_add_gameplay_test(CroMagRallyPathTests paths Tests/PathTests.c Source/Terrain/Paths.c)
 	cmr_add_gameplay_test(CroMagRallyVehiclePickerTests vehicle_picker Tests/VehiclePickerTests.c
 		Source/Player/VehiclePicker.c Source/System/DeterministicMath.c)
+	cmr_add_gameplay_test(CroMagRallyDriverLooksTests driver_looks Tests/DriverLooksTests.c
+		Source/Player/DriverLooks.c)
 	cmr_add_gameplay_test(CroMagRallyPlayerLimitTests player_limits Tests/PlayerLimitTests.c
 		Source/Terrain/TerrainResidency.c Source/Screens/InfobarPlace.c Source/System/CollisionList.c)
 	if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -620,10 +624,21 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 			Source/Player/CPUFill.c)
 		target_compile_options(CroMagRallyRacePlaceTests PRIVATE -ffunction-sections -fdata-sections)
 		target_link_options(CroMagRallyRacePlaceTests PRIVATE -Wl,--gc-sections)
+		# Likewise only snowfall and its particle groups from Effects.c.
+		cmr_add_gameplay_test(CroMagRallySnowTests snow Tests/SnowTests.c Source/3D/Effects.c
+			Source/System/LocalPlayers.c)
+		target_compile_options(CroMagRallySnowTests PRIVATE -ffunction-sections -fdata-sections)
+		target_link_options(CroMagRallySnowTests PRIVATE -Wl,--gc-sections)
 	endif()
 	cmr_add_gameplay_test(CroMagRallyCheckpointTests checkpoints Tests/CheckpointTests.c Source/Terrain/CheckpointProgress.c)
 	cmr_add_gameplay_test(CroMagRallyCPUDriverTests cpu_driver Tests/CPUDriverTests.c Source/Player/CPUDriver.c)
-	cmr_add_gameplay_test(CroMagRallyCPUFillTests cpu_fill Tests/CPUFillTests.c Source/Player/CPUFill.c)
+	cmr_add_gameplay_test(CroMagRallyCarCountTuningTests car_count_tuning Tests/CarCountTuningTests.c
+		Source/Player/CarCountTuning.c)
+	cmr_add_gameplay_test(CroMagRallyStartSlotTests start_slots Tests/StartSlotTests.c
+		Source/Terrain/StartSlots.c Source/Terrain/StartSlotTable.c)
+	cmr_add_gameplay_test(CroMagRallyRaceMetricsTests race_metrics Tests/RaceMetricsTests.c Source/System/RaceMetrics.c)
+	cmr_add_gameplay_test(CroMagRallyCPUFillTests cpu_fill Tests/CPUFillTests.c Source/Player/CPUFill.c
+		Source/Player/DriverLooks.c)
 	add_executable(CroMagRallyValidationTests
 		Tests/ValidationTests.c
 		Source/Network/NetValidation.c
@@ -707,7 +722,7 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 		if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 			add_executable(CroMagRallyNetworkReadinessTests Tests/NetworkReadinessTests.c
 				Source/Network/NetValidation.c Source/System/TextUtils.c
-				Source/Player/Player.c Source/Player/VehiclePicker.c Source/Player/CPUFill.c Source/System/Main.c
+				Source/Player/Player.c Source/Player/VehiclePicker.c Source/Player/DriverLooks.c Source/Player/CarCountTuning.c Source/Player/CPUFill.c Source/System/Main.c
 				Source/System/DeterministicMath.c)
 			target_include_directories(CroMagRallyNetworkReadinessTests PRIVATE ${GAME_GENERATED_INCLUDE_DIR} ${GAME_SRCDIR}/Headers)
 			target_link_libraries(CroMagRallyNetworkReadinessTests PRIVATE Pomme SDL3::SDL3)
@@ -735,6 +750,11 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 		$<TARGET_FILE:CroMagRallyAssetExtractionTests> ${CMAKE_COMMAND})
 	add_test(NAME release_workflow COMMAND ${Python3_EXECUTABLE}
 		${CMAKE_SOURCE_DIR}/Tests/ReleaseWorkflowTests.py ${CMAKE_SOURCE_DIR})
+	if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+		# The race-metrics soak scripts target Linux (offscreen video, bash, coreutils timeout).
+		add_test(NAME race_metrics_tools COMMAND ${Python3_EXECUTABLE}
+			${CMAKE_SOURCE_DIR}/Tests/RaceMetricsToolsTests.py ${CMAKE_SOURCE_DIR})
+	endif()
 	add_executable(CroMagRallyMigrationTests Tests/UserDataMigrationTests.cpp Source/System/UserDataFiles.c)
 	target_include_directories(CroMagRallyMigrationTests PRIVATE
 		${GAME_GENERATED_INCLUDE_DIR} ${GAME_SRCDIR}/Headers ${GAME_SRCDIR}/System)
@@ -771,6 +791,10 @@ if(BUILD_TESTING AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NO
 	add_test(
 		NAME localization_data
 		COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/Tests/LocalizationDataTests.py ${CMAKE_SOURCE_DIR})
+	add_test(
+		NAME start_slot_table
+		COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/Tests/StartSlotTableTests.py ${CMAKE_SOURCE_DIR})
+	set_tests_properties(start_slot_table PROPERTIES TIMEOUT 600)
 	add_test(
 		NAME synced_random
 		COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/Tests/SyncedRandomTests.py ${CMAKE_SOURCE_DIR})

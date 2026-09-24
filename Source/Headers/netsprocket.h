@@ -20,7 +20,7 @@ typedef int sockfd_t;
 #define kNSpPlayerNameLength 32
 #define NSP_HANDSHAKE_TIMEOUT_MS 10000u
 #define NSP_LOBBY_EXPIRY_MS 5000u
-#define kNSpMaxPayloadLength 512			// CMR7: bumped 256->512 to fit the wider host control msg (must change with the 4CC)
+#define kNSpMaxPayloadLength 1024			// 512->1024 for twelve players: the host control msg is 628 B at MAX_PLAYERS 12
 #define kNSpMaxMessageLength (kNSpMaxPayloadLength + sizeof(NSpMessageHeader))
 
 #define kNSpCMRProtocol4CC 'CMR8'			// CMR8 (unreleased) requires initialized readiness fields; reject older peers at handshake
@@ -166,7 +166,8 @@ NSpPlayerID NSpGame_AcceptNewClient(NSpGameReference gameRef);
 int NSpGame_StopAcceptingNewClients(NSpGameReference gameRef);
 int NSpGame_AckJoinRequest(NSpGameReference gameRef, NSpMessageHeader* inMessage);
 int NSpGame_GetNumActivePlayers(NSpGameReference gameRef);
-int NSpGame_GetMaxPlayers(void);										// host + clients one game can seat
+int NSpGame_GetMaxPlayers(void);										// host + clients one game can seat (this build's MAX_CLIENTS)
+int NSpGame_SetMaxPlayers(NSpGameReference gameRef, int maxPlayers);	// host: seat at most this many (2..MAX_CLIENTS); later joins are refused as full
 int NSpGame_GetNumRefusedClients(NSpGameReference gameRef);				// host: joins refused because the game was full
 uint32_t NSpGame_GetActivePlayersIDMask(NSpGameReference gameRef);
 NSpPlayerID NSpGame_GetNthActivePlayerID(NSpGameReference gameRef, int n);

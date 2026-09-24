@@ -13,6 +13,8 @@
 #include "network.h"
 #include "cpu_driver.h"
 #include "finite_guard.h"
+#include "car_count_tuning.h"
+#include "race_metrics.h"
 
 /****************************/
 /*    PROTOTYPES            */
@@ -26,6 +28,7 @@ static void RotateCar(ObjNode *theNode);
 static void DoCarMotion(ObjNode *theNode);
 static Boolean DoVehicleCollisionDetect(ObjNode *vehicle);
 static void DoCPUControl_Car(ObjNode *theNode);
+static void RescueStrandedCPUCar(ObjNode *theNode, float dt);
 static void DoCPUWeaponLogic_Standard(ObjNode *carObj, short playerNum, short powType);
 static void DoCPUPOWLogic_Nitro(ObjNode *carObj, short playerNum);
 static void DoPlayerControl_Car(ObjNode *theNode);
@@ -541,6 +544,69 @@ const VehicleMotionState	startState = GetVehicleMotionState(theNode, gPlayerInfo
 	gFramesPerSecondFrac = oldFPSFrac;
 
 	KeepCarMotionFinite(theNode, &startState);
+	RescueStrandedCPUCar(theNode, oldFPSFrac);
+}
+
+
+/******************** RESCUE STRANDED CPU CAR ***********************/
+//
+// See CPU_RESCUE_TIME (cpu_driver.h). Once per frame, after the car's move, for cars
+// the AI drives, in races only. The car moves with its old position and collision
+// boxes, so the move itself never crosses a checkpoint or sweeps through anything.
+// It reads only simulation state, so every network peer rescues the same bots alike.
+//
+
+static void RescueStrandedCPUCar(ObjNode *theNode, float dt)
+{
+short			p = theNode->PlayerNum;
+PlayerInfoType	*pinfo = &gPlayerInfo[p];
+OGLPoint3D		others[MAX_PLAYERS];
+int				numOthers = 0;
+
+	if (!pinfo->isComputer && !gAutoPilot)								// humans drive themselves
+		return;
+
+	const Boolean raceMode = gGameMode == GAME_MODE_PRACTICE || gGameMode == GAME_MODE_TOURNAMENT
+		|| gGameMode == GAME_MODE_MULTIPLAYERRACE;
+	const Boolean racing = raceMode && gNumCheckpoints > 0 && !gNoCarControls && !pinfo->raceComplete;
+	const int progress = CPURaceProgress(pinfo->lapNum, pinfo->checkpointNum, gNumCheckpoints);
+
+	if (!UpdateCPURescueTimer(pinfo, progress, pinfo->distToNextCheckpoint, racing, dt))
+		return;
+
+	for (int i = 0; i < gNumTotalPlayers; i++)
+	{
+		if (i != p && gPlayerInfo[i].objNode)
+			others[numOthers++] = gPlayerInfo[i].objNode->Coord;
+	}
+
+	CPURescueSpot spot;
+	if (!FindCPURescueSpot(pinfo, others, numOthers, &spot))
+	{
+		pinfo->rescueTimer = CPU_RESCUE_TIME;							// every spot is taken: try again next frame
+		return;
+	}
+
+	SDL_Log("CPU rescue: player %d from (%.0f, %.0f, %.0f) back to checkpoint %d, lap %d",
+			p, theNode->Coord.x, theNode->Coord.y, theNode->Coord.z, pinfo->checkpointNum, pinfo->lapNum);
+
+	gCoord.x = spot.x;
+	gCoord.z = spot.z;
+	gCoord.y = GetTerrainY(spot.x, spot.z) + 100;						// as InitPlayer_Car places a new car
+	gDelta.x = gDelta.y = gDelta.z = 0;
+	theNode->Rot.x = theNode->Rot.z = 0;
+	theNode->Rot.y = spot.rotY;
+	theNode->DeltaRot.x = theNode->DeltaRot.y = theNode->DeltaRot.z = 0;
+	UpdateObject(theNode);
+	KeepOldCollisionBoxes(theNode);
+
+	theNode->Speed2D = theNode->Speed3D = 0;
+	pinfo->coord = gCoord;
+	pinfo->rescueBestDist = CPU_RESCUE_NO_DIST;									// measure progress from here
+	pinfo->reverseTimer = 0;											// start the stuck check afresh
+	pinfo->oldPosition = gCoord;
+	pinfo->oldPositionTimer = POSITION_TIMER;
+	AlignWheelsAndHeadOnCar(theNode);
 }
 
 
@@ -596,13 +662,14 @@ CarStatsType	*info;
 uint16_t		tileAttribs;
 float		thrust,dx,dz;
 PlayerInfoType	*pinfo;
-float		cpuTweakFactor;
+float		cpuTweakFactor, placeScale;
 Boolean		onWater;
 
 	playerNum = theNode->PlayerNum;
 	info = &gPlayerInfo[playerNum].carStats;
 	pinfo = &gPlayerInfo[playerNum];
 	onWater = pinfo->onWater;
+	placeScale = GetCatchUpPlaceScale(gNumTotalPlayers);					// per-place edges below were tuned for 6 cars
 
 			/* GET CPU TWEAK FACTOR */
 
@@ -613,7 +680,7 @@ Boolean		onWater;
 		if (pinfo->isComputer)												// give cars in back a slight edge
 		{
 			if (pinfo->place > gWorstHumanPlace)							// only give CPU an edge if its behind the worst human
-				cpuTweakFactor = 1.0f + (float)(pinfo->place - gWorstHumanPlace) * 0.3f;
+				cpuTweakFactor = 1.0f + (float)(pinfo->place - gWorstHumanPlace) * (0.3f * placeScale);
 		}
 	}
 
@@ -827,10 +894,10 @@ Boolean		onWater;
 		if (pinfo->isComputer)
 		{
 			if (pinfo->place > gWorstHumanPlace)							// only give CPU an edge if its behind the worst human
-				maxSpeed += (float)(pinfo->place - gWorstHumanPlace) * PLACE_SPEED_TWEAK_CPU;
+				maxSpeed += (float)(pinfo->place - gWorstHumanPlace) * (PLACE_SPEED_TWEAK_CPU * placeScale);
 		}
 		else
-			maxSpeed += (float)(pinfo->place) * PLACE_SPEED_TWEAK;				// give human cars in back a slight edge
+			maxSpeed += (float)(pinfo->place) * (PLACE_SPEED_TWEAK * placeScale);	// give human cars in back a slight edge
 	}
 
 	if (pinfo->flamingTimer > 0.0f)											// half speed if flaming
@@ -1991,6 +2058,8 @@ short		p2 = car2->PlayerNum;
 	relD1.y = gDelta.y - car2->Delta.y;
 	relD1.z = gDelta.z - car2->Delta.z;
 	VectorLength3D(relSpeed, relD1.x, relD1.y, relD1.z);					// relative speed of car 1 (same for both cars, so just calc it once)
+	if (gRaceMetricsEnabled)
+		RaceMetricsCarHit(p1, p2, relSpeed);
 
 	relD2.x = car2->Delta.x - gDelta.x;
 	relD2.y = car2->Delta.y - gDelta.y;
@@ -3277,6 +3346,8 @@ ObjNode	*obj;
 		if (d <= radius)
 		{
 			d2 = radius - d;												// determine blast force
+			if (gRaceMetricsEnabled)
+				RaceMetricsBlast(i, whoThrew);
 
 			obj = gPlayerInfo[i].objNode;								// get the car object
 

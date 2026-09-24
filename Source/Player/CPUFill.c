@@ -4,6 +4,7 @@
 
 #include "game.h"
 #include "cpu_fill.h"
+#include "driver_looks.h"
 
 #define	NUM_DRIVER_LOOKS	(2 * NUM_CAVEMAN_SKINS)				// both sexes in every skin
 
@@ -26,19 +27,39 @@ Boolean DecideCPUFillThisRace(int gameMode, Boolean netGame, Boolean hostConfigC
 }
 
 
+/******************** DECIDE PLAYER LIMIT THIS GAME *********************/
+
+Byte DecidePlayerLimitThisGame(Boolean netGame, int hostConfigLimit, int prefLimit)
+{
+	int limit = netGame ? hostConfigLimit : prefLimit;
+
+	return (Byte) (IS_SUPPORTED_PLAYER_LIMIT(limit) ? limit : PLAYER_LIMIT_ORIGINAL);
+}
+
+
+/******************** SMALLEST PLAYER LIMIT FOR *********************/
+
+Byte SmallestPlayerLimitFor(int numPlayers)
+{
+	return numPlayers <= PLAYER_LIMIT_ORIGINAL ? PLAYER_LIMIT_ORIGINAL : MAX_PLAYERS;
+}
+
+
 /******************** COUNT PLAYERS IN GAME *********************/
 
-short CountPlayersInGame(int gameMode, short numRealPlayers, Boolean cpuFill)
+short CountPlayersInGame(int gameMode, short numRealPlayers, Boolean cpuFill, short playerLimit)
 {
+	short	fullGrid = playerLimit > numRealPlayers ? playerLimit : numRealPlayers;	// every human races
+
 	switch (gameMode)
 	{
 		case	GAME_MODE_PRACTICE:
 		case	GAME_MODE_TOURNAMENT:
-				return MAX_PLAYERS;
+				return fullGrid;
 
 		default:
 				if (cpuFill && CPUFillAppliesToMode(gameMode))
-					return MAX_PLAYERS;
+					return fullGrid;
 				return numRealPlayers;
 	}
 }
@@ -123,21 +144,20 @@ uint32_t	humans = 0;
 
 /******************** DRESS NETWORK FILL CPUS *********************/
 //
-// A character screen swaps outfits between the local player and whoever wears the one
-// it wants, CPU slots included, and only on that machine. Starting every fill CPU from
-// its dealt look again undoes that, and the rest reads only the humans' choices, which
-// every peer received.
+// A character screen could swap outfits between the local player and whoever wears the
+// one it wants, CPU slots included, and only on that machine. Starting every fill CPU from
+// its dealt look again undoes that; ResolveCPUDriverLooks then keeps them apart from the
+// humans and each other, reading only state every peer shares.
 //
 
 void DressNetworkFillCPUs(PlayerInfoType players[], short numHumans, short numPlayers)
 {
 	for (short p = numHumans; p < numPlayers; p++)					// the look InitPlayerInfo_Game dealt the slot
 	{
-		players[p].sex = p & 1;
-		players[p].skin = p % NUM_CAVEMAN_SKINS;
+		const DriverLook look = GetDefaultDriverLook(p);
+		players[p].sex = look.sex;
+		players[p].skin = look.skin;
 	}
-
-	MakeLooksDistinct(players, numPlayers, numHumans >= 32 ? ~0u : (1u << numHumans) - 1u);
 }
 
 

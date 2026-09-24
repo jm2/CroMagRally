@@ -2,6 +2,7 @@
 #include "cpu_driver.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 
 #define CHECK(condition) do { if (!(condition)) { \
 	fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, #condition); \
@@ -137,12 +138,115 @@ static void TestFloatingCarWithStalePlaningDrives(void)
 	}
 }
 
+/************************** CPU RESCUE ****************************/
+
+// Seconds of no forward progress until the rescue fires, at this timestep.
+static float SecondsUntilRescue(PlayerInfoType *p, int progress, float fps, float limit)
+{
+	const float dt = 1.0f / fps;
+	for (float t = dt; t <= limit; t += dt)
+		if (UpdateCPURescueTimer(p, progress, 5000, true, dt))
+			return t;
+	return -1;
+}
+
+static void TestRescueTimer(void)
+{
+	for (int f = 0; f < 3; f++)
+	{
+		const float fps = kTimesteps[f];
+		PlayerInfoType p = {0};
+		p.rescueProgress = -1;
+
+		// Twenty seconds without a new best progress, then again twenty seconds later.
+		CHECK(!UpdateCPURescueTimer(&p, 0, 5000, true, 1.0f / fps));				// crossed the finish line
+		const float first = SecondsUntilRescue(&p, 0, fps, 30);
+		CHECK(first >= CPU_RESCUE_TIME && first < CPU_RESCUE_TIME + 2.0f / fps);
+		const float second = SecondsUntilRescue(&p, 0, fps, 30);
+		CHECK(second >= CPU_RESCUE_TIME && second < CPU_RESCUE_TIME + 2.0f / fps);
+
+		// Each new checkpoint restarts the count; going back or losing a lap doesn't.
+		p.rescueTimer = 0;
+		for (int i = 0; i < (int) (15 * fps); i++)
+			CHECK(!UpdateCPURescueTimer(&p, 0, 5000, true, 1.0f / fps));
+		CHECK(!UpdateCPURescueTimer(&p, 1, 5000, true, 1.0f / fps));
+		CHECK(p.rescueTimer == 0 && p.rescueProgress == 1);
+		const float backward = SecondsUntilRescue(&p, 0, fps, 30);
+		CHECK(backward >= CPU_RESCUE_TIME && backward < CPU_RESCUE_TIME + 2.0f / fps);
+
+		// A car that keeps getting closer to the next checkpoint, however slowly, is left
+		// alone; one that only goes back and forth (on a fence) is rescued once its first
+		// swing toward the checkpoint (which counts as progress) is 20 s old.
+		PlayerInfoType slow = {0};
+		slow.rescueProgress = -1;
+		CHECK(!UpdateCPURescueTimer(&slow, 0, 20000, true, 1.0f / fps));
+		for (int i = 0; i < (int) (90 * fps); i++)								// 150 units a second
+			CHECK(!UpdateCPURescueTimer(&slow, 0, 20000 - 150.0f * (float) i / fps, true, 1.0f / fps));
+		PlayerInfoType rocking = {0};
+		rocking.rescueProgress = -1;
+		CHECK(!UpdateCPURescueTimer(&rocking, 0, 8000, true, 1.0f / fps));
+		Boolean rescued = false;
+		for (int i = 0; i < (int) (30 * fps) && !rescued; i++)					// swings 600 units either way
+			rescued = UpdateCPURescueTimer(&rocking, 0, 8000 + 600.0f * sinf((float) i / fps), true, 1.0f / fps);
+		CHECK(rescued);
+
+		// Starting lights and finished races never count.
+		for (int i = 0; i < (int) (60 * fps); i++)
+			CHECK(!UpdateCPURescueTimer(&p, 1, 5000, false, 1.0f / fps));
+		CHECK(p.rescueTimer == 0);
+	}
+
+	// Race progress: laps count every checkpoint, and the start (lap -1, checkpoint N-1) is -1.
+	CHECK(CPURaceProgress(-1, 20, 21) == -1);
+	CHECK(CPURaceProgress(0, 0, 21) == 0 && CPURaceProgress(1, 3, 21) == 24);
+	CHECK(CPURaceProgress(2, 0, 21) > CPURaceProgress(1, 20, 21));
+}
+
+static void TestRescueSpot(void)
+{
+	PlayerInfoType p = {0};
+	CPURescueSpot spot;
+
+	// Just past where the car last crossed a checkpoint going forward, facing the way it
+	// was driving then (cars face (-sin rotY, -cos rotY)).
+	RecordCPURescueCrossing(&p, 1000, -2000, 0, -30);							// driving toward -z
+	CHECK(FindCPURescueSpot(&p, NULL, 0, &spot));
+	CHECK(spot.x == 1000 && spot.z == -2000 - CPU_RESCUE_AHEAD);
+	CHECK(fabsf(-sinf(spot.rotY)) < 0.001f && fabsf(-cosf(spot.rotY) - (-1)) < 0.001f);
+
+	// A diagonal crossing keeps its direction, normalized.
+	RecordCPURescueCrossing(&p, 0, 0, 3, 4);
+	CHECK(FindCPURescueSpot(&p, NULL, 0, &spot));
+	CHECK(fabsf(spot.x - 0.6f * CPU_RESCUE_AHEAD) < 0.01f && fabsf(spot.z - 0.8f * CPU_RESCUE_AHEAD) < 0.01f);
+	CHECK(fabsf(-sinf(spot.rotY) - 0.6f) < 0.001f && fabsf(-cosf(spot.rotY) - 0.8f) < 0.001f);
+
+	// A car in the way: further along, a step at a time.
+	RecordCPURescueCrossing(&p, 1000, -2000, 0, -1);
+	OGLPoint3D others[3] = { {1000, 0, -2000 - CPU_RESCUE_AHEAD} };
+	CHECK(FindCPURescueSpot(&p, others, 1, &spot));
+	CHECK(spot.x == 1000 && spot.z == -2000 - CPU_RESCUE_AHEAD - CPU_RESCUE_STEP);
+
+	// Every place taken: no spot, and the caller's spot is left alone (never overlap a car).
+	others[1] = (OGLPoint3D) {1000, 0, -2000 - CPU_RESCUE_AHEAD - CPU_RESCUE_STEP};
+	others[2] = (OGLPoint3D) {1000, 0, -2000 - CPU_RESCUE_AHEAD - 2 * CPU_RESCUE_STEP};
+	const CPURescueSpot untouched = {1, 2, 3};
+	spot = untouched;
+	CHECK(!FindCPURescueSpot(&p, others, 3, &spot));
+	CHECK(spot.x == 1 && spot.z == 2 && spot.rotY == 3);
+
+	// A zero-length move keeps the previous direction; the point still moves.
+	RecordCPURescueCrossing(&p, 50, 60, 0, 0);
+	CHECK(p.rescueX == 50 && p.rescueZ == 60 && p.rescueDirX == 0 && p.rescueDirZ == -1);
+}
+
 int main(void)
 {
 	TestBrakeForSkid();
 	TestPedal();
 	TestStuckCheck();
 	TestFloatingCarWithStalePlaningDrives();
+	TestRescueTimer();
+	TestRescueSpot();
 	puts("cpu driver tests passed");
 	return EXIT_SUCCESS;
 }

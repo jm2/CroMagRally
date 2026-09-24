@@ -10,6 +10,8 @@
 /****************************/
 
 #include "game.h"
+#include "car_count_tuning.h"
+#include "race_metrics.h"
 #include <limits.h>
 
 /*******************/
@@ -50,6 +52,7 @@ static Boolean DoTrig_SeaMine(ObjNode *theNode, ObjNode *whoNode, Byte sideBits)
 static void MoveSeaMine(ObjNode *theNode);
 
 static Boolean DoTrig_Druid(ObjNode *theNode, ObjNode *whoNode, Byte sideBits);
+static float GetPOWRespawnDelay(void);
 
 static uint32_t TerrainEventEntityKey(const ObjNode* node)
 {
@@ -73,6 +76,8 @@ static uint32_t TerrainEventEntityKey(const ObjNode* node)
 #define	MAX_TORCHES				(6*2)
 
 #define	GONG_PYLON_RADIUS			50.0f
+
+#define	POW_RESPAWN_DELAY			5.0f				// seconds until a picked-up POW reappears in a 6-car race
 
 enum
 {
@@ -311,6 +316,17 @@ static void MovePOW(ObjNode *theNode)
 }
 
 
+/******************** GET POW RESPAWN DELAY ***********************/
+//
+// More cars pass each POW, so it comes back sooner for them (see GetPOWRespawnScale).
+//
+
+static float GetPOWRespawnDelay(void)
+{
+	return POW_RESPAWN_DELAY * GetPOWRespawnScale(gNumTotalPlayers);
+}
+
+
 /************** DO TRIGGER - POW ********************/
 //
 // OUTPUT: True = want to handle trigger as a solid object
@@ -325,6 +341,8 @@ Boolean	thud = false;
 
 	playerNum = whoNode->PlayerNum;
 	powType = theNode->POWType;
+	if (gRaceMetricsEnabled)
+		RaceMetricsPickup(playerNum);
 
 	if (gPlayerInfo[playerNum].powType == powType)		// see if we already have this
 	{
@@ -354,7 +372,7 @@ Boolean	thud = false;
 			/* PUT INTO HIDE MODE */
 
 	theNode->POWHidden = true;
-	theNode->POWHiddenTimer = 5.0;					// n seconds until it reappears
+	theNode->POWHiddenTimer = GetPOWRespawnDelay();	// n seconds until it reappears
 	theNode->StatusBits |= STATUS_BIT_HIDDEN;
 	theNode->CType = 0;
 
@@ -570,7 +588,7 @@ short	playerNum;
 			/* PUT INTO HIDE MODE */
 
 	theNode->POWHidden = true;
-	theNode->POWHiddenTimer = 5.0;					// n seconds until it reappears
+	theNode->POWHiddenTimer = GetPOWRespawnDelay();	// n seconds until it reappears
 	theNode->StatusBits |= STATUS_BIT_HIDDEN;
 	theNode->CType = 0;
 
@@ -665,7 +683,7 @@ short	playerNum;
 			/* PUT INTO HIDE MODE */
 
 	theNode->POWHidden = true;
-	theNode->POWHiddenTimer = 5.0;					// n seconds until it reappears
+	theNode->POWHiddenTimer = GetPOWRespawnDelay();	// n seconds until it reappears
 	theNode->StatusBits |= STATUS_BIT_HIDDEN;
 	theNode->CType = 0;
 
@@ -763,7 +781,7 @@ short	playerNum;
 			/* PUT INTO HIDE MODE */
 
 	theNode->POWHidden = true;
-	theNode->POWHiddenTimer = 5.0;					// n seconds until it reappears
+	theNode->POWHiddenTimer = GetPOWRespawnDelay();	// n seconds until it reappears
 	theNode->StatusBits |= STATUS_BIT_HIDDEN;
 	theNode->CType = 0;
 

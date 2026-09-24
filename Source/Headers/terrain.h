@@ -51,6 +51,11 @@ enum
 								// until after we've allocated new supertiles, so we'll always
 								// need more supertiles than are actually ever used - worst case
 								// scenario is twice as many.
+								//
+								// "N players" is the local split-screen panes: only humans on this
+								// machine build supertile geometry (DoPlayerTerrainUpdate), so CPU
+								// and remote cars cost item streaming, not supertiles. Headless
+								// one-pane races use at most 98 of these with 6 or 12 cars.
 
 #define	MAX_SUPERTILES			((SUPERTILE_DIST_WIDE * SUPERTILE_DIST_DEEP) * MAX_SPLITSCREENS * 2)
 

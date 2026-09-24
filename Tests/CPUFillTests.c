@@ -1,5 +1,6 @@
 #include "game.h"
 #include "cpu_fill.h"
+#include "driver_looks.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -60,33 +61,86 @@ static void TestFillDecision(void)
 	}
 }
 
+// Only the original 6 and every slot this build has are offered.
+static void TestPlayerLimits(void)
+{
+	for (int limit = -1; limit <= 256; limit++)
+		CHECK(IS_SUPPORTED_PLAYER_LIMIT(limit) == (limit == PLAYER_LIMIT_ORIGINAL || limit == MAX_PLAYERS));
+	CHECK(IS_SUPPORTED_PLAYER_LIMIT(6));
+	CHECK(IS_SUPPORTED_PLAYER_LIMIT(MAX_PLAYERS));
+	CHECK(!IS_SUPPORTED_PLAYER_LIMIT(0) && !IS_SUPPORTED_PLAYER_LIMIT(7) && !IS_SUPPORTED_PLAYER_LIMIT(MAX_PLAYERS + 1));
+
+	// A local game takes this machine's pref; a network game only the host's config.
+	// Unsupported values (never from sanitized prefs or a validated config) fall back to 6.
+	static const int kValues[] = { 0, 1, PLAYER_LIMIT_ORIGINAL, 7, MAX_PLAYERS, MAX_PLAYERS + 1, 255 };
+	const int numValues = (int) (sizeof(kValues) / sizeof(kValues[0]));
+	for (int netGame = 0; netGame <= 1; netGame++)
+	{
+		for (int h = 0; h < numValues; h++)
+		{
+			for (int p = 0; p < numValues; p++)
+			{
+				int chosen = netGame ? kValues[h] : kValues[p];
+				int expected = IS_SUPPORTED_PLAYER_LIMIT(chosen) ? chosen : PLAYER_LIMIT_ORIGINAL;
+				CHECK(DecidePlayerLimitThisGame(netGame, kValues[h], kValues[p]) == expected);
+			}
+		}
+	}
+	CHECK(DecidePlayerLimitThisGame(false, PLAYER_LIMIT_ORIGINAL, MAX_PLAYERS) == MAX_PLAYERS);	// a host's pref
+	CHECK(DecidePlayerLimitThisGame(true, PLAYER_LIMIT_ORIGINAL, MAX_PLAYERS) == PLAYER_LIMIT_ORIGINAL);	// a client's
+	CHECK(DecidePlayerLimitThisGame(true, MAX_PLAYERS, PLAYER_LIMIT_ORIGINAL) == MAX_PLAYERS);
+
+	// A smoke host seats the smallest supported limit that holds its players.
+	for (int players = 1; players <= MAX_PLAYERS; players++)
+	{
+		Byte limit = SmallestPlayerLimitFor(players);
+		CHECK(IS_SUPPORTED_PLAYER_LIMIT(limit) && limit >= players);
+		CHECK(limit == PLAYER_LIMIT_ORIGINAL || players > PLAYER_LIMIT_ORIGINAL);
+	}
+	CHECK(SmallestPlayerLimitFor(2) == PLAYER_LIMIT_ORIGINAL && SmallestPlayerLimitFor(6) == PLAYER_LIMIT_ORIGINAL);
+	CHECK(SmallestPlayerLimitFor(7) == MAX_PLAYERS && SmallestPlayerLimitFor(MAX_PLAYERS) == MAX_PLAYERS);
+}
+
 static void TestPlayerCounts(void)
 {
-	for (int mode = 0; mode < NUM_GAME_MODES; mode++)
+	static const short kLimits[] = { PLAYER_LIMIT_ORIGINAL, MAX_PLAYERS };
+	for (int l = 0; l < 2; l++)
 	{
-		for (short humans = 1; humans <= MAX_PLAYERS; humans++)
+		const short limit = kLimits[l];
+		for (int mode = 0; mode < NUM_GAME_MODES; mode++)
 		{
-			for (int fill = 0; fill <= 1; fill++)
+			for (short humans = 1; humans <= MAX_PLAYERS; humans++)
 			{
-				short count = CountPlayersInGame(mode, humans, fill);
-				switch (mode)
+				const short fullGrid = humans > limit ? humans : limit;	// every human races
+				for (int fill = 0; fill <= 1; fill++)
 				{
-					case GAME_MODE_PRACTICE:						// single-player races use every slot
-					case GAME_MODE_TOURNAMENT:
-						CHECK(count == MAX_PLAYERS);
-						break;
+					short count = CountPlayersInGame(mode, humans, fill, limit);
+					switch (mode)
+					{
+						case GAME_MODE_PRACTICE:					// single-player races use every slot
+						case GAME_MODE_TOURNAMENT:
+							CHECK(count == fullGrid);
+							break;
 
-					case GAME_MODE_MULTIPLAYERRACE:					// CPU cars only with fill
-						CHECK(count == (fill ? MAX_PLAYERS : humans));
-						break;
+						case GAME_MODE_MULTIPLAYERRACE:				// CPU cars only with fill
+							CHECK(count == (fill ? fullGrid : humans));
+							break;
 
-					default:										// battle modes: humans only
-						CHECK(count == humans);
-						break;
+						default:									// battle modes: humans only
+							CHECK(count == humans);
+							break;
+					}
 				}
 			}
 		}
 	}
+
+	CHECK(CountPlayersInGame(GAME_MODE_PRACTICE, 1, false, PLAYER_LIMIT_ORIGINAL) == 6);		// the original grid
+	CHECK(CountPlayersInGame(GAME_MODE_TOURNAMENT, 1, false, MAX_PLAYERS) == MAX_PLAYERS);
+	CHECK(CountPlayersInGame(GAME_MODE_MULTIPLAYERRACE, 2, true, PLAYER_LIMIT_ORIGINAL) == 6);
+	CHECK(CountPlayersInGame(GAME_MODE_MULTIPLAYERRACE, 2, true, MAX_PLAYERS) == MAX_PLAYERS);
+	CHECK(CountPlayersInGame(GAME_MODE_MULTIPLAYERRACE, 2, false, MAX_PLAYERS) == 2);
+	CHECK(CountPlayersInGame(GAME_MODE_SURVIVAL, 3, true, MAX_PLAYERS) == 3);
 }
 
 #define NUM_LOOKS			(2 * NUM_CAVEMAN_SKINS)
@@ -209,8 +263,9 @@ static void TestDriverLooks(void)
 }
 
 // Network fill CPUs: whatever a character screen left in their slots on this machine,
-// every peer dresses them alike. Human slots keep their looks, including players who
-// left since (bots), and the rest follows MakeCPULooksDistinct from the dealt looks.
+// every peer puts them back in their dealt looks (ResolveCPUDriverLooks, tested with the
+// driver looks, then keeps them apart). Human slots keep their looks, including players
+// who left since (bots).
 static void TestNetworkFillLooks(void)
 {
 	uint32_t rng = 12345;
@@ -220,7 +275,7 @@ static void TestNetworkFillLooks(void)
 	{
 		for (int trial = 0; trial < 200; trial++)
 		{
-			PlayerInfoType peer[2][MAX_LOOK_PLAYERS], expected[MAX_LOOK_PLAYERS];
+			PlayerInfoType peer[2][MAX_LOOK_PLAYERS];
 			memset(peer, 0, sizeof(peer));
 			for (short p = 0; p < humans; p++)								// network humans may repeat looks
 			{
@@ -240,18 +295,6 @@ static void TestNetworkFillLooks(void)
 				}
 			}
 
-			memcpy(expected, peer[0], sizeof(expected));					// the rule from the dealt looks
-			for (short p = 0; p < MAX_LOOK_PLAYERS; p++)
-			{
-				expected[p].isComputer = p >= humans;
-				if (p >= humans)
-				{
-					expected[p].sex = p & 1;
-					expected[p].skin = p % NUM_CAVEMAN_SKINS;
-				}
-			}
-			MakeCPULooksDistinct(expected, MAX_LOOK_PLAYERS);
-
 			for (int view = 0; view < 2; view++)
 			{
 				PlayerInfoType before[MAX_LOOK_PLAYERS];
@@ -259,27 +302,18 @@ static void TestNetworkFillLooks(void)
 				DressNetworkFillCPUs(peer[view], humans, MAX_LOOK_PLAYERS);
 				for (short p = 0; p < MAX_LOOK_PLAYERS; p++)
 				{
-					CHECK(peer[view][p].sex == expected[p].sex && peer[view][p].skin == expected[p].skin);
+					const DriverLook dealt = GetDefaultDriverLook(p);
 					CHECK(peer[view][p].isComputer == before[p].isComputer);
 					if (p < humans)
 						CHECK(peer[view][p].sex == before[p].sex && peer[view][p].skin == before[p].skin);
+					else
+						CHECK(peer[view][p].sex == dealt.sex && peer[view][p].skin == dealt.skin);
 				}
 			}
+			for (short p = 0; p < MAX_LOOK_PLAYERS; p++)						// so both peers agree
+				CHECK(peer[0][p].sex == peer[1][p].sex && peer[0][p].skin == peer[1][p].skin);
 		}
 	}
-
-	// Humans in the looks they were dealt leave every fill CPU in its own dealt look, up to
-	// one player per skin (the deal repeats after that).
-	memset(lookPlayers, 0, sizeof(lookPlayers));
-	for (short p = 0; p < MAX_PLAYERS; p++)
-	{
-		lookPlayers[p].isComputer = p >= 2;
-		lookPlayers[p].sex = p & 1;
-		lookPlayers[p].skin = p < 2 ? p : (p + 3) % NUM_CAVEMAN_SKINS;		// swapped around on this screen
-	}
-	DressNetworkFillCPUs(lookPlayers, 2, MAX_PLAYERS);
-	for (short p = 0; p < MAX_PLAYERS && p < NUM_CAVEMAN_SKINS; p++)
-		CHECK(lookPlayers[p].sex == (p & 1) && lookPlayers[p].skin == p % NUM_CAVEMAN_SKINS);
 
 	#undef NEXT_RANDOM
 }
@@ -376,6 +410,7 @@ int main(void)
 {
 	TestModes();
 	TestFillDecision();
+	TestPlayerLimits();
 	TestPlayerCounts();
 	TestDriverLooks();
 	TestNetworkFillLooks();
