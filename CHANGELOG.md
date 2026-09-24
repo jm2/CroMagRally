@@ -14,6 +14,7 @@
     - Only humans can win a multiplayer race: a player who leaves a LAN race keeps racing as a bot but no longer ends the race or wins it.
     - Preferences move to a v2 layout for the new options; existing settings carry over. An older build that reads the new file resets to defaults.
     - Fix a possible LAN desync when a setting was changed from a network game's pause menu (menu sounds drew from the synced random number generator).
+    - Final places follow the order cars cross the finish line. A car that crossed first while ranked just behind (for example out at the edge of the track) used to keep 2nd, tied with the car it beat, and scoreboard records and tournament results used that place.
     - Developers: smoke-only `--smoke-local-players N` and `--smoke-cpu-fill` for headless split-screen and filled LAN races, `Tests/NetworkSmokeTests.py --cpu-fill`, and a test that fails if unreviewed code draws the synced random number generator.
     - Restore six-player LAN and Wi-Fi games (host plus five clients), as in the original game.
     - Fix HUD, POW-timer and gamepad-hint state being indexed by network player number. In four-player LAN games the third and fourth players' HUD icons were laid out from split-screen pane data the renderer never refreshes; with six players, players 5 and 6 would have read and written out of bounds.

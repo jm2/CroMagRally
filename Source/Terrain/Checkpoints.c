@@ -273,6 +273,20 @@ void PlayerCompletedRace(short playerNum)
 	if (gPlayerInfo[playerNum].raceComplete)
 		return;
 
+			/* FINISHING ORDER IS THE FINAL PLACE */
+			//
+			// The live place is from last frame's CalcPlayerPlaces, which ranks by distance
+			// to the finish line's midpoint, so a car can cross first while ranked behind.
+			// Keeping that place would leave it tied with the car it beat.
+
+	short place = 0;
+	for (short p = 0; p < gNumTotalPlayers; p++)
+	{
+		if (p != playerNum && gPlayerInfo[p].raceComplete)
+			place++;
+	}
+	gPlayerInfo[playerNum].place = place;
+
 	gPlayerInfo[playerNum].raceComplete = true;
 
 
