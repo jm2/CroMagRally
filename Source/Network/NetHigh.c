@@ -75,8 +75,6 @@ Byte		gNetGamePlayerLimit = PLAYER_LIMIT_ORIGINAL;
 NSpGameReference	gNetGame = nil;
 NSpSearchReference	gNetSearch = nil;
 
-Str32			gPlayerNameStrings[MAX_PLAYERS];
-
 uint32_t			gClientSendCounter[MAX_PLAYERS];
 uint32_t			gHostSendCounter;
 

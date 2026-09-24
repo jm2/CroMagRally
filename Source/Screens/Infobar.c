@@ -49,8 +49,6 @@ static void MovePressAnyKey(ObjNode *theNode);
 /*    CONSTANTS             */
 /****************************/
 
-#define PLAYER_NAME_SAFE_CHARSET " .0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-
 #define OVERHEAD_MAP_REFERENCE_SIZE 256.0f
 
 #define INFOBAR_SPRITE_FLAGS (kTextMeshAlignCenter | kTextMeshAlignMiddle | kTextMeshKeepCurrentProjection)
@@ -1973,27 +1971,13 @@ void ShowWinLose(short playerNum, Byte mode, short winner)
 				break;
 
 		case	2:
-				if (gNetGameInProgress && (gGameMode != GAME_MODE_CAPTUREFLAG) && (winner != -1))		// if net game & not CTF, then show name of winner
+				if (gNetGameInProgress && (gGameMode != GAME_MODE_CAPTUREFLAG) && (winner != -1))		// if net game & not CTF, then show who won
 				{
 					char s[64];
-					char safePlayerName[32];
 
-					SDL_memset(s, 0, sizeof(s));
-					SDL_memset(safePlayerName, 0, sizeof(safePlayerName));
-
-					int j = 0;
-					for (int i = 0; i < 20; i++)									// copy name
-					{
-						char c = gPlayerNameStrings[winner][i];
-
-						if ((c >= 'a') && (c <= 'z'))								// convert to UPPER CASE
-							c = 'A' + (c - 'a');
-
-						if (SDL_strchr(PLAYER_NAME_SAFE_CHARSET, c))				// safe characters
-							safePlayerName[j++] = c;
-					}
-
-					SDL_snprintf(s, sizeof(s), "%s %s", safePlayerName, Localize(STR_3RDPERSON_WINS));	// insert "WINS"
+					// Net players have no names on the wire (clients join as "CLIENT"), so
+					// use the same "PLAYER n" as the character select screen.
+					SDL_snprintf(s, sizeof(s), "%s %s", GetPlayerName(winner), Localize(STR_3RDPERSON_WINS));	// insert "WINS"
 
 					gWinLoseString[playerNum] = TextMesh_New(s, 0, &def);
 				}
