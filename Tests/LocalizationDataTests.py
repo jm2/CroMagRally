@@ -9,12 +9,15 @@ import sys
 # English text of rows that must stay at their enum position. LoadLocalizedStrings
 # gives each non-empty CSV record the next LocStrID, so a reordered CSV with the
 # right row count would show the wrong text. These surround the IDs added for the
-# CPU cars option and the GAMEPLAY settings page.
+# CPU cars option, the 6/12 players option and the GAMEPLAY settings page.
 EXPECTED_ENGLISH = {
     "STR_ENGLISH": "ENGLISH",
     "STR_4_MINUTES": "4 MINUTES",
     "STR_CPU_CARS": "CPU CARS",
     "STR_CPU_CARS_HELP": "CPU CARS FILL THE EMPTY SPOTS.\nTHE FIRST PLAYER TO FINISH WINS!",
+    "STR_PLAYERS": "PLAYERS",
+    "STR_PLAYERS_6_ORIGINAL": "6 [ORIGINAL]",
+    "STR_PLAYERS_12": "12",
     "STR_CONTROLS": "CONTROLS",
     "STR_SOUND": "SOUND",
     "STR_GRAPHICS": "GRAPHICS",
