@@ -101,6 +101,24 @@ static int ExpectLeave(NSpGame* host)
     return id;
 }
 
+// Reads game's notices in order up to the given leave or join notice for player id. Join
+// notices ahead of it (the ones a peer gets when it joins) are skipped: on a loaded machine
+// they, and the target itself, can still be in flight after the step that caused them.
+static void SkipToNotice(NSpGame* game, uint32_t what, int id)
+{
+    for (;;)
+    {
+        NSpMessageHeader* message = WaitMessage(game);
+        const uint32_t got = message->what;
+        const int gotID = got == kNSpPlayerLeft ? (int)((NSpPlayerLeftMessage*)message)->playerID
+                        : got == kNSpPlayerJoined ? (int)((NSpPlayerJoinedMessage*)message)->playerInfo.id : -1;
+        NSpMessage_Release(game, message);
+        if (got == what && gotID == id)
+            return;
+        CHECK(got == kNSpPlayerJoined);
+    }
+}
+
 static void Session(void)
 {
     NSpGame* host = NSpGame_Host();
@@ -189,11 +207,11 @@ static void Session(void)
     NSpGame_Dispose(first, 0);
     CHECK(ExpectLeave(host) == 1);
     CHECK(NSpGame_GetActivePlayersIDMask(host) == 5); // host + sparse ID 2
-    Drain(second);
+    SkipToNotice(second, kNSpPlayerLeft, 1);
     NSpGame* replacement = Join(host);
     CHECK(replacement->myID == 1);
     CHECK(host->players[1].sendRing.used == 0 && !host->players[1].needsLeaveNotify);
-    Drain(second);
+    SkipToNotice(second, kNSpPlayerJoined, 1); // nothing else may reach it before the heartbeat below
 
     // Force the actual send path to overflow one ring. The surviving peer and host
     // must each receive one leave while the broadcast as a whole still succeeds.

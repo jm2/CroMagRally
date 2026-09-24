@@ -296,6 +296,21 @@ static void TestConfigValidation(void)
 	message.gameMode = GAME_MODE_CAPTUREFLAG;
 	message.trackNum = NUM_TRACKS - 1;
 	assert(NetValidateConfigPayload(&message));
+
+	// CPU fill is 0 or 1, and 1 only for a race: arenas have no AI paths.
+	message.cpuFill = 1;
+	assert(!NetValidateConfigPayload(&message));
+	for (int mode = GAME_MODE_MULTIPLAYERRACE; mode <= GAME_MODE_CAPTUREFLAG; mode++)
+	{
+		message.gameMode = mode;
+		message.trackNum = mode == GAME_MODE_MULTIPLAYERRACE ? NUM_RACE_TRACKS - 1 : NUM_TRACKS - 1;
+		for (int fill = 0; fill <= 255; fill++)
+		{
+			message.cpuFill = fill;
+			assert(NetValidateConfigPayload(&message)
+				== (fill == 0 || (fill == 1 && mode == GAME_MODE_MULTIPLAYERRACE)));
+		}
+	}
 }
 
 static void TestSyncMaskValidation(void)
@@ -386,98 +401,98 @@ static NetHostControlInfoMessageType ValidHostControlMessage(void)
 static void TestHostControlValidation(void)
 {
 	NetHostControlInfoMessageType message = ValidHostControlMessage();
-	assert(NetValidateHostControlPayload(&message, 4));
-	assert(!NetValidateHostControlPayload(NULL, 4));
-	assert(!NetValidateHostControlPayload(&message, 0));
-	assert(NetValidateHostControlPayload(&message, MAX_CLIENTS));
-	assert(!NetValidateHostControlPayload(&message, MAX_CLIENTS + 1));
+	assert(NetValidateHostControlPayload(&message, 4, 4));
+	assert(!NetValidateHostControlPayload(NULL, 4, 4));
+	assert(!NetValidateHostControlPayload(&message, 0, 0));
+	assert(NetValidateHostControlPayload(&message, MAX_CLIENTS, MAX_CLIENTS));
+	assert(!NetValidateHostControlPayload(&message, MAX_CLIENTS + 1, MAX_CLIENTS + 1));
 
 	const float rates[] = {0, 1, 8, 9, 1000, 1001};
 	for (size_t i = 0; i < sizeof(rates) / sizeof(rates[0]); i++)
 	{
 		message.fps = rates[i];
 		message.fpsFrac = rates[i] > 0 ? 1.0f / rates[i] : 0;
-		assert(NetValidateHostControlPayload(&message, 4)
+		assert(NetValidateHostControlPayload(&message, 4, 4)
 			== (rates[i] >= NET_MIN_FPS && rates[i] <= MAX_GAME_FPS));
 	}
 
 	message.fps = 9.0f;
 	message.fpsFrac = 1.0f / 9.0f;
-	assert(NetValidateHostControlPayload(&message, 4));
+	assert(NetValidateHostControlPayload(&message, 4, 4));
 	message.fps = 1000.0f;
 	message.fpsFrac = 0.001f;
-	assert(NetValidateHostControlPayload(&message, 4));
+	assert(NetValidateHostControlPayload(&message, 4, 4));
 	message = ValidHostControlMessage();
 	message.fps = NAN;
-	assert(!NetValidateHostControlPayload(&message, 4));
+	assert(!NetValidateHostControlPayload(&message, 4, 4));
 	message = ValidHostControlMessage();
 	message.fps = INFINITY;
-	assert(!NetValidateHostControlPayload(&message, 4));
+	assert(!NetValidateHostControlPayload(&message, 4, 4));
 	message = ValidHostControlMessage();
 	message.fps = 8.99f;
-	assert(!NetValidateHostControlPayload(&message, 4));
+	assert(!NetValidateHostControlPayload(&message, 4, 4));
 	message = ValidHostControlMessage();
 	message.fpsFrac = 0.0f;
-	assert(!NetValidateHostControlPayload(&message, 4));
+	assert(!NetValidateHostControlPayload(&message, 4, 4));
 	message = ValidHostControlMessage();
 	message.fpsFrac = -INFINITY;
-	assert(!NetValidateHostControlPayload(&message, 4));
+	assert(!NetValidateHostControlPayload(&message, 4, 4));
 	message = ValidHostControlMessage();
 	message.fpsFrac = 0.02f;
-	assert(!NetValidateHostControlPayload(&message, 4));
+	assert(!NetValidateHostControlPayload(&message, 4, 4));
 
 	message = ValidHostControlMessage();
 	message.controlBits[MAX_PLAYERS - 1] = 1u << NUM_CONTROL_BITS;
-	assert(!NetValidateHostControlPayload(&message, 4));
+	assert(!NetValidateHostControlPayload(&message, 4, 4));
 	message = ValidHostControlMessage();
 	message.controlBitsNew[0] = 1u << NUM_CONTROL_BITS;
-	assert(!NetValidateHostControlPayload(&message, 4));
+	assert(!NetValidateHostControlPayload(&message, 4, 4));
 	message = ValidHostControlMessage();
 	message.controlBitsNew[0] = 1u << kControlBit_Forward;
-	assert(NetValidateHostControlPayload(&message, 4));
+	assert(NetValidateHostControlPayload(&message, 4, 4));
 
 	message = ValidHostControlMessage();
 	message.analogSteering[0] = (OGLVector2D){-1.0f, 1.0f};
-	assert(NetValidateHostControlPayload(&message, 4));
+	assert(NetValidateHostControlPayload(&message, 4, 4));
 	message.analogSteering[0].x = -1.01f;
-	assert(!NetValidateHostControlPayload(&message, 4));
+	assert(!NetValidateHostControlPayload(&message, 4, 4));
 	message = ValidHostControlMessage();
 	message.analogSteering[0].y = NAN;
-	assert(!NetValidateHostControlPayload(&message, 4));
+	assert(!NetValidateHostControlPayload(&message, 4, 4));
 
 	message = ValidHostControlMessage();
 	message.syncPos[0] = (OGLPoint3D){-1000000.0f, 1000000.0f, 0.0f};
 	message.syncRotY[0] = -1000000.0f;
-	assert(NetValidateHostControlPayload(&message, 4));
+	assert(NetValidateHostControlPayload(&message, 4, 4));
 	message.syncPos[0].z = 1000001.0f;
-	assert(!NetValidateHostControlPayload(&message, 4));
+	assert(!NetValidateHostControlPayload(&message, 4, 4));
 	message = ValidHostControlMessage();
 	message.syncPos[0].y = INFINITY;
-	assert(!NetValidateHostControlPayload(&message, 4));
+	assert(!NetValidateHostControlPayload(&message, 4, 4));
 	message = ValidHostControlMessage();
 	message.syncRotY[0] = NAN;
-	assert(!NetValidateHostControlPayload(&message, 4));
+	assert(!NetValidateHostControlPayload(&message, 4, 4));
 	message = ValidHostControlMessage();
 	message.syncRotY[0] = -1000001.0f;
-	assert(!NetValidateHostControlPayload(&message, 4));
+	assert(!NetValidateHostControlPayload(&message, 4, 4));
 
 	message = ValidHostControlMessage();
 	message.pauseState[0] = 2;
-	assert(!NetValidateHostControlPayload(&message, 4));
+	assert(!NetValidateHostControlPayload(&message, 4, 4));
 	message = ValidHostControlMessage();
 	message.inputFlags[0] = INPUT_FLAG_SUBSTITUTED | INPUT_FLAG_COALESCED;
-	assert(NetValidateHostControlPayload(&message, 4));
+	assert(NetValidateHostControlPayload(&message, 4, 4));
 	message.inputFlags[0] |= 0x04;
-	assert(!NetValidateHostControlPayload(&message, 4));
+	assert(!NetValidateHostControlPayload(&message, 4, 4));
 	message = ValidHostControlMessage();
 	message.queueDepth[0] = NET_INPUT_QUEUE_SIZE - 1;
 	message.targetDepth[0] = NET_MAX_INPUT_DEPTH;
-	assert(NetValidateHostControlPayload(&message, 4));
+	assert(NetValidateHostControlPayload(&message, 4, 4));
 	message.queueDepth[0] = NET_INPUT_QUEUE_SIZE;
-	assert(!NetValidateHostControlPayload(&message, 4));
+	assert(!NetValidateHostControlPayload(&message, 4, 4));
 	message = ValidHostControlMessage();
 	message.targetDepth[0] = NET_MAX_INPUT_DEPTH + 1;
-	assert(!NetValidateHostControlPayload(&message, 4));
+	assert(!NetValidateHostControlPayload(&message, 4, 4));
 
 	message = ValidHostControlMessage();
 	message.eventCount = 1;
@@ -487,27 +502,27 @@ static void TestHostControlValidation(void)
 		.type = kEvBecomeBot,
 		.playerNum = 3,
 	};
-	assert(NetValidateHostControlPayload(&message, 4));
+	assert(NetValidateHostControlPayload(&message, 4, 4));
 	message.events[0].effectiveFrame++;
-	assert(!NetValidateHostControlPayload(&message, 4));
+	assert(!NetValidateHostControlPayload(&message, 4, 4));
 	message.events[0].effectiveFrame = message.frameCounter - 1;
-	assert(!NetValidateHostControlPayload(&message, 4));
+	assert(!NetValidateHostControlPayload(&message, 4, 4));
 	message.events[0].effectiveFrame = message.frameCounter;
 	message.events[0].type = kEvReserved;
-	assert(!NetValidateHostControlPayload(&message, 4));
+	assert(!NetValidateHostControlPayload(&message, 4, 4));
 	message.events[0].type = kEvUnpauseForce;
 	message.events[0].playerNum = -1;
-	assert(!NetValidateHostControlPayload(&message, 4));
+	assert(!NetValidateHostControlPayload(&message, 4, 4));
 	message.events[0].playerNum = 4;
-	assert(!NetValidateHostControlPayload(&message, 4));
-	assert(NetValidateHostControlPayload(&message, MAX_CLIENTS));
+	assert(!NetValidateHostControlPayload(&message, 4, 4));
+	assert(NetValidateHostControlPayload(&message, MAX_CLIENTS, MAX_CLIENTS));
 	message.events[0].playerNum = MAX_CLIENTS - 1;
-	assert(NetValidateHostControlPayload(&message, MAX_CLIENTS));
+	assert(NetValidateHostControlPayload(&message, MAX_CLIENTS, MAX_CLIENTS));
 	message.events[0].playerNum = MAX_CLIENTS;
-	assert(!NetValidateHostControlPayload(&message, MAX_CLIENTS));
+	assert(!NetValidateHostControlPayload(&message, MAX_CLIENTS, MAX_CLIENTS));
 	message.events[0].playerNum = 0;
 	message.events[0].pad = 1;
-	assert(!NetValidateHostControlPayload(&message, 4));
+	assert(!NetValidateHostControlPayload(&message, 4, 4));
 
 	message = ValidHostControlMessage();
 	message.frameCounter = UINT32_MAX - 5;
@@ -518,7 +533,7 @@ static void TestHostControlValidation(void)
 		.type = kEvUnpauseForce,
 		.playerNum = 0,
 	};
-	assert(NetValidateHostControlPayload(&message, 4));
+	assert(NetValidateHostControlPayload(&message, 4, 4));
 
 	message = ValidHostControlMessage();
 	message.eventCount = 2;
@@ -531,29 +546,98 @@ static void TestHostControlValidation(void)
 			.playerNum = 1,
 		};
 	}
-	assert(!NetValidateHostControlPayload(&message, 4));
+	assert(!NetValidateHostControlPayload(&message, 4, 4));
 
+	// A full packet: one POW use per car but the host's, then leaves and unpauses.
 	message = ValidHostControlMessage();
 	message.eventCount = NET_MAX_PENDING_EVENTS;
 	for (int i = 0; i < NET_MAX_PENDING_EVENTS; i++)
 	{
+		int other = i - (MAX_PLAYERS - 1);
 		message.events[i] = (NetFrameEvent)
 		{
 			.effectiveFrame = message.frameCounter + NET_MAX_EVENT_LEAD,
-			.type = i < 4 ? kEvBecomeBot : kEvUnpauseForce,
-			.playerNum = i % 4,
+			.type = other < 0 ? kEvCpuThrow : other < 4 ? kEvBecomeBot : kEvUnpauseForce,
+			.playerNum = other < 0 ? i + 1 : other % 4,
+			.pad = other < 0 ? NetEncodeCPUPOW(i % MAX_POW_TYPES, i & 1) : 0,
 		};
 	}
-	assert(NetValidateHostControlPayload(&message, 4));
+	assert(NetValidateHostControlPayload(&message, 4, MAX_PLAYERS));
+	assert(!NetValidateHostControlPayload(&message, 4, MAX_PLAYERS - 1));	// names a car not in the race
 	message.eventCount = NET_MAX_PENDING_EVENTS + 1;
-	assert(!NetValidateHostControlPayload(&message, 4));
+	assert(!NetValidateHostControlPayload(&message, 4, MAX_PLAYERS));
 
 	message = ValidHostControlMessage();
 	message.events[0] = (NetFrameEvent){.effectiveFrame = UINT32_MAX, .type = 255, .playerNum = -1, .pad = 1};
 	message.randomSeed = UINT32_MAX;
 	message.simTick = UINT32_MAX;
 	message.ackInputSeq[0] = UINT32_MAX;
-	assert(NetValidateHostControlPayload(&message, 4));
+	assert(NetValidateHostControlPayload(&message, 4, 4));
+}
+
+// kEvCpuThrow: which car uses which POW, in which direction.
+static void TestCPUPOWEvents(void)
+{
+	for (int type = 0; type < MAX_POW_TYPES; type++)
+	{
+		for (int backward = 0; backward <= 1; backward++)
+		{
+			short decodedType = -1;
+			Boolean decodedBackward = !backward;
+			uint16_t pad = NetEncodeCPUPOW(type, backward);
+			assert(NetDecodeCPUPOW(pad, &decodedType, &decodedBackward));
+			assert(decodedType == type && decodedBackward == backward);
+			assert(NetDecodeCPUPOW(pad, NULL, NULL));
+		}
+	}
+	int valid = 0;
+	for (uint32_t pad = 0; pad <= UINT16_MAX; pad++)
+		valid += NetDecodeCPUPOW((uint16_t) pad, NULL, NULL);
+	assert(valid == 2 * MAX_POW_TYPES);									// nothing the encoder can't produce
+	assert(!NetDecodeCPUPOW(MAX_POW_TYPES, NULL, NULL));
+	assert(!NetDecodeCPUPOW(NET_CPU_POW_TYPE_MASK, NULL, NULL));
+	assert(!NetDecodeCPUPOW(0x20, NULL, NULL));
+
+	NetHostControlInfoMessageType message = ValidHostControlMessage();
+	message.eventCount = 1;
+	message.events[0] = (NetFrameEvent)
+	{
+		.effectiveFrame = message.frameCounter + NET_MAX_EVENT_LEAD,
+		.type = kEvCpuThrow,
+		.playerNum = MAX_PLAYERS - 1,											// a fill CPU
+		.pad = NetEncodeCPUPOW(POW_TYPE_MINE, true),
+	};
+	assert(NetValidateHostControlPayload(&message, 2, MAX_PLAYERS));
+	assert(!NetValidateHostControlPayload(&message, 2, MAX_PLAYERS - 1));
+	assert(!NetValidateHostControlPayload(&message, 2, 1));					// fewer cars than players
+	assert(!NetValidateHostControlPayload(&message, 2, MAX_PLAYERS + 1));
+	message.events[0].playerNum = 1;											// a replacement bot, no fill
+	assert(NetValidateHostControlPayload(&message, 2, 2));
+	message.events[0].playerNum = 0;											// the host's car is never a CPU
+	assert(!NetValidateHostControlPayload(&message, 2, MAX_PLAYERS));
+	message.events[0].playerNum = -1;
+	assert(!NetValidateHostControlPayload(&message, 2, MAX_PLAYERS));
+	message.events[0].playerNum = 1;
+	message.events[0].pad = MAX_POW_TYPES;
+	assert(!NetValidateHostControlPayload(&message, 2, MAX_PLAYERS));
+	message.events[0].pad = NetEncodeCPUPOW(POW_TYPE_NITRO, false);
+	assert(NetValidateHostControlPayload(&message, 2, MAX_PLAYERS));
+	message.events[0].effectiveFrame++;
+	assert(!NetValidateHostControlPayload(&message, 2, MAX_PLAYERS));
+
+	// Becoming a bot and a POW use may share a packet; two uses by one car may not.
+	message.events[0].effectiveFrame = message.frameCounter + 1;
+	message.eventCount = 2;
+	message.events[1] = message.events[0];
+	message.events[1].type = kEvBecomeBot;
+	message.events[1].pad = 0;
+	assert(NetValidateHostControlPayload(&message, 2, MAX_PLAYERS));
+	message.events[1].type = kEvCpuThrow;
+	message.events[1].pad = NetEncodeCPUPOW(POW_TYPE_BONE, false);
+	message.events[1].effectiveFrame++;
+	assert(!NetValidateHostControlPayload(&message, 2, MAX_PLAYERS));
+	message.events[1].playerNum = 2;
+	assert(NetValidateHostControlPayload(&message, 2, MAX_PLAYERS));
 }
 
 static void TestDeterministicEventMath(void)
@@ -643,6 +727,7 @@ static PrefsType ValidPrefs(void)
 	prefs.sfxVolumePercent = 60;
 	prefs.raceTimer = 1;
 	prefs.gamepadRumble = true;
+	prefs.cpuFill = true;
 	prefs.bindings[0].key[0] = SDL_SCANCODE_SPACE;
 	prefs.bindings[0].pad[0] = (PadBinding){kInputTypeButton, SDL_GAMEPAD_BUTTON_SOUTH};
 	prefs.bindings[1].pad[0] = (PadBinding){kInputTypeAxisPlus, SDL_GAMEPAD_AXIS_LEFTX};
@@ -677,6 +762,7 @@ static void TestPrefsSanitization(void)
 	CHECK_REPAIR(raceTimer, 3);
 	CHECK_REPAIR(gamepadRumble, 2);
 	CHECK_REPAIR(tournamentProgression.numTracksCompleted, NUM_RACE_TRACKS + 1);
+	CHECK_REPAIR(cpuFill, 2);
 
 #undef CHECK_REPAIR
 
@@ -785,6 +871,7 @@ int main(void)
 	TestSyncMaskValidation();
 	TestControlValidation();
 	TestHostControlValidation();
+	TestCPUPOWEvents();
 	TestDeterministicEventMath();
 	TestCursorClamping();
 	TestPlaceholderFormatting();

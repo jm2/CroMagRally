@@ -144,9 +144,12 @@ backends. It checks practice gameplay, host lobby startup, invalid track IDs,
 invalid developer options, and teardown with isolated preferences and a
 45-second limit per invocation.
 
-The developer option `--smoke-test-frames N` (1–600) requires `--track` or
+The developer option `--smoke-test-frames N` (1–36000) requires `--track` or
 `--join-address` and exits after that many gameplay frames, or lobby frames when
-combined with `--host`. It cannot be used with `--join`. A smoke run that ends
+combined with `--host`. It cannot be used with `--join`. With
+`--smoke-local-players N` (2–4), the run is a split-screen multiplayer race with
+N local players instead; `--smoke-cpu-fill` adds CPU cars in its empty slots. A
+smoke run that ends
 before printing its `SMOKE:` completion line exits with status 1. CI builds the
 full game with ASan/UBSan before running these tests; unit tests alone do not
 exercise asset loading. Leak detection remains enabled in the unit suite, but is
@@ -165,7 +168,8 @@ binds a fixed UDP port. These developer options let them meet directly:
   already names a port.
 - `--smoke-net-players N` (with `--host`, `--track` and `--smoke-test-frames`)
   keeps the lobby open until N players, the host included, have joined, then
-  starts the race. `--smoke-net-refusals N` (only when `--smoke-net-players`
+  starts the race; `--smoke-cpu-fill` makes it fill the race's empty slots with CPU
+  cars, as the CPU CARS option does. `--smoke-net-refusals N` (only when `--smoke-net-players`
   equals the most players a game seats) also waits until N further joins were
   turned away because the game is full. Clients started with
   `--join-address` and `--smoke-test-frames` accept the default character and
@@ -174,8 +178,9 @@ binds a fixed UDP port. These developer options let them meet directly:
   exits.
 
 `python3 Tests/NetworkSmokeTests.py <path-to-CroMagRally> [PLAYERS] [--track N]
-[--frames K]` uses these options to race a host and its clients on loopback,
-headless, and checks that one join too many is refused. PLAYERS defaults to the
+[--frames K] [--cpu-fill]` uses these options to race a host and its clients on loopback,
+headless, and checks that one join too many is refused. With `--cpu-fill`, CPU cars
+fill the rest of the grid; any seed desync fails the run. PLAYERS defaults to the
 most the binary seats. Use a sanitizer build: it is how out-of-bounds HUD or
 network state for high player numbers shows up. CI doesn't run this script yet;
 a six-player run takes about 15–30 seconds.

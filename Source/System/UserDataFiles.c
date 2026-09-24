@@ -98,6 +98,66 @@ fileIsCorrupt:
 }
 
 
+/********* UPGRADE V1 PREFS ***********/
+//
+// Keeps every v1 setting. The fields v2 added start from their defaults.
+//
+
+_Static_assert(sizeof(((PrefsType*)0)->bindings) == sizeof(((PrefsTypeV1*)0)->bindings), "v1 bindings copy whole");
+_Static_assert(sizeof(((PrefsType*)0)->playerName) == sizeof(((PrefsTypeV1*)0)->playerName), "v1 name copies whole");
+
+static void UpgradePrefsV1(PrefsType* prefs, const PrefsTypeV1* v1, const PrefsType* defaults)
+{
+	SDL_memcpy(prefs, defaults, sizeof(*prefs));
+
+	prefs->difficulty			= v1->difficulty;
+	prefs->splitScreenMode2P	= v1->splitScreenMode2P;
+	prefs->splitScreenMode3P	= v1->splitScreenMode3P;
+	prefs->language				= v1->language;
+	prefs->tagDuration			= v1->tagDuration;
+	prefs->antialiasingLevel	= v1->antialiasingLevel;
+	prefs->fullscreen			= v1->fullscreen;
+	prefs->displayNumMinus1		= v1->displayNumMinus1;
+	prefs->musicVolumePercent	= v1->musicVolumePercent;
+	prefs->sfxVolumePercent		= v1->sfxVolumePercent;
+	prefs->raceTimer			= v1->raceTimer;
+	SDL_memcpy(prefs->bindings, v1->bindings, sizeof(prefs->bindings));
+	prefs->gamepadRumble		= v1->gamepadRumble;
+	prefs->tournamentProgression = v1->tournamentProgression;
+	SDL_memcpy(prefs->playerName, v1->playerName, sizeof(prefs->playerName));
+}
+
+
+/********* LOAD PREFS, UPGRADING OLDER LAYOUTS ***********/
+//
+// Loads the current prefs layout, or else a v1 file upgraded to it, so that a new
+// build keeps the settings an older one saved. *upgraded tells the caller to write
+// the file back in the current layout. If neither layout loads, returns the current
+// layout's error (e.g. fnfErr on first launch) and leaves prefs undefined.
+//
+
+OSErr LoadPrefsFile(const char* filename, PrefsType* prefs, const PrefsType* defaults, Boolean* upgraded)
+{
+	if (!prefs || !defaults || !upgraded)
+		return paramErr;
+
+	*upgraded = false;
+
+	OSErr err = LoadUserDataFile(filename, PREFS_MAGIC, sizeof(*prefs), (Ptr) prefs);
+	if (err == noErr)
+		return noErr;
+
+	PrefsTypeV1 v1;
+	if (LoadUserDataFile(filename, PREFS_MAGIC_V1, sizeof(v1), (Ptr) &v1) != noErr)
+		return err;
+
+	UpgradePrefsV1(prefs, &v1, defaults);
+	*upgraded = true;
+	SDL_Log("Upgraded '%s' from the v1 prefs layout", filename);
+	return noErr;
+}
+
+
 /********* SAVE STRUCT TO USER FILE IN PREFS FOLDER ***********/
 
 OSErr SaveUserDataFile(const char* filename, const char* magic, long payloadLength, Ptr payloadPtr)

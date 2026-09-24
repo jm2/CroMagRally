@@ -349,12 +349,104 @@ static void HardModeSources(void)
 	CHECK(PickCPUVehicle(&rules, 0) == 8 && PickCPUVehicle(&rules, 1) == 7);
 }
 
+// The picks for every CPU slot after numHumans humans, from the shared network rules.
+static void PickShared(const short* humanCars, int numHumans, int difficulty, int trackNum, int picks[MAX_TEST_PLAYERS])
+{
+	CPUVehiclePickRules rules;
+	SharedCPUVehicleSeed seed;
+	InitSharedCPUVehiclePickRules(&rules, &seed, humanCars, numHumans, difficulty, trackNum);
+	for (int cpu = 0; cpu < MAX_TEST_PLAYERS - numHumans; cpu++)
+		picks[cpu] = PickCPUVehicle(&rules, cpu);
+}
+
+// Network CPU fill cars depend only on state every peer shares: the humans' cars, the
+// difficulty, the track and the slot. They come from the whole land roster whatever
+// this machine unlocked, never consume the synced RNG, and are the same however often
+// and in whatever order a peer picks them.
+static void SharedNetworkPicks(void)
+{
+	const int difficulties[] = {DIFFICULTY_SIMPLISTIC, DIFFICULTY_EASY, DIFFICULTY_MEDIUM, DIFFICULTY_HARD};
+	uint32_t hardTypesSeen = 0;
+	int hardPicksDifferByTrack = 0;
+
+	for (int numHumans = 1; numHumans < MAX_TEST_PLAYERS; numHumans++)
+	{
+		for (int trial = 0; trial < 20; trial++)
+		{
+			short humanCars[MAX_TEST_PLAYERS];
+			for (int h = 0; h < numHumans; h++)
+				humanCars[h] = (short) ((h * 7 + trial * 3 + numHumans) % NUM_LAND_CAR_TYPES);
+
+			for (int d = 0; d < 4; d++)
+			{
+				for (int track = 0; track < NUM_RACE_TRACKS; track++)
+				{
+					int picks[MAX_TEST_PLAYERS], again[MAX_TEST_PLAYERS];
+					numRandomCalls = 0;
+					for (testAgesCompleted = 0; testAgesCompleted < NUM_TEST_AGES; testAgesCompleted++)
+					{
+						PickShared(humanCars, numHumans, difficulties[d], track, testAgesCompleted ? again : picks);
+						if (testAgesCompleted)
+							CHECK(!memcmp(picks, again, sizeof(int) * (MAX_TEST_PLAYERS - numHumans)));
+					}
+					CHECK(numRandomCalls == 0);								// never the synced RNG
+
+					CPUVehiclePickRules rules;
+					SharedCPUVehicleSeed seed;
+					InitSharedCPUVehiclePickRules(&rules, &seed, humanCars, numHumans, difficulties[d], track);
+					for (int cpu = MAX_TEST_PLAYERS - numHumans - 1; cpu >= 0; cpu--)	// picked in any order
+					{
+						CHECK(picks[cpu] >= 0 && picks[cpu] < NUM_LAND_CAR_TYPES);
+						CHECK(PickCPUVehicle(&rules, cpu) == picks[cpu]);
+					}
+
+					if (difficulties[d] == DIFFICULTY_HARD)
+					{
+						int otherTrack[MAX_TEST_PLAYERS];
+						PickShared(humanCars, numHumans, DIFFICULTY_HARD, (track + 1) % NUM_RACE_TRACKS, otherTrack);
+						hardPicksDifferByTrack += memcmp(picks, otherTrack, sizeof(int) * (MAX_TEST_PLAYERS - numHumans)) != 0;
+						for (int cpu = 0; cpu < MAX_TEST_PLAYERS - numHumans; cpu++)
+							hardTypesSeen |= 1u << picks[cpu];
+						continue;
+					}
+
+					// Below Hard: the best cars no human drives, one each and best first, from
+					// the whole roster, then the same order again.
+					int expected[NUM_LAND_CAR_TYPES], numFree = 0;
+					for (int type = NUM_LAND_CAR_TYPES - 1; type >= 0; type--)
+					{
+						Boolean humanCar = false;
+						for (int h = 0; h < numHumans; h++)
+							humanCar |= humanCars[h] == type;
+						if (!humanCar)
+							expected[numFree++] = type;
+					}
+					for (int cpu = 0; cpu < MAX_TEST_PLAYERS - numHumans; cpu++)
+						CHECK(picks[cpu] == (numFree ? expected[cpu % numFree] : NUM_LAND_CAR_TYPES - 1 - cpu % NUM_LAND_CAR_TYPES));
+				}
+			}
+		}
+	}
+
+	CHECK(hardTypesSeen == (1u << NUM_LAND_CAR_TYPES) - 1);				// Hard can hand out any car
+	CHECK(hardPicksDifferByTrack > 0);
+
+	// Pinned Hard picks: peers on every platform must agree, so the draw may never change.
+	static const short twoHumans[] = {CAR_TYPE_ROCK, CAR_TYPE_CHARIOT};
+	static const int expectedHard[] = {9, 5, 7, 9, 6, 1, 3, 7, 6, 2};
+	int picks[MAX_TEST_PLAYERS];
+	PickShared(twoHumans, 2, DIFFICULTY_HARD, 0, picks);
+	for (int cpu = 0; cpu < (int) (sizeof(expectedHard) / sizeof(expectedHard[0])); cpu++)
+		CHECK(picks[cpu] == expectedHard[cpu]);
+}
+
 int main(void)
 {
 	SixCarEquivalence();
 	AnySlotCount();
 	ReuseOrder();
 	HardModeSources();
+	SharedNetworkPicks();
 	puts("CPU vehicle picker tests passed");
 	return 0;
 }

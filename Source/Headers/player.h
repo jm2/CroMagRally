@@ -224,6 +224,9 @@ typedef struct
 	{
 		int32_t			nspPlayerID;			// this player's net sprocket id#
 		uint8_t			pauseState;
+		short			cpuPOWType;				// kEvCpuThrow: POW this CPU uses in frame cpuPOWFrame, or POW_TYPE_NONE
+		Boolean			cpuPOWBackward;
+		uint32_t		cpuPOWFrame;			// host frame
 	} net;
 
 

@@ -193,7 +193,7 @@ static void ParseCommandLine(int argc, char **argv) {
           ParseIntegerArgument("--track", argc, argv, &i, 1, NUM_RACE_TRACKS);
     } else if (argument == "--smoke-test-frames") {
       gCommandLine.smokeTestFrames =
-          ParseIntegerArgument("--smoke-test-frames", argc, argv, &i, 1, 600);
+          ParseIntegerArgument("--smoke-test-frames", argc, argv, &i, 1, 36000);
     } else if (argument == "--smoke-net-players") {
       // smoke only: a --host run starts the race once this many players (itself included) joined
       gCommandLine.smokeNetPlayers = ParseIntegerArgument(
@@ -202,6 +202,12 @@ static void ParseCommandLine(int argc, char **argv) {
       // smoke only: ...and once this many further joins were refused because the game is full
       gCommandLine.smokeNetRefusals = ParseIntegerArgument(
           "--smoke-net-refusals", argc, argv, &i, 1, NSpGame_GetMaxPlayers());
+    } else if (argument == "--smoke-local-players") {
+      // smoke only: race --track as a local split-screen multiplayer race with this many humans
+      gCommandLine.smokeLocalPlayers = ParseIntegerArgument(
+          "--smoke-local-players", argc, argv, &i, 2, MAX_LOCAL_PLAYERS);
+    } else if (argument == "--smoke-cpu-fill") {
+      gCommandLine.smokeCPUFill = true;	// smoke only: either race with CPU cars in its empty slots
     } else if (argument == "--print-max-net-players") {
       gCommandLine.printMaxNetPlayers = true;	// dev/test: report how many players one LAN game seats
     } else if (argument == "--car") {
@@ -271,6 +277,14 @@ static void ParseCommandLine(int argc, char **argv) {
   if (gCommandLine.smokeNetPlayers &&
       (!gCommandLine.netHost || !gCommandLine.smokeTestFrames)) {
     throw std::invalid_argument("--smoke-net-players requires --host and --smoke-test-frames");
+  }
+  if (gCommandLine.smokeLocalPlayers &&
+      (!gCommandLine.bootToTrack || !gCommandLine.smokeTestFrames || gCommandLine.netHost)) {
+    throw std::invalid_argument(
+        "--smoke-local-players requires --track and --smoke-test-frames and cannot use --host");
+  }
+  if (gCommandLine.smokeCPUFill && !gCommandLine.smokeLocalPlayers && !gCommandLine.smokeNetPlayers) {
+    throw std::invalid_argument("--smoke-cpu-fill requires --smoke-local-players or --smoke-net-players");
   }
   // Joins are only refused once every seat is taken.
   if (gCommandLine.smokeNetRefusals &&

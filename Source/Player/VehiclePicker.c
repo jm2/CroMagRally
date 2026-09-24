@@ -57,3 +57,45 @@ const int best = GetBestUnlockedLandCarType(rules->agesCompleted);
 
 	return best - cpuIndex % (best + 1);
 }
+
+
+/******************** SHARED CPU VEHICLE RANDOM *********************/
+//
+// Hard mode's draw for a network CPU. A stateless function of the seed and the slot:
+// it neither consumes the synced RNG nor depends on the order peers pick in. The
+// draw is scaled in integers, so every platform rounds it alike.
+//
+
+static uint16_t SharedCPUVehicleRandom(void* context, int cpuIndex, uint16_t min, uint16_t max)
+{
+	const SharedCPUVehicleSeed* seed = (const SharedCPUVehicleSeed*) context;
+	const uint32_t slot = (uint32_t) (seed->firstCPUSlot + cpuIndex);
+	const uint32_t draw = (uint32_t) (DeterministicStableFloat(kDeterministicEvent_CpuVehicle, seed->key, slot)
+										* 16777216.0f);					// the float's 24-bit integer, exactly
+	const uint32_t range = (uint32_t) max - min + 1u;
+
+	return (uint16_t) (min + (uint32_t) (((uint64_t) draw * range) >> 24));
+}
+
+
+/******************** INIT SHARED CPU VEHICLE PICK RULES *********************/
+
+void InitSharedCPUVehiclePickRules(CPUVehiclePickRules* rules, SharedCPUVehicleSeed* seed,
+		const short humanCars[], int numHumans, int difficulty, int trackNum)
+{
+	seed->key = DeterministicPairKey((uint32_t) trackNum, (uint32_t) numHumans);
+	seed->firstCPUSlot = numHumans;
+
+	rules->humanCarMask = 0;
+	for (int h = 0; h < numHumans; h++)
+	{
+		if (humanCars[h] >= 0 && humanCars[h] < NUM_LAND_CAR_TYPES)
+			rules->humanCarMask |= 1u << humanCars[h];
+		seed->key = DeterministicPairKey(seed->key, (uint32_t) humanCars[h]);
+	}
+
+	rules->agesCompleted = MAX_UNLOCKING_AGES;							// the whole roster, whatever this machine unlocked
+	rules->difficulty = difficulty;
+	rules->randomRange = SharedCPUVehicleRandom;
+	rules->randomContext = seed;
+}

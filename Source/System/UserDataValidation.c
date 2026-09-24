@@ -74,6 +74,7 @@ Boolean SanitizePrefs(PrefsType* prefs, const PrefsType* defaults)
 	REPAIR_FIELD_IF_INVALID(gamepadRumble, prefs->gamepadRumble <= 1);
 	REPAIR_FIELD_IF_INVALID(tournamentProgression.numTracksCompleted,
 		prefs->tournamentProgression.numTracksCompleted <= NUM_RACE_TRACKS);
+	REPAIR_FIELD_IF_INVALID(cpuFill, prefs->cpuFill <= 1);
 
 #undef REPAIR_FIELD_IF_INVALID
 

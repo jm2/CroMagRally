@@ -10,6 +10,7 @@
 /****************************/
 
 #include "game.h"
+#include "cpu_fill.h"
 #include "vehicle_picker.h"
 
 /****************************/
@@ -139,19 +140,12 @@ short	i;
 
 
 			/* SEE HOW MANY PLAYERS IN GAME */
+			//
+			// CPU cars (isComputer above) take every slot after the humans'. Multiplayer
+			// races only have them with CPU fill; battle modes never do.
+			//
 
-	switch(gGameMode)
-	{
-		case	GAME_MODE_PRACTICE:
-		case	GAME_MODE_TOURNAMENT:
-//		case	GAME_MODE_MULTIPLAYERRACE:
-				gNumTotalPlayers = MAX_PLAYERS;                 // use them all
-				break;
-
-		default:
-				gNumTotalPlayers = gNumRealPlayers;				// no CPU players in battle modes
-				break;
-	}
+	gNumTotalPlayers = CountPlayersInGame(gGameMode, gNumRealPlayers, gCPUFillThisRace);
 
 
 	SafeDisposePtr((Ptr) backup);
@@ -169,6 +163,7 @@ void InitPlayersAtStartOfLevel(void)
 int		i,j;
 int		numCPUVehiclesPicked = 0;
 CPUVehiclePickRules	cpuVehicleRules = { .randomRange = SyncedCPUVehicleRandom };
+SharedCPUVehicleSeed	sharedCPUVehicleSeed;
 
 	gWorstHumanPlace = 0;
 	gNumPlayersEliminated = 0;
@@ -192,14 +187,46 @@ CPUVehiclePickRules	cpuVehicleRules = { .randomRange = SyncedCPUVehicleRandom };
 	cpuVehicleRules.difficulty = gDifficulty;
 
 
+		/* NETWORK CPU FILL CARS COME FROM SHARED STATE */
+		//
+		// Every peer must seat the same cars, so they depend only on what the peers
+		// share: the humans' choices (including players who left since), the track and
+		// the difficulty. Never on local unlocks or the synced RNG.
+		//
+
+	if (gNetGameInProgress)
+	{
+		short	humanCars[MAX_PLAYERS];
+
+		for (i = 0; i < gNumRealPlayers; i++)
+			humanCars[i] = gPlayerInfo[i].vehicleType;
+
+		InitSharedCPUVehiclePickRules(&cpuVehicleRules, &sharedCPUVehicleSeed,
+				humanCars, gNumRealPlayers, gDifficulty, gTrackNum);
+	}
+
+
+		/* KEEP CPU DRIVERS FROM LOOKING LIKE THE HUMANS */
+		//
+		// Humans picked their looks after InitPlayerInfo_Game dealt them out. A network
+		// bot keeps the look its peer picked; network fill CPUs are dressed from what every
+		// peer shares, so they look the same on every screen.
+		//
+
+	if (!gNetGameInProgress)
+		MakeCPULooksDistinct(gPlayerInfo, gNumTotalPlayers);
+	else if (gCPUFillThisRace)
+		DressNetworkFillCPUs(gPlayerInfo, gNumRealPlayers, gNumTotalPlayers);
+
+
 			/* SET SOME GLOBALS */
 
 	for (i = 0; i < gNumTotalPlayers; i++)
 	{
-		// Network replacements retain the shared selection (or its default).
-		// Local unlock progress must not change their vehicle or consume synced RNG.
-		// Pick in player order: Hard draws stay interleaved with SetPhysicsForVehicleType's.
-		if (gPlayerInfo[i].isComputer && !gNetGameInProgress)		// set local CPU vehicle type
+		// Network replacements (human slots) retain the shared selection (or its default);
+		// network CPU fill cars (every slot after the humans') get the shared picks above.
+		// Pick in player order: local Hard draws stay interleaved with SetPhysicsForVehicleType's.
+		if (gPlayerInfo[i].isComputer && (!gNetGameInProgress || i >= gNumRealPlayers))	// set CPU vehicle type
 			gPlayerInfo[i].vehicleType = PickCPUVehicle(&cpuVehicleRules, numCPUVehiclesPicked++);
 
 		gPlayerInfo[i].coord.y = GetTerrainY(gPlayerInfo[i].startX,gPlayerInfo[i].startZ);
@@ -344,6 +371,7 @@ CPUVehiclePickRules	cpuVehicleRules = { .randomRange = SyncedCPUVehicleRandom };
 		gPlayerInfo[i].attackTimer		= 2;					// dont attack for the first few seconds
 		gPlayerInfo[i].targetedPlayer	= -1;					// no players targeted yet
 		gPlayerInfo[i].targetingTimer	= 0;
+		gPlayerInfo[i].net.cpuPOWType	= POW_TYPE_NONE;		// no host-scheduled POW use (network games)
 		gPlayerInfo[i].pathVec.x	= 0;
 		gPlayerInfo[i].pathVec.y	= 0;
 
