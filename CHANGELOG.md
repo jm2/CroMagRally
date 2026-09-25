@@ -27,6 +27,7 @@
     - Harden player-count limits: supertile player masks cover up to 16 players, place numbers and announcer lines can't index past their tables, the collision list checks its capacity before writing, and the self-running demo's last place follows the player count.
     - Sample each car's starting height at its own start position (an original typo used the x coordinate twice).
     - Developers: add `--join-address HOST[:PORT]` to join a LAN game directly without discovery, smoke-only `--smoke-net-players`/`--smoke-net-refusals` auto-start, `--print-max-net-players`, and `Tests/NetworkSmokeTests.py` for headless multi-instance LAN runs. A `--smoke-test-frames` run that ends before its completion line now exits with status 1.
+    - Debian packages built against the system SDL declare the SDL runtime package and minimum version they need. Packaging a source-built shared SDL without bundling it is now a configure error instead of a package with no SDL.
 
 - **3.1.1 (July 15, 2026)**
     - Use one pinned SDL3 source checkout across every supported platform.

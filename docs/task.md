@@ -131,10 +131,13 @@ Merge in subsystem order: [network #35](https://github.com/jm2/CroMagRally/pull/
 remain focused; retarget successors to master as their predecessors merge.
 
 PRs #35–#37 have merged with passing CI and clean final-head bot reviews.
-PRs #38–#40 remain open: their initial CI exposed the test portability defect
-tracked in #41. Its repair is now included in all three branches, with CI and
-final-head bot reviews rerunning. Checked entries below mean implemented and
-locally tested; remaining merges still require passing CI and a clean review.
+#39 merged into the audio branch, so #38 carries the race-record fix to master.
+The test portability repair (#41) is included in #38 and #40. On 2026-09-25 both
+branches took master (the player-limit work, #42–#44), and #40 took the three
+packaging review fixes: it rejects an unbundled source-built shared SDL, requires
+a versioned SDL dependency, and installs both DEBs in CI to race through the
+installed launcher. Checked entries below mean implemented and locally tested;
+remaining merges still require passing CI and a clean review.
 
 - [x] [#26](https://github.com/jm2/CroMagRally/issues/26) — Advance network race-end cooldown according to synchronized simulation progress; keep completion consistent across client hold/catch-up renders and freeze during pause.
 - [x] [#27](https://github.com/jm2/CroMagRally/issues/27) — Give terrain LZSS decoding a destination-capacity contract, check before emitting bytes, and reject incomplete input before texture use.
