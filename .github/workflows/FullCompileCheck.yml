@@ -112,6 +112,40 @@ jobs:
         if: matrix.platform.name == 'Linux/GCC'
         run: python3 Tests/MalformedAssetTests.py build-sanitize/CroMagRally
 
+  # Debian provides a packaged SDL3, allowing dpkg-shlibdeps to resolve the
+  # external runtime and tests to inspect both supported DEB layouts, then
+  # install each one and race a few headless frames through its launcher.
+  debian-sdl-packaging:
+    name: Debian SDL packaging
+    runs-on: ubuntu-latest
+    container: debian:trixie-slim@sha256:abc9cb88a5587630d7f915f47b23b0668fe250fbfc6457aa4d52b534c1bbf73f
+    timeout-minutes: 20
+    env:
+      TMPDIR: /var/tmp
+    steps:
+      - name: Install Debian build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends cmake ninja-build g++ git python3 \
+            dpkg-dev file libsdl3-dev libgl-dev ca-certificates \
+            libegl1 libegl-mesa0 libgl1-mesa-dri   # SDL's offscreen driver for the installed smoke
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with: {submodules: 'recursive'}
+      - name: Build, inspect and install bundled and external SDL packages
+        run: |
+          cmr_build="${TMPDIR:-/var/tmp}/cmr-debian"
+          cmake -S . -B "$cmr_build" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SDL_FROM_SOURCE=OFF -DCMR_INSTALL=ON -DCMR_BUNDLE_SDL=OFF
+          cmake --build "$cmr_build" --parallel 2
+          ctest --test-dir "$cmr_build" --output-on-failure --no-tests=error
+          cpack -G DEB --config "$cmr_build/CPackConfig.cmake" -B "$cmr_build/packages/system"
+          cmake -S . -B "$cmr_build" -DCMR_BUNDLE_SDL=ON
+          cpack -G DEB --config "$cmr_build/CPackConfig.cmake" -B "$cmr_build/packages/bundled"
+          # Install into a system without the SDL build packages and the libraries they
+          # pulled in, so each package's own Depends must bring in what it needs.
+          apt-get purge -y --auto-remove libsdl3-dev libsdl3-0
+          python3 Tests/DebianPackageTests.py --install "$cmr_build"/packages/bundled/*.deb "$cmr_build"/packages/system/*.deb
+
   # Exercise both release device builds and the developer scripts' simulator defaults.
   apple-mobile-check:
     name: Apple mobile (${{ matrix.target.name }}, ${{ matrix.destination }})

@@ -885,6 +885,11 @@ if(CMR_INSTALL)
 	if(NOT UNIX OR APPLE)
 		message(FATAL_ERROR "CMR_INSTALL is only supported for Linux (FHS) packaging")
 	endif()
+	# A shared SDL built from source is never installed on its own, so the package would
+	# ship without SDL and without a dependency on one.
+	if(BUILD_SDL_FROM_SOURCE AND NOT SDL_STATIC AND NOT CMR_BUNDLE_SDL)
+		message(FATAL_ERROR "CMR_INSTALL with BUILD_SDL_FROM_SOURCE and a shared SDL requires CMR_BUNDLE_SDL=ON")
+	endif()
 
 	# Deliberately the literal "lib/cromagrally", NOT GNUInstallDirs/CMAKE_INSTALL_LIBDIR:
 	# on Fedora/Arch the latter is "lib64", but the launcher wrapper hard-codes "lib" and
@@ -1000,12 +1005,17 @@ if(CMR_INSTALL)
 	set(CPACK_DEBIAN_PACKAGE_SECTION "games")
 	set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
 	set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "${CPACK_PACKAGE_HOMEPAGE_URL}")
-	# CRITICAL: dpkg-shlibdeps would abort generation on the private, non-system libSDL3.so.0,
-	# so it's off and we declare runtime deps by hand.
+	# An SDL built here and bundled dlopen()s its platform libraries, so keep manual
+	# dependencies for it. Any other shared SDL comes from the distribution: let
+	# dpkg-shlibdeps find its runtime package and version (external SDL), or the
+	# libraries a distribution SDL copied into the package links against (bundled).
 	set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS OFF)
+	if(NOT SDL_STATIC AND NOT (CMR_BUNDLE_SDL AND BUILD_SDL_FROM_SOURCE))
+		set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+	endif()
 	set(CPACK_DEBIAN_PACKAGE_DEPENDS "libc6, libstdc++6, libgcc-s1, libgl1, libglx0, libopengl0")
-	# SDL dlopen()s these at runtime (not in DT_NEEDED), and only one of X11/Wayland is needed
-	# on any given host, so they are Recommends rather than hard Depends.
+	# A source-built SDL dlopen()s these at runtime (not in DT_NEEDED), and only one of
+	# X11/Wayland is needed on any given host, so they are Recommends rather than hard Depends.
 	set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "libx11-6, libxext6, libxcursor1, libxi6, libxrandr2, libxfixes3, libwayland-client0, libxkbcommon0, libasound2 | libasound2t64, libpulse0")
 
 	# ---- RPM ----
