@@ -11,6 +11,8 @@ import subprocess
 import sys
 import tempfile
 
+MIN_SDL_VERSION = (3, 2, 0)
+
 
 def field(package, name):
     return subprocess.check_output(["dpkg-deb", "--field", str(package), name], text=True).strip()
@@ -21,8 +23,10 @@ def verify(package, bundled):
     dependencies = field(package, "Depends")
     private_sdl = bool(re.search(r"\./usr/lib(?:exec)?/cromagrally/libSDL3\.so", contents))
     external_sdl = bool(re.search(r"(?:^|,)\s*libsdl3-0(?:\s|,|$)", dependencies))
-    # dpkg-shlibdeps takes the minimum version from the library's symbols file.
-    versioned_sdl = bool(re.search(r"(?:^|,)\s*libsdl3-0\s*\(>=\s*3\.\d+\.\d+[^)]*\)", dependencies))
+    # dpkg-shlibdeps takes the minimum version from the library's symbols file. SDL 3.2.0
+    # is SDL3's first stable ABI, so anything lower would admit a preview release.
+    sdl_minimum = re.search(r"(?:^|,)\s*libsdl3-0\s*\(>=\s*(\d+)\.(\d+)\.(\d+)[^)]*\)", dependencies)
+    versioned_sdl = bool(sdl_minimum) and tuple(map(int, sdl_minimum.groups())) >= MIN_SDL_VERSION
     assert private_sdl == bundled, (package, contents)
     assert external_sdl != bundled, (package, dependencies)
     assert versioned_sdl != bundled, (package, dependencies)
