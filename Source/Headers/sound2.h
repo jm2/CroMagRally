@@ -187,6 +187,9 @@ void Update3DSoundChannel(short effectNum, short *channel, const OGLPoint3D *whe
 Boolean IsEffectChannelPlaying(short chanNum);
 int GetNumBusyEffectChannels(void);
 void UpdateListenerLocation(void);
+void CalcSpatialAudioVolume(const OGLPoint3D* source, float refDistance, float volumeAdjust,
+	const OGLPoint3D* ears, const OGLVector3D* eyes, int numListeners,
+	uint32_t* leftOut, uint32_t* rightOut);
 void ChangeChannelRate(short channel, long rateMult);
 void StopAChannelIfEffectNum(short *channelNum, short effectNum);
 void UpdateGlobalVolume(void);
