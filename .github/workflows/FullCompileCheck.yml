@@ -141,6 +141,9 @@ jobs:
           cpack -G DEB --config "$cmr_build/CPackConfig.cmake" -B "$cmr_build/packages/system"
           cmake -S . -B "$cmr_build" -DCMR_BUNDLE_SDL=ON
           cpack -G DEB --config "$cmr_build/CPackConfig.cmake" -B "$cmr_build/packages/bundled"
+          # Install into a system without the SDL build packages and the libraries they
+          # pulled in, so each package's own Depends must bring in what it needs.
+          apt-get purge -y --auto-remove libsdl3-dev libsdl3-0
           python3 Tests/DebianPackageTests.py --install "$cmr_build"/packages/bundled/*.deb "$cmr_build"/packages/system/*.deb
 
   # Exercise both release device builds and the developer scripts' simulator defaults.
