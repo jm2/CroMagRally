@@ -113,7 +113,8 @@ jobs:
         run: python3 Tests/MalformedAssetTests.py build-sanitize/CroMagRally
 
   # Debian provides a packaged SDL3, allowing dpkg-shlibdeps to resolve the
-  # external runtime and tests to inspect both supported DEB layouts.
+  # external runtime and tests to inspect both supported DEB layouts, then
+  # install each one and race a few headless frames through its launcher.
   debian-sdl-packaging:
     name: Debian SDL packaging
     runs-on: ubuntu-latest
@@ -126,10 +127,11 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends cmake ninja-build g++ git python3 \
-            dpkg-dev file libsdl3-dev libgl-dev ca-certificates
+            dpkg-dev file libsdl3-dev libgl-dev ca-certificates \
+            libegl1 libegl-mesa0 libgl1-mesa-dri   # SDL's offscreen driver for the installed smoke
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with: {submodules: 'recursive'}
-      - name: Build and inspect bundled and external SDL packages
+      - name: Build, inspect and install bundled and external SDL packages
         run: |
           cmr_build="${TMPDIR:-/var/tmp}/cmr-debian"
           cmake -S . -B "$cmr_build" -G Ninja -DCMAKE_BUILD_TYPE=Release \
@@ -139,7 +141,7 @@ jobs:
           cpack -G DEB --config "$cmr_build/CPackConfig.cmake" -B "$cmr_build/packages/system"
           cmake -S . -B "$cmr_build" -DCMR_BUNDLE_SDL=ON
           cpack -G DEB --config "$cmr_build/CPackConfig.cmake" -B "$cmr_build/packages/bundled"
-          python3 Tests/DebianPackageTests.py "$cmr_build"/packages/bundled/*.deb "$cmr_build"/packages/system/*.deb
+          python3 Tests/DebianPackageTests.py --install "$cmr_build"/packages/bundled/*.deb "$cmr_build"/packages/system/*.deb
 
   # Exercise both release device builds and the developer scripts' simulator defaults.
   apple-mobile-check:
