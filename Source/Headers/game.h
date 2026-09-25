@@ -179,7 +179,6 @@ extern short					gWhoWasIt;
 extern short					gWorstHumanPlace;
 extern SplineDefType			**gSplineList;
 extern SplineDefType			**gSplineList;
-extern Str32					gPlayerNameStrings[MAX_PLAYERS];
 extern SuperTileGridType		**gSuperTileTextureGrid;
 extern SuperTileStatus			**gSuperTileStatusGrid;
 extern TerrainItemEntryType		**gMasterItemList;
