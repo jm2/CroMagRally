@@ -11,7 +11,9 @@
 /****************************/
 
 #include "game.h"
+#include "driver_looks.h"
 #include "network.h"		// Net_IsConnectionBadgeVisible for the in-game connection hint
+#include "localplayers.h"
 #include <stddef.h>
 
 /****************************/
@@ -23,6 +25,8 @@ static void DrawInfobar(ObjNode* theNode);
 
 static void Infobar_DrawMap(Byte whichPane);
 static void Infobar_MovePlace(ObjNode* objNode);
+static void Infobar_DrawPlaceDigits(ObjNode* objNode);
+static void LoadPlaceDigitFont(void);
 static void Infobar_MoveInventoryPOW(ObjNode* objNode);
 static void Infobar_MoveWrongWay(ObjNode* objNode);
 static void Infobar_DrawStartingLight(Byte whichPane);
@@ -37,6 +41,7 @@ static void Infobar_DrawHealth(Byte whichPane);
 static void Infobar_DrawNetBadge(Byte whichPane);
 
 static void MoveFinalPlace(ObjNode *theNode);
+static void DrawFinalPlaceDigits(ObjNode *theNode);
 static void MovePressAnyKey(ObjNode *theNode);
 
 
@@ -53,6 +58,12 @@ static void MovePressAnyKey(ObjNode *theNode);
 #define MAX_PANEDIVIDER_QUADS		4
 
 #define MAX_SUBICONS				12
+
+#define PLACE_SUB_NUMBER			0		// big number sprite (1st-6th)
+#define PLACE_SUB_ORDINAL			1		// "st", "nd", "rd", "th"...
+#define PLACE_SUB_DIGITS			2		// past the number sprites: the number in wall font digits
+
+#define ICONFLAG_PLACEDIGITS		0x40	// Infobar_MakeIcon: draws the place number in wall font digits
 
 #define MAX_POWTIMERS 6
 
@@ -95,6 +106,8 @@ typedef struct
 	int sub;
 	int displayedValue;
 	int state;
+	int pane;				// split-screen pane that shows this icon (node->PlayerNum is the player it tracks)
+	bool hiddenForGood;		// hidden by ShowFinalPlace: a move call that sets its own visibility must not show it again
 } InfobarIconData;
 CheckSpecialDataStruct(InfobarIconData);
 #define GetInfobarIconData(node) GetSpecialData(node, InfobarIconData)
@@ -141,17 +154,7 @@ static const struct
 	{ offsetof(PlayerInfoType, flamingTimer),			INFOBAR_SObjType_RedTorch },
 };
 
-static int8_t gPOWTimersByRow[MAX_LOCAL_PLAYERS][MAX_POWTIMERS];
-
-const OGLColorRGB kCavemanSkinColors[NUM_CAVEMAN_SKINS] =
-{
-	[CAVEMAN_SKIN_BROWN]	=	{.8,.5,.3},
-	[CAVEMAN_SKIN_GREEN]	=	{ 0, 1, 0},
-	[CAVEMAN_SKIN_BLUE]		=	{ 0, 0, 1},
-	[CAVEMAN_SKIN_GRAY]		=	{.5,.5,.5},
-	[CAVEMAN_SKIN_RED]		=	{ 1, 0, 0},
-	[CAVEMAN_SKIN_WHITE]	=	{ 1, 1, 1},
-};
+static int8_t gPOWTimersByRow[MAX_SPLITSCREENS][MAX_POWTIMERS];		// per pane, not per player number
 
 /*********************/
 /*    VARIABLES      */
@@ -222,12 +225,17 @@ static float GetIconY(Byte whichPane, int iconID)
 
 static void HideIconObjects(int playerNum, int iconType)
 {
+	int pane = GetLocalSlotForPlayer(playerNum);				// icons are stored per pane, not per player number
+	if (pane < 0)
+		return;
+
 	for (int i = 0; i < MAX_SUBICONS; i++)
 	{
-		ObjNode* icon = gInfobarIconObjs[playerNum][iconType][i];
+		ObjNode* icon = gInfobarIconObjs[pane][iconType][i];
 		if (icon)
 		{
 			SetObjectVisible(icon, false);
+			GetInfobarIconData(icon)->hiddenForGood = true;
 		}
 	}
 }
@@ -385,11 +393,11 @@ static const char*	maps[] =
 
 			/* RESET ROW ALLOCATIONS FOR POW TIMERS */
 
-	for (int p = 0; p < MAX_LOCAL_PLAYERS; p++)
+	for (int pane = 0; pane < MAX_SPLITSCREENS; pane++)
 	{
 		for (int row = 0; row < MAX_POWTIMERS; row++)
 		{
-			gPOWTimersByRow[p][row] = -1;
+			gPOWTimersByRow[pane][row] = -1;
 		}
 	}
 
@@ -407,6 +415,12 @@ static const char*	maps[] =
 		.drawCall = DrawInfobar,
 	};
 	gInfobarMasterObj = MakeNewObject(&masterObjDef);
+
+
+			/* LOAD DIGITS FOR PLACES PAST THE PLACE SPRITES */
+
+	if (IsRaceMode() && GetPlaceNumber(gNumTotalPlayers - 1).numDigits > 0)
+		LoadPlaceDigitFont();
 
 
 	MakeInfobar();
@@ -509,8 +523,9 @@ static void Infobar_MakeIcon(uint8_t type, uint8_t flags)
 		[ICON_FLAG]				= Infobar_MoveFlag,
 	};
 
-	uint8_t sub = flags & 0x7f;
+	uint8_t sub = flags & 0x3f;
 	bool isText = !!(flags & 0x80);
+	bool isPlaceDigits = !!(flags & ICONFLAG_PLACEDIGITS);
 
 	GAME_ASSERT(type < NUM_INFOBAR_ICONTYPES);
 	GAME_ASSERT(sub < MAX_SUBICONS);
@@ -525,27 +540,44 @@ static void Infobar_MakeIcon(uint8_t type, uint8_t flags)
 		.projection = kProjectionType2DOrthoFullRect,
 	};
 
-	if (!isText)
+	if (isPlaceDigits)
+	{
+		def.genre = CUSTOM_GENRE;
+		def.drawCall = Infobar_DrawPlaceDigits;
+	}
+	else if (!isText)
 	{
 		def.group = SPRITE_GROUP_INFOBAR;
 		def.type = INFOBAR_SObjType_WrongWay;
 	}
 
+	GAME_ASSERT(gNumSplitScreenPanes <= MAX_SPLITSCREENS);
+
 	for (int pane = 0; pane < gNumSplitScreenPanes; pane++)
 	{
 		ObjNode* obj = NULL;
 
-		def.player = GetPlayerNum(pane);		// TODO: maybe revise this for net games
+		def.player = GetPlayerNum(pane);		// player shown in this pane (a net game's only pane shows gMyNetworkPlayerNum)
 
 		if (isText)
+		{
 			obj = TextMesh_New("?", kTextMeshAlignLeft, &def);
+		}
+		else if (isPlaceDigits)
+		{
+			obj = MakeNewObject(&def);
+			UpdateObjectTransforms(obj);
+		}
 		else
+		{
 			obj = MakeSpriteObject(&def);
+		}
 
 		InfobarIconData* special = GetInfobarIconData(obj);
 		special->type = type;
 		special->sub = sub;
 		special->displayedValue = -1;
+		special->pane = pane;
 //		special->allocatedRow = -1;
 
 		gInfobarIconObjs[pane][type][sub] = obj;
@@ -555,7 +587,7 @@ static void Infobar_MakeIcon(uint8_t type, uint8_t flags)
 static void Infobar_RepositionIconTemp(ObjNode* theNode)
 {
 	const InfobarIconData* special = GetInfobarIconData(theNode);
-	int pane = theNode->PlayerNum;
+	int pane = special->pane;								// not PlayerNum: net player numbers exceed the pane count
 	int id = special->type;
 	int sub = special->sub;
 	theNode->Coord.x = GetIconX(pane, id) + sub * GetIconXSpacing(id);
@@ -605,8 +637,10 @@ static void MakeInfobar(void)
 
 	if (IsRaceMode())
 	{
-		Infobar_MakeIcon(ICON_PLACE, 0);		// big number
-		Infobar_MakeIcon(ICON_PLACE, 1);		// ordinal
+		Infobar_MakeIcon(ICON_PLACE, PLACE_SUB_NUMBER);		// big number
+		Infobar_MakeIcon(ICON_PLACE, PLACE_SUB_ORDINAL);	// ordinal
+		if (GetPlaceNumber(gNumTotalPlayers - 1).numDigits > 0)
+			Infobar_MakeIcon(ICON_PLACE, ICONFLAG_PLACEDIGITS | PLACE_SUB_DIGITS);	// number past 6th
 		Infobar_MakeIcon(ICON_WRONGWAY, 0);
 		Infobar_MakeIcon(ICON_LAP, 0);
 
@@ -797,6 +831,7 @@ static void Infobar_DrawMap(Byte whichPane)
 
 			/* SET COLOR */
 
+
 		switch(gGameMode)
 		{
 			case	GAME_MODE_TAG1:
@@ -808,7 +843,10 @@ static void Infobar_DrawMap(Byte whichPane)
 					break;
 
 			default:
-					gGlobalColorFilter = kCavemanSkinColors[gPlayerInfo[i].skin];
+					if (gGameMode == GAME_MODE_CAPTUREFLAG)			// CTF outfits are team colours, not drivers
+						gGlobalColorFilter = kCavemanSkinColors[gPlayerInfo[i].skin];
+					else
+						gGlobalColorFilter = GetDriverBlipColor(gPlayerInfo[i].skin, GetPlayerOutfitRank(i));
 		}
 
 		
@@ -861,31 +899,43 @@ static void Infobar_DrawMap(Byte whichPane)
 
 /********************** DRAW PLACE *************************/
 
-static int LocalizeOrdinalSprite(int place, int sex)
+static void LoadPlaceDigitFont(void)
 {
-	switch (gGamePrefs.language)
-	{
-		case LANGUAGE_ENGLISH:
-		default:
-			switch (place)
-			{
-				case 0: return INFOBAR_SObjType_PlaceST;
-				case 1: return INFOBAR_SObjType_PlaceND;
-				case 2: return INFOBAR_SObjType_PlaceRD;
-				default: return INFOBAR_SObjType_PlaceTH;
-			}
-			break;
+	LoadSpriteGroup(SPRITE_GROUP_PLACEDIGITS, "wallfont", kAtlasLoadFont);		// does nothing once loaded
+}
 
-		case LANGUAGE_FRENCH:
-			if (place == 0)
-				return sex==1? INFOBAR_SObjType_PlaceRE: INFOBAR_SObjType_PlaceER;
-			else
-				return INFOBAR_SObjType_PlaceE;
-			break;
+// How far right the ordinal sprite goes for this number (see GetPlaceOrdinalX)
+static float GetOrdinalOffset(const PlaceNumber* number)
+{
+	if (number->numDigits == 0)								// a number sprite: the wall font may not be loaded
+		return 0;
 
-		case LANGUAGE_ITALIAN:
-			return sex==1? INFOBAR_SObjType_PlaceA: INFOBAR_SObjType_PlaceO;
-	}
+	LoadPlaceDigitFont();									// InitInfobar preloads it, but never draw without it
+
+	const AtlasGlyph* glyph = GetSpriteInfo(SPRITE_GROUP_PLACEDIGITS, '0');	// the font's digits are monospaced
+	GAME_ASSERT(glyph);
+	return GetPlaceOrdinalX(number->numDigits, glyph->xadv);
+}
+
+// Draws a place number past the number sprites in wall font digits, ending at
+// the node's origin, where the ordinal sprite begins. Heartbeat twitches then
+// grow the number and its ordinal from the same point, like a number sprite.
+static void DrawPlaceDigits(ObjNode* node, int place)
+{
+	PlaceNumber number = GetPlaceNumber(place);
+	if (number.numDigits == 0)
+		return;
+
+	OGL_PushState();
+	glMultMatrixf(node->BaseTransformMatrix.value);
+	glScalef(PLACE_DIGIT_SCALE, PLACE_DIGIT_SCALE, 1);
+	Atlas_ImmediateDraw(SPRITE_GROUP_PLACEDIGITS, number.digits, kTextMeshAlignRight | kTextMeshAlignMiddle | kTextMeshKeepCurrentProjection);
+	OGL_PopState();
+}
+
+static void Infobar_DrawPlaceDigits(ObjNode* node)
+{
+	DrawPlaceDigits(node, GetInfobarIconData(node)->displayedValue);
 }
 
 static void Infobar_MovePlace(ObjNode* node)
@@ -895,6 +945,9 @@ static void Infobar_MovePlace(ObjNode* node)
 	int sex = gPlayerInfo[playerNum].sex;
 
 	InfobarIconData* special = GetInfobarIconData(node);
+
+	if (special->hiddenForGood)							// ShowFinalPlace took over
+		return;
 
 	if (special->displayedValue != place)
 	{
@@ -907,21 +960,29 @@ static void Infobar_MovePlace(ObjNode* node)
 		special->displayedValue = place;
 	}
 
-	switch (GetInfobarIconData(node)->sub)
+	PlaceNumber number = GetPlaceNumber(place);
+
+	Infobar_RepositionIconTemp(node);
+
+	switch (special->sub)
 	{
-		case 0:
-			ModifySpriteObjectFrame(node, INFOBAR_SObjType_Place1+place);
+		case PLACE_SUB_NUMBER:
+			if (SetObjectVisible(node, number.sprite != INFOBAR_SObjType_NULL))
+				ModifySpriteObjectFrame(node, number.sprite);
 			break;
 
-		case 1:
-			ModifySpriteObjectFrame(node, LocalizeOrdinalSprite(place, sex));
+		case PLACE_SUB_ORDINAL:
+			ModifySpriteObjectFrame(node, GetPlaceOrdinalSprite(place, gGamePrefs.language, sex));
+			node->Coord.x += GetOrdinalOffset(&number) * node->Scale.x;
 			break;
 
-		default:
-			ModifySpriteObjectFrame(node, INFOBAR_SObjType_WrongWay);
+		case PLACE_SUB_DIGITS:							// past the number sprites (drawn by Infobar_DrawPlaceDigits)
+			SetObjectVisible(node, number.numDigits > 0);
+			node->Coord.x += GetOrdinalOffset(&number) * node->Scale.x;
+			break;
 	}
 
-	Infobar_RepositionIcon(node);
+	UpdateObjectTransforms(node);
 }
 
 /********************** DRAW WEAPON TYPE *************************/
@@ -1312,11 +1373,13 @@ static void Infobar_MoveToken(ObjNode* node)
 
 /********************* DRAW TIMER POWERUPS **************************/
 
-static int GetRowForPOWTimer(int playerNum, int powTimerID)
+static int GetRowForPOWTimer(int pane, int powTimerID)
 {
+	GAME_ASSERT(pane >= 0 && pane < MAX_SPLITSCREENS);
+
 	for (int row = 0; row < MAX_POWTIMERS; row++)
 	{
-		if (gPOWTimersByRow[playerNum][row] == powTimerID)
+		if (gPOWTimersByRow[pane][row] == powTimerID)
 		{
 			return row;
 		}
@@ -1325,13 +1388,15 @@ static int GetRowForPOWTimer(int playerNum, int powTimerID)
 	return -1;
 }
 
-static int AllocRowForNewPOWTimer(int playerNum, int powTimerID)
+static int AllocRowForNewPOWTimer(int pane, int powTimerID)
 {
+	GAME_ASSERT(pane >= 0 && pane < MAX_SPLITSCREENS);
+
 	for (int row = 0; row < MAX_POWTIMERS; row++)
 	{
-		if (gPOWTimersByRow[playerNum][row] < 0)
+		if (gPOWTimersByRow[pane][row] < 0)
 		{
-			gPOWTimersByRow[playerNum][row] = powTimerID;
+			gPOWTimersByRow[pane][row] = powTimerID;
 			return row;
 		}
 	}
@@ -1339,11 +1404,11 @@ static int AllocRowForNewPOWTimer(int playerNum, int powTimerID)
 	return -1;
 }
 
-static void FreeRowTakenByPOWTimer(int playerNum, int powTimerID)
+static void FreeRowTakenByPOWTimer(int pane, int powTimerID)
 {
-	int8_t* rowAllocation = &gPOWTimersByRow[playerNum][0];
+	int8_t* rowAllocation = &gPOWTimersByRow[pane][0];
 
-	int row = GetRowForPOWTimer(playerNum, powTimerID);
+	int row = GetRowForPOWTimer(pane, powTimerID);
 
 	if (row >= 0)
 	{
@@ -1377,6 +1442,7 @@ enum
 
 	short p = objNode->PlayerNum;
 	InfobarIconData* special = GetInfobarIconData(objNode);
+	int pane = special->pane;								// rows are allocated per pane
 
 	int timerID = special->sub >> 1;
 	int subInRow = special->sub & 1;
@@ -1385,7 +1451,7 @@ enum
 	float timer = *(float*) (((char*) &gPlayerInfo[p]) + timerOffset);
 	bool isTicking = timer > 0;
 
-	int currentRow = GetRowForPOWTimer(p, timerID);
+	int currentRow = GetRowForPOWTimer(pane, timerID);
 	bool hasRow = currentRow >= 0;
 
 	switch (special->state)
@@ -1401,7 +1467,7 @@ enum
 				// Started ticking, reserve row
 				if (!hasRow)
 				{
-					currentRow = AllocRowForNewPOWTimer(p, timerID);
+					currentRow = AllocRowForNewPOWTimer(pane, timerID);
 					hasRow = currentRow >= 0;
 				}
 
@@ -1435,7 +1501,7 @@ enum
 				// Wait for vanish effect to finish
 				if (objNode->TwitchNode == NULL)
 				{
-					FreeRowTakenByPOWTimer(p, timerID);
+					FreeRowTakenByPOWTimer(pane, timerID);
 					special->state = kDormant;
 					SetObjectVisible(objNode, false);
 				}
@@ -1721,14 +1787,19 @@ short	sex;
 
 			/* ANNOUNCE PLACE */
 
-	PlayAnnouncerSound(EFFECT_1st + place, true, 1.0);
+	int placeEffect = GetPlaceAnnouncerEffect(place);
+	if (placeEffect >= 0)										// no voice line past 6th, so stay silent
+		PlayAnnouncerSound(placeEffect, true, 1.0);
 
 			/* MAKE NUMBER SPRITE */
+
+	PlaceNumber number = GetPlaceNumber(place);
+	float ordinalX = GetOrdinalOffset(&number);
 
 	NewObjectDefinitionType spriteDef =
 	{
 		.group 		= SPRITE_GROUP_INFOBAR,
-		.type		= INFOBAR_SObjType_Place1+place,
+		.type		= number.sprite,
 		.coord		= {0,0,0},
 		.flags		= STATUS_BIT_ONLYSHOWTHISPLAYER,
 		.slot		= SPRITE_SLOT,
@@ -1746,12 +1817,31 @@ short	sex;
 			break;
 	}
 
-	gFinalPlaceObj = MakeSpriteObject(&spriteDef);
+	// Keep a number with more digits centered too
+	spriteDef.coord.x -= ordinalX * spriteDef.scale * 0.5f;
+
+	if (number.sprite != INFOBAR_SObjType_NULL)
+	{
+		gFinalPlaceObj = MakeSpriteObject(&spriteDef);
+	}
+	else													// past the number sprites, spell it out in wall font digits
+	{
+		NewObjectDefinitionType digitsDef = spriteDef;
+		digitsDef.genre = CUSTOM_GENRE;
+		digitsDef.flags |= STATUS_BITS_FOR_2D;
+		digitsDef.projection = kProjectionType2DOrthoCentered;
+		digitsDef.drawCall = DrawFinalPlaceDigits;
+		digitsDef.coord.x += ordinalX * spriteDef.scale;		// the digits end where the ordinal begins
+		gFinalPlaceObj = MakeNewObject(&digitsDef);
+		gFinalPlaceObj->Special[0] = place;
+		UpdateObjectTransforms(gFinalPlaceObj);
+	}
 
 			/* MAKE ORDINAL SPRITE ON TOP OF NUMBER */
 
 	spriteDef.slot++;
-	spriteDef.type = LocalizeOrdinalSprite(place, sex);
+	spriteDef.type = GetPlaceOrdinalSprite(place, gGamePrefs.language, sex);
+	spriteDef.coord.x += ordinalX * spriteDef.scale;
 	ObjNode* ordinalObj = MakeSpriteObject(&spriteDef);
 	ordinalObj->PlayerNum = playerNum;
 
@@ -1801,6 +1891,11 @@ static void MoveFinalPlace(ObjNode *theNode)
 //	theNode->Rot.z = sin(theNode->SpecialF[0]) * .2f;
 	theNode->SpecialF[0] += gFramesPerSecondFrac * 5.0f;
 //	UpdateObjectTransforms(theNode);
+}
+
+static void DrawFinalPlaceDigits(ObjNode *theNode)
+{
+	DrawPlaceDigits(theNode, (int) theNode->Special[0]);		// the place when the player finished
 }
 
 #pragma mark -

@@ -101,6 +101,24 @@ static int ExpectLeave(NSpGame* host)
     return id;
 }
 
+// Reads game's notices in order up to the given leave or join notice for player id. Join
+// notices ahead of it (the ones a peer gets when it joins) are skipped: on a loaded machine
+// they, and the target itself, can still be in flight after the step that caused them.
+static void SkipToNotice(NSpGame* game, uint32_t what, int id)
+{
+    for (;;)
+    {
+        NSpMessageHeader* message = WaitMessage(game);
+        const uint32_t got = message->what;
+        const int gotID = got == kNSpPlayerLeft ? (int)((NSpPlayerLeftMessage*)message)->playerID
+                        : got == kNSpPlayerJoined ? (int)((NSpPlayerJoinedMessage*)message)->playerInfo.id : -1;
+        NSpMessage_Release(game, message);
+        if (got == what && gotID == id)
+            return;
+        CHECK(got == kNSpPlayerJoined);
+    }
+}
+
 static void Session(void)
 {
     NSpGame* host = NSpGame_Host();
@@ -109,26 +127,30 @@ static void Session(void)
     gNetPort = ntohs(address.sin_port);
     CHECK(NSpGame_GetActivePlayersIDMask(host) == 1);
 
-    // CMR7 readiness fields were uninitialized: refuse that peer at the handshake
-    // instead of accepting it and then disconnecting during level preparation.
-    int legacy = socket(AF_INET, SOCK_STREAM, 0);
-    CHECK(connect(legacy, (struct sockaddr*)&address, sizeof(address)) == 0);
-    CHECK(AcceptClient(host) == 1);
-    NSpJoinRequestMessage legacyJoin = {0};
-    NSpClearMessageHeader(&legacyJoin.header);
-    legacyJoin.header.version = 'CMR7';
-    legacyJoin.header.what = kNSpJoinRequest;
-    legacyJoin.header.to = kNSpHostID;
-    legacyJoin.header.messageLen = sizeof(legacyJoin);
-    CHECK(send(legacy, &legacyJoin, sizeof(legacyJoin), MSG_NOSIGNAL) == sizeof(legacyJoin));
-    for (int i = 0; i < 1000 && host->players[1].state != kNSpPlayerState_Offline; i++)
+    // Refuse older peers at the handshake instead of accepting them and disconnecting
+    // later: CMR7 left readiness fields uninitialized during level preparation.
+    const uint32_t legacyVersions[] = {'CMR7'};
+    for (size_t v = 0; v < sizeof(legacyVersions) / sizeof(legacyVersions[0]); v++)
     {
-        CHECK(!NSpMessage_Get(host));
-        SDL_Delay(1);
+        int legacy = socket(AF_INET, SOCK_STREAM, 0);
+        CHECK(connect(legacy, (struct sockaddr*)&address, sizeof(address)) == 0);
+        CHECK(AcceptClient(host) == 1);
+        NSpJoinRequestMessage legacyJoin = {0};
+        NSpClearMessageHeader(&legacyJoin.header);
+        legacyJoin.header.version = legacyVersions[v];
+        legacyJoin.header.what = kNSpJoinRequest;
+        legacyJoin.header.to = kNSpHostID;
+        legacyJoin.header.messageLen = sizeof(legacyJoin);
+        CHECK(send(legacy, &legacyJoin, sizeof(legacyJoin), MSG_NOSIGNAL) == sizeof(legacyJoin));
+        for (int i = 0; i < 1000 && host->players[1].state != kNSpPlayerState_Offline; i++)
+        {
+            CHECK(!NSpMessage_Get(host));
+            SDL_Delay(1);
+        }
+        CHECK(host->players[1].state == kNSpPlayerState_Offline);
+        CHECK(NSpGame_GetActivePlayersIDMask(host) == 1);
+        CloseSocket(&legacy);
     }
-    CHECK(host->players[1].state == kNSpPlayerState_Offline);
-    CHECK(NSpGame_GetActivePlayersIDMask(host) == 1);
-    CloseSocket(&legacy);
 
     // A send failure before join approval also recycles silently.
     LobbyInfo pendingLobby = {.hostAddr = address};
@@ -152,6 +174,21 @@ static void Session(void)
         CHECK(connect(silent[i], (struct sockaddr*)&address, sizeof(address)) == 0);
         CHECK(AcceptClient(host) == i + 1);
     }
+
+    // The host plus MAX_CLIENTS-1 clients fill the lobby (host + 5 clients, as in the
+    // original game). One more client is denied instead of being given a slot.
+    int overflow = socket(AF_INET, SOCK_STREAM, 0);
+    CHECK(connect(overflow, (struct sockaddr*)&address, sizeof(address)) == 0);
+    CHECK(AcceptClient(host) == -1);
+    NSpJoinDeniedMessage denied = {0};
+    WaitReadable(overflow);
+    CHECK(recv(overflow, &denied, sizeof(denied), MSG_WAITALL) == sizeof(denied));
+    CHECK(denied.header.what == kNSpJoinDenied && denied.header.messageLen == sizeof(denied));
+    CHECK(strcmp(denied.reason, "THE GAME IS FULL.") == 0);
+    CloseSocket(&overflow);
+    for (int i = 1; i < MAX_CLIENTS; i++)
+        CHECK(host->players[i].state == kNSpPlayerState_AwaitingHandshake);
+
     CHECK(send(silent[0], "C", 1, MSG_NOSIGNAL) == 1);
     testNow += NSP_HANDSHAKE_TIMEOUT_MS - 1;
     CHECK(!NSpMessage_Get(host));
@@ -170,11 +207,11 @@ static void Session(void)
     NSpGame_Dispose(first, 0);
     CHECK(ExpectLeave(host) == 1);
     CHECK(NSpGame_GetActivePlayersIDMask(host) == 5); // host + sparse ID 2
-    Drain(second);
+    SkipToNotice(second, kNSpPlayerLeft, 1);
     NSpGame* replacement = Join(host);
     CHECK(replacement->myID == 1);
     CHECK(host->players[1].sendRing.used == 0 && !host->players[1].needsLeaveNotify);
-    Drain(second);
+    SkipToNotice(second, kNSpPlayerJoined, 1); // nothing else may reach it before the heartbeat below
 
     // Force the actual send path to overflow one ring. The surviving peer and host
     // must each receive one leave while the broadcast as a whole still succeeds.
@@ -266,12 +303,53 @@ static void Discovery(void)
     NSpSearch_Dispose(search);
 }
 
+// A host in 6-player mode (the 6/12 players setting) seats the host and five clients,
+// then turns the next join away exactly like a full 12-player lobby. The build's
+// capacity is unchanged.
+static void CappedLobby(void)
+{
+    NSpGame* host = NSpGame_Host();
+    CHECK(host);
+    CHECK(NSpGame_SetMaxPlayers(host, 1) != kNSpRC_OK && NSpGame_SetMaxPlayers(host, MAX_CLIENTS + 1) != kNSpRC_OK);
+    CHECK(NSpGame_SetMaxPlayers(host, PLAYER_LIMIT_ORIGINAL) == kNSpRC_OK);
+    CHECK(NSpGame_GetMaxPlayers() == MAX_CLIENTS);
+    struct sockaddr_in address = Address(host->hostListenSocket);
+
+    int seated[PLAYER_LIMIT_ORIGINAL - 1];
+    for (int i = 0; i < PLAYER_LIMIT_ORIGINAL - 1; i++)
+    {
+        seated[i] = socket(AF_INET, SOCK_STREAM, 0);
+        CHECK(connect(seated[i], (struct sockaddr*)&address, sizeof(address)) == 0);
+        CHECK(AcceptClient(host) == i + 1);
+    }
+
+    for (int attempt = 0; attempt < 2; attempt++)                  // every later join, not just the first
+    {
+        int overflow = socket(AF_INET, SOCK_STREAM, 0);
+        CHECK(connect(overflow, (struct sockaddr*)&address, sizeof(address)) == 0);
+        CHECK(AcceptClient(host) == -1);
+        NSpJoinDeniedMessage denied = {0};
+        WaitReadable(overflow);
+        CHECK(recv(overflow, &denied, sizeof(denied), MSG_WAITALL) == sizeof(denied));
+        CHECK(denied.header.what == kNSpJoinDenied && strcmp(denied.reason, "THE GAME IS FULL.") == 0);
+        CloseSocket(&overflow);
+    }
+    CHECK(NSpGame_GetNumRefusedClients(host) == 2);
+    for (int i = PLAYER_LIMIT_ORIGINAL; i < MAX_CLIENTS; i++)
+        CHECK(host->players[i].state == kNSpPlayerState_Offline);
+
+    for (int i = 0; i < PLAYER_LIMIT_ORIGINAL - 1; i++)
+        CloseSocket(&seated[i]);
+    NSpGame_Dispose(host, 0);
+}
+
 int main(void)
 {
     setvbuf(stdout, NULL, _IONBF, 0); // retain transport diagnostics if CTest times out
     gNetPort = 0;
     Session();
     Session(); // immediately rehost on the same port in the same process
+    CappedLobby();
     Discovery();
     puts("Loopback lifecycle tests passed");
     return 0;

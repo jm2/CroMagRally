@@ -10,6 +10,8 @@
 /****************************/
 
 #include "game.h"
+#include "finite_guard.h"
+#include "car_count_tuning.h"
 #include <SDL3/SDL_scancode.h>
 
 /****************************/
@@ -119,12 +121,49 @@ ObjNode			*newObj;
 #pragma mark -
 
 
+/******************** KEEP SUBMARINE MOTION FINITE ***********************/
+//
+// Called at the end of the sub's move. A NaN speed would truncate to a garbage pass
+// count and freeze the sub for good (and its camera would follow it into NaN), so put
+// back the last finite state and stop the sub instead. The propeller realigns on the
+// next move; realigning it here would also spin it and stream bubbles twice.
+//
+
+static void KeepSubmarineMotionFinite(ObjNode *theNode, const VehicleMotionState *lastFinite)
+{
+static uint32_t		reported = 0;
+short				p = theNode->PlayerNum;
+VehicleMotionState	bad,state;
+uint32_t			fields;
+
+	state = bad = GetVehicleMotionState(theNode, gPlayerInfo[p].currentRPM);
+	fields = RepairVehicleMotion(&state, lastFinite);
+	if (fields == 0)
+		return;
+
+	if (FirstNonFiniteReport(&reported, p))
+		LogNonFiniteVehicle("submarine", p, gSimulationFrame, fields, &bad, &state);
+
+	gCoord = state.coord;
+	gDelta = state.delta;
+	theNode->Rot = state.rot;
+	theNode->DeltaRot = state.deltaRot;
+	UpdateObject(theNode);
+
+	theNode->Speed2D = state.speed2D;
+	theNode->Speed3D = state.speed3D;
+	gPlayerInfo[p].coord = gCoord;
+	gPlayerInfo[p].currentRPM = state.rpm;
+}
+
+
 /******************** MOVE PLAYER: SUBMARINE ***********************/
 
 static void MovePlayer_Submarine(ObjNode *theNode)
 {
 int					numPasses;
 float				oldFPS,oldFPSFrac;
+const VehicleMotionState	startState = GetVehicleMotionState(theNode, gPlayerInfo[theNode->PlayerNum].currentRPM);
 
 		/* KEEP TRACK OF LAP TIMES */
 
@@ -185,6 +224,8 @@ float				oldFPS,oldFPSFrac;
 
 	gFramesPerSecond = oldFPS;											// restore real FPS values
 	gFramesPerSecondFrac = oldFPSFrac;
+
+	KeepSubmarineMotionFinite(theNode, &startState);
 }
 
 
@@ -259,7 +300,8 @@ OGLVector3D		aimVec;
 	}
 	else
 	{
-		float	maxSpeed = gPlayerInfo[playerNum].carStats.maxSpeed + ((float)gPlayerInfo[playerNum].place * 100.0f);
+		float	placeStep = 100.0f * GetCatchUpPlaceScale(gNumTotalPlayers);		// subs in back get a slight edge
+		float	maxSpeed = gPlayerInfo[playerNum].carStats.maxSpeed + ((float)gPlayerInfo[playerNum].place * placeStep);
 
 		if (gPlayerInfo[playerNum].nitroTimer > 0.0f)			// see if give nitro boost
 			maxSpeed *= 1.4f;

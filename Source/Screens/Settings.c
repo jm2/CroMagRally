@@ -102,6 +102,7 @@ const MenuItem gSettingsMenuTree[] =
 	{kMIPick, STR_CONTROLS, .next='ctrl'},
 	{kMIPick, STR_SOUND, .next='soun'},
 	{kMIPick, STR_GRAPHICS, .next='graf'},
+	{kMIPick, STR_GAMEPLAY, .next='gmpl'},
 	{kMIPick, STR_LANGUAGE, .next='lang'},
 
 	{.id='ctrl'},
@@ -187,6 +188,34 @@ const MenuItem gSettingsMenuTree[] =
 	{kMISpacer, .customHeight=.5f },
 	{kMILabel, STR_FULLSCREEN_HINT, .customHeight=.5f },
 	{kMISpacer, .customHeight=.5f },
+
+	// Gameplay. A LAN host's choices travel in its game config; clients never use their own.
+	{.id='gmpl'},
+	{kMILabel, .text=STR_CPU_CARS_HELP },
+	{kMISpacer, .text=STR_NULL, .customHeight=.5f },
+	{
+		kMICycler1, STR_CPU_CARS, .cycler=
+		{
+			.valuePtr=&gGamePrefs.cpuFill, .choices=
+			{
+				{STR_OFF, 0},
+				{STR_ON, 1},
+			}
+		}
+	},
+#if MAX_PLAYERS == 12									// the 12 choice is MAX_PLAYERS
+	{
+		// Most cars in single-player, split-screen and hosted LAN games (and the LAN lobby size)
+		kMICycler1, STR_PLAYERS, .cycler=
+		{
+			.valuePtr=&gGamePrefs.playerLimit, .choices=
+			{
+				{STR_PLAYERS_6_ORIGINAL, PLAYER_LIMIT_ORIGINAL},
+				{STR_PLAYERS_12, MAX_PLAYERS},
+			}
+		}
+	},
+#endif
 
 	{.id='lang'},
 	{kMIPick, STR_ENGLISH,	.id=LANGUAGE_ENGLISH,	.callback=OnPickLanguage,	.next='BACK'},

@@ -1,0 +1,184 @@
+// Player-count invariants: per-player masks and tables must cover every player slot,
+// and fixed-size lists must refuse entries instead of writing past their end.
+#include "game.h"
+#include <stdio.h>
+#include <stdlib.h>
+
+#define CHECK(condition) do { if (!(condition)) { \
+	fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, #condition); \
+	exit(EXIT_FAILURE); } } while (0)
+
+SuperTileStatus** gSuperTileStatusGrid;
+long gNumSuperTilesDeep, gNumSuperTilesWide;
+
+static void TestSuperTilePlayerFlags(void)
+{
+	// Cover all 16 bits the terrain masks promise (MAX_PLAYERS <= 16 is asserted),
+	// not just today's MAX_PLAYERS: an 8-bit field would drop players 8+.
+	for (short p = 0; p < 16; p++)
+	{
+		SuperTileStatus status = {0};
+		CHECK(!IsSuperTileUsedByPlayers(&status, -1));
+		MarkSuperTilePlayerHere(&status, p);
+		CHECK(status.playerHereFlags == (uint16_t)(1u << p));
+		CHECK(IsSuperTileUsedByPlayers(&status, -1));
+		CHECK(!IsSuperTileUsedByPlayers(&status, p));
+		CHECK(IsSuperTileUsedByPlayers(&status, (short)((p + 1) % 16)));
+	}
+
+	// Every player on one supertile: skipping any single player leaves it in use.
+	SuperTileStatus shared = {0};
+	for (short p = 0; p < MAX_PLAYERS; p++)
+		MarkSuperTilePlayerHere(&shared, p);
+	CHECK(shared.playerHereFlags == (uint16_t)((1u << MAX_PLAYERS) - 1));
+	for (short p = 0; p < MAX_PLAYERS; p++)
+		CHECK(IsSuperTileUsedByPlayers(&shared, p) == (MAX_PLAYERS > 1));
+}
+
+static int PlaceNumberValue(const PlaceNumber* number)
+{
+	CHECK(number->numDigits >= 0 && number->numDigits <= MAX_PLACE_DIGITS);
+	CHECK(number->digits[number->numDigits] == '\0');
+
+	int value = 0;
+	for (int i = 0; i < number->numDigits; i++)
+	{
+		CHECK(number->digits[i] >= '0' && number->digits[i] <= '9');
+		value = value * 10 + (number->digits[i] - '0');
+	}
+	return value;
+}
+
+static void TestPlaceTables(void)
+{
+	// 1st-6th keep their hand-drawn number sprites and voice lines.
+	for (int place = 0; place < NUM_PLACE_SPRITES; place++)
+	{
+		PlaceNumber number = GetPlaceNumber(place);
+		CHECK(number.sprite == INFOBAR_SObjType_Place1 + place && number.numDigits == 0);
+		CHECK(GetPlaceAnnouncerEffect(place) == EFFECT_1st + place);
+	}
+
+	// Every place any MAX_PLAYERS can produce has a number: its sprite, or font
+	// digits spelling it out exactly (no leading zero, nothing clamped).
+	for (int place = 0; place < GAME_MAX(MAX_PLAYERS, 999); place++)
+	{
+		PlaceNumber number = GetPlaceNumber(place);
+		if (number.sprite != INFOBAR_SObjType_NULL)
+		{
+			CHECK(place < NUM_PLACE_SPRITES);
+			CHECK(number.sprite >= INFOBAR_SObjType_Place1 && number.sprite <= INFOBAR_SObjType_Place6);
+			CHECK(number.numDigits == 0);
+		}
+		else
+		{
+			CHECK(place >= NUM_PLACE_SPRITES);
+			CHECK(number.numDigits >= 1 && number.numDigits <= MAX_PLACE_DIGITS);
+			CHECK(number.digits[0] != '0');
+			CHECK(PlaceNumberValue(&number) == place + 1);
+		}
+
+		// The announcer says 1st-6th and stays silent past its lines; nothing else plays.
+		int effect = GetPlaceAnnouncerEffect(place);
+		CHECK(effect == (place < NUM_ANNOUNCER_PLACE_LINES ? EFFECT_1st + place : -1));
+	}
+
+	PlaceNumber seventh = GetPlaceNumber(6);
+	CHECK(seventh.numDigits == 1 && SDL_strcmp(seventh.digits, "7") == 0);
+	PlaceNumber twelfth = GetPlaceNumber(11);
+	CHECK(twelfth.numDigits == 2 && SDL_strcmp(twelfth.digits, "12") == 0);
+	CHECK(GetPlaceNumber(-1).sprite == INFOBAR_SObjType_Place1);
+	CHECK(SDL_strcmp(GetPlaceNumber(5000).digits, "999") == 0);		// never overflows the digits
+	CHECK(GetPlaceAnnouncerEffect(-1) == -1);
+
+	// Layout: after a number sprite, and after one digit, the ordinal stays where it
+	// always was. The digits end where the ordinal begins, so each further digit
+	// moves the ordinal one digit right while the number's left edge stays put.
+	const float advance = 45.0f, width = advance * PLACE_DIGIT_SCALE;
+	CHECK(GetPlaceOrdinalX(0, advance) == 0.0f);
+	CHECK(GetPlaceOrdinalX(1, advance) == 0.0f);
+	for (int numDigits = 1; numDigits <= MAX_PLACE_DIGITS; numDigits++)
+	{
+		float numberLeft = GetPlaceOrdinalX(numDigits, advance) - numDigits * width;
+		CHECK(SDL_fabsf(numberLeft + width) < 0.001f);
+	}
+}
+
+static void TestPlaceOrdinals(void)
+{
+	enum { ST = INFOBAR_SObjType_PlaceST, ND = INFOBAR_SObjType_PlaceND, RD = INFOBAR_SObjType_PlaceRD,
+		TH = INFOBAR_SObjType_PlaceTH, ER = INFOBAR_SObjType_PlaceER, RE = INFOBAR_SObjType_PlaceRE,
+		E = INFOBAR_SObjType_PlaceE, O = INFOBAR_SObjType_PlaceO, A = INFOBAR_SObjType_PlaceA };
+
+	// 1st-12th for [language][sex]; 1st-6th are the suffixes the game has always shown.
+	// German, Spanish and Swedish use the English suffixes.
+	static const int kExpected[NUM_LANGUAGES][2][12] =
+	{
+		[LANGUAGE_ENGLISH]	= { {ST,ND,RD,TH,TH,TH, TH,TH,TH,TH,TH,TH}, {ST,ND,RD,TH,TH,TH, TH,TH,TH,TH,TH,TH} },
+		[LANGUAGE_FRENCH]	= { {ER,E,E,E,E,E, E,E,E,E,E,E},             {RE,E,E,E,E,E, E,E,E,E,E,E} },
+		[LANGUAGE_GERMAN]	= { {ST,ND,RD,TH,TH,TH, TH,TH,TH,TH,TH,TH}, {ST,ND,RD,TH,TH,TH, TH,TH,TH,TH,TH,TH} },
+		[LANGUAGE_SPANISH]	= { {ST,ND,RD,TH,TH,TH, TH,TH,TH,TH,TH,TH}, {ST,ND,RD,TH,TH,TH, TH,TH,TH,TH,TH,TH} },
+		[LANGUAGE_ITALIAN]	= { {O,O,O,O,O,O, O,O,O,O,O,O},             {A,A,A,A,A,A, A,A,A,A,A,A} },
+		[LANGUAGE_SWEDISH]	= { {ST,ND,RD,TH,TH,TH, TH,TH,TH,TH,TH,TH}, {ST,ND,RD,TH,TH,TH, TH,TH,TH,TH,TH,TH} },
+	};
+
+	for (int language = 0; language < NUM_LANGUAGES; language++)
+		for (int sex = 0; sex < 2; sex++)
+			for (int place = 0; place < 12; place++)
+				CHECK(GetPlaceOrdinalSprite(place, language, sex) == kExpected[language][sex][place]);
+
+	// Every place any MAX_PLAYERS can produce gets a suffix sprite, in every language.
+	for (int language = 0; language < NUM_LANGUAGES; language++)
+		for (int sex = 0; sex < 2; sex++)
+			for (int place = 0; place < GAME_MAX(MAX_PLAYERS, 1000); place++)
+			{
+				int sprite = GetPlaceOrdinalSprite(place, language, sex);
+				CHECK(sprite >= INFOBAR_SObjType_PlaceST && sprite <= INFOBAR_SObjType_PlaceA);
+			}
+
+	// English follows the number's last digits past 12th.
+	CHECK(GetPlaceOrdinalSprite(12, LANGUAGE_ENGLISH, 0) == TH);		// 13th
+	CHECK(GetPlaceOrdinalSprite(20, LANGUAGE_ENGLISH, 0) == ST);		// 21st
+	CHECK(GetPlaceOrdinalSprite(21, LANGUAGE_ENGLISH, 0) == ND);		// 22nd
+	CHECK(GetPlaceOrdinalSprite(22, LANGUAGE_ENGLISH, 0) == RD);		// 23rd
+	CHECK(GetPlaceOrdinalSprite(110, LANGUAGE_ENGLISH, 0) == TH);		// 111th
+	CHECK(GetPlaceOrdinalSprite(-1, LANGUAGE_ENGLISH, 0) == ST);
+}
+
+static void TestCollisionListBudget(void)
+{
+	// A full list refuses new entries instead of writing past its end (an exact-size
+	// heap block lets ASan catch any stray write), and keeps the first hits it found.
+	enum { kCapacity = 4 };
+	CollisionRec* list = calloc(kCapacity, sizeof(*list));
+	CHECK(list);
+	short numCollisions = 0;
+	for (short i = 0; i < kCapacity; i++)
+	{
+		CollisionRec* rec = AppendCollisionRec(list, &numCollisions, kCapacity);
+		CHECK(rec == &list[i] && numCollisions == i + 1);
+		rec->targetBox = (Byte)(i + 1);
+	}
+	for (int i = 0; i < 100; i++)
+		CHECK(!AppendCollisionRec(list, &numCollisions, kCapacity));
+	CHECK(numCollisions == kCapacity);
+	for (short i = 0; i < kCapacity; i++)
+		CHECK(list[i].targetBox == i + 1);
+
+	// A count already out of range never yields an entry or moves further.
+	numCollisions = kCapacity + 5;
+	CHECK(!AppendCollisionRec(list, &numCollisions, kCapacity) && numCollisions == kCapacity + 5);
+	numCollisions = -1;
+	CHECK(!AppendCollisionRec(list, &numCollisions, kCapacity) && numCollisions == -1);
+	free(list);
+}
+
+int main(void)
+{
+	TestSuperTilePlayerFlags();
+	TestPlaceTables();
+	TestPlaceOrdinals();
+	TestCollisionListBudget();
+	puts("Player limit tests passed");
+	return EXIT_SUCCESS;
+}

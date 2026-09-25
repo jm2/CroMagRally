@@ -1,0 +1,816 @@
+// Start slots for players without an authored MyStartCoord item (StartSlots.c): the generated
+// table for the shipped maps, the procedural rule for other maps, keeping humans at the back of
+// a race grid, and picking each game mode's items. Tests/StartSlotTableTests.py checks the table
+// against the map data itself.
+
+#include "game.h"
+#include "startslots.h"
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define CHECK(condition) do { if (!(condition)) { \
+	fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, #condition); \
+	exit(EXIT_FAILURE); } } while (0)
+
+#define CHECK_ENTRY(condition, entry) do { if (!(condition)) { \
+	fprintf(stderr, "%s:%d: %s (%s set %d)\n", __FILE__, __LINE__, #condition, (entry)->map, (int) (entry)->set); \
+	exit(EXIT_FAILURE); } } while (0)
+
+enum
+{
+	AUTHORED		= START_SLOT_TABLE_AUTHORED,
+	TABLE_SLOTS		= START_SLOT_TABLE_AUTHORED + START_SLOT_TABLE_EXTRA,
+	MAX_TEST_SLOTS	= 16,
+	MIN_SPACING		= 900,						// tools/gen_start_slots.py MIN_SPACING
+	RACE_BEHIND		= 900,						// ...RACE_BEHIND
+	ROW_TOL			= 400,						// ...ROW_TOL
+};
+
+_Static_assert(MAX_PLAYERS <= MAX_TEST_SLOTS, "the tests' pose arrays hold MAX_PLAYERS slots");
+
+static int64_t Dist2(int x0, int z0, int x1, int z1)
+{
+	const int64_t dx = (int64_t) x0 - x1, dz = (int64_t) z0 - z1;
+	return dx * dx + dz * dz;
+}
+
+// How far along the grid's forward vector (-sin rotY, -cos rotY) a slot is.
+static double Depth(int x, int z, int rot16)
+{
+	const double rot = 2.0 * 3.14159265358979323846 * rot16 / 16.0;
+	return x * -sin(rot) + z * -cos(rot);
+}
+
+static bool SamePose(StartSlotPose pose, StartSlot slot)
+{
+	return pose.x == slot.x && pose.z == slot.z && pose.rotY == StartSlot_RotY(slot.rot16);
+}
+
+static bool PosesEqual(StartSlotPose a, StartSlotPose b)
+{
+	return a.x == b.x && a.z == b.z && a.rotY == b.rotY;
+}
+
+// Players 0-5 authored as in the table entry, the rest missing.
+static void LoadAuthored(const StartSlotTableEntry* entry, StartSlot items[], bool authored[], int numSlots)
+{
+	for (int p = 0; p < numSlots; p++)
+	{
+		authored[p] = p < AUTHORED;
+		items[p] = p < AUTHORED ? entry->authored[p] : (StartSlot) { 0, 0, 0 };
+	}
+}
+
+static const StartSlotTableEntry* Fill(const StartSlotTableEntry* entry, int numSlots, StartSlotPose poses[])
+{
+	StartSlot items[MAX_TEST_SLOTS];
+	bool authored[MAX_TEST_SLOTS];
+	LoadAuthored(entry, items, authored, numSlots);
+	return StartSlots_Fill(entry->set, entry->mapUnitWidth, entry->mapUnitDepth, items, authored, numSlots, poses);
+}
+
+static void CheckDistinctAndSpaced(const StartSlotTableEntry* entry, const StartSlotPose poses[], int numSlots)
+{
+	for (int p = 0; p < numSlots; p++)
+	{
+		for (int q = p + 1; q < numSlots; q++)
+		{
+			const int64_t d2 = Dist2(poses[p].x, poses[p].z, poses[q].x, poses[q].z);
+			CHECK_ENTRY(d2 > 0, entry);
+			if (q >= AUTHORED)										// (authored pairs are the map's own: Desert has one at 856)
+				CHECK_ENTRY(d2 >= (int64_t) MIN_SPACING * MIN_SPACING, entry);
+		}
+	}
+}
+
+
+// after holds the poses of before for players 0 .. numPlayers-1, each exactly once, and the
+// others are untouched.
+static void CheckSwapped(const StartSlotTableEntry* entry, const StartSlotPose before[], const StartSlotPose after[], int numPlayers)
+{
+	bool used[MAX_TEST_SLOTS] = {false};
+
+	for (int p = 0; p < MAX_TEST_SLOTS; p++)
+	{
+		if (p >= numPlayers)
+		{
+			CHECK_ENTRY(PosesEqual(after[p], before[p]), entry);
+			continue;
+		}
+		int from = -1;
+		for (int q = 0; q < numPlayers && from < 0; q++)
+			if (!used[q] && PosesEqual(after[p], before[q]))
+				from = q;
+		CHECK_ENTRY(from >= 0, entry);
+		used[from] = true;
+	}
+}
+
+
+/*************** EVERY TABLE ENTRY ****************/
+
+static void TestTableEntries(void)
+{
+	int perSet[3] = {0, 0, 0};
+
+	CHECK(kNumStartSlotTableEntries == 9 + 8 + 8);				// 9 race grids; 8 arenas x (battle, CTF)
+
+	for (int e = 0; e < kNumStartSlotTableEntries; e++)
+	{
+		const StartSlotTableEntry* entry = &kStartSlotTable[e];
+
+		CHECK_ENTRY(entry->set >= START_SLOT_SET_RACE && entry->set <= START_SLOT_SET_CTF, entry);
+		perSet[entry->set]++;
+		CHECK_ENTRY(entry->mapUnitWidth > 0 && entry->mapUnitDepth > 0, entry);
+
+		for (int f = 0; f < e; f++)									// the key picks out exactly one entry
+		{
+			const StartSlotTableEntry* other = &kStartSlotTable[f];
+			bool same = other->set == entry->set && other->mapUnitWidth == entry->mapUnitWidth
+					&& other->mapUnitDepth == entry->mapUnitDepth;
+			for (int p = 0; same && p < AUTHORED; p++)
+				same = other->authored[p].x == entry->authored[p].x && other->authored[p].z == entry->authored[p].z
+					&& other->authored[p].rot16 == entry->authored[p].rot16;
+			CHECK_ENTRY(!same, entry);
+		}
+
+		StartSlotPose poses[TABLE_SLOTS];
+		CHECK_ENTRY(Fill(entry, TABLE_SLOTS, poses) == entry, entry);
+
+		for (int p = 0; p < TABLE_SLOTS; p++)
+		{
+			const StartSlot slot = p < AUTHORED ? entry->authored[p] : entry->extra[p - AUTHORED];
+			CHECK_ENTRY(SamePose(poses[p], slot), entry);
+			CHECK_ENTRY(slot.rot16 >= 0 && slot.rot16 < 16, entry);
+			CHECK_ENTRY(poses[p].x >= 0 && poses[p].x < entry->mapUnitWidth, entry);
+			CHECK_ENTRY(poses[p].z >= 0 && poses[p].z < entry->mapUnitDepth, entry);
+		}
+		CheckDistinctAndSpaced(entry, poses, TABLE_SLOTS);
+
+				/* CTF: EACH NEW SLOT IS NEARER ITS OWN TEAM THAN THE OTHER TEAM */
+
+		if (entry->set == START_SLOT_SET_CTF)
+		{
+			double tx[2] = {0, 0}, tz[2] = {0, 0};
+			for (int p = 0; p < AUTHORED; p++)
+			{
+				tx[p & 1] += entry->authored[p].x / 3.0;
+				tz[p & 1] += entry->authored[p].z / 3.0;
+			}
+			for (int p = AUTHORED; p < TABLE_SLOTS; p++)
+			{
+				const int team = p & 1;
+				const double own = (poses[p].x - tx[team]) * (poses[p].x - tx[team]) + (poses[p].z - tz[team]) * (poses[p].z - tz[team]);
+				const double foe = (poses[p].x - tx[!team]) * (poses[p].x - tx[!team]) + (poses[p].z - tz[!team]) * (poses[p].z - tz[!team]);
+				CHECK_ENTRY(own < foe, entry);
+			}
+		}
+
+				/* RACE: THE NEW SLOTS FACE LIKE THE GRID, BEHIND ALL OF IT */
+
+		if (entry->set == START_SLOT_SET_RACE)
+		{
+			double rear = 1e30;
+			for (int p = 0; p < AUTHORED; p++)
+				rear = fmin(rear, Depth(entry->authored[p].x, entry->authored[p].z, entry->authored[0].rot16));
+			for (int p = 0; p < START_SLOT_TABLE_EXTRA; p++)
+			{
+				CHECK_ENTRY(entry->extra[p].rot16 == entry->authored[p].rot16, entry);
+				CHECK_ENTRY(rear - Depth(entry->extra[p].x, entry->extra[p].z, entry->authored[0].rot16) >= (double) RACE_BEHIND - 1, entry);
+			}
+		}
+	}
+
+	CHECK(perSet[START_SLOT_SET_RACE] == 9);
+	CHECK(perSet[START_SLOT_SET_BATTLE] == 8);
+	CHECK(perSet[START_SLOT_SET_CTF] == 8);
+}
+
+
+/*************** ANY NUMBER OF PLAYERS ****************/
+//
+// MAX_PLAYERS is 6 today: every shipped slot is authored and nothing changes.
+//
+
+static void TestPlayerCounts(void)
+{
+	for (int e = 0; e < kNumStartSlotTableEntries; e++)
+	{
+		const StartSlotTableEntry* entry = &kStartSlotTable[e];
+		StartSlotPose poses[MAX_TEST_SLOTS], before[MAX_TEST_SLOTS];
+
+				/* 6 PLAYERS: AUTHORED ONLY, AND NO SWAPS */
+
+		CHECK_ENTRY(Fill(entry, AUTHORED, poses) == NULL, entry);
+		for (int p = 0; p < AUTHORED; p++)
+		{
+			CHECK_ENTRY(SamePose(poses[p], entry->authored[p]), entry);
+			before[p] = poses[p];
+		}
+		const bool oneHuman[MAX_TEST_SLOTS] = {false, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true};
+		StartSlots_KeepHumansAtBack(poses, oneHuman, AUTHORED, AUTHORED, entry->authored[0].rot16);
+		for (int p = 0; p < AUTHORED; p++)
+			CHECK_ENTRY(PosesEqual(poses[p], before[p]), entry);
+
+				/* 8 PLAYERS: THE TABLE'S FIRST TWO */
+
+		CHECK_ENTRY(Fill(entry, 8, poses) == entry, entry);
+		CHECK_ENTRY(SamePose(poses[6], entry->extra[0]) && SamePose(poses[7], entry->extra[1]), entry);
+
+				/* 16 PLAYERS: THE TABLE'S SIX, THEN THE RULE, CLEAR OF THEM */
+
+		CHECK_ENTRY(Fill(entry, MAX_TEST_SLOTS, poses) == entry, entry);
+		for (int p = 0; p < TABLE_SLOTS; p++)
+			CHECK_ENTRY(SamePose(poses[p], p < AUTHORED ? entry->authored[p] : entry->extra[p - AUTHORED]), entry);
+		for (int p = TABLE_SLOTS; p < MAX_TEST_SLOTS; p++)
+		{
+			CHECK_ENTRY(poses[p].x >= 0 && poses[p].x < entry->mapUnitWidth, entry);
+			CHECK_ENTRY(poses[p].z >= 0 && poses[p].z < entry->mapUnitDepth, entry);
+		}
+		CheckDistinctAndSpaced(entry, poses, MAX_TEST_SLOTS);
+
+				/* A RACE GRID'S THIRD WAVE STARTS BEHIND THE TABLE'S */
+
+		if (entry->set == START_SLOT_SET_RACE)
+		{
+			const int rot16 = entry->authored[0].rot16;
+			for (int p = TABLE_SLOTS; p < MAX_TEST_SLOTS; p++)
+				for (int q = AUTHORED; q < TABLE_SLOTS; q++)
+					CHECK_ENTRY(Depth(poses[p].x, poses[p].z, rot16) < Depth(poses[q].x, poses[q].z, rot16), entry);
+		}
+	}
+}
+
+
+/*************** HUMANS START AT THE BACK OF A RACE GRID ****************/
+
+static void TestHumansAtTheBack(void)
+{
+	for (int e = 0; e < kNumStartSlotTableEntries; e++)
+	{
+		const StartSlotTableEntry* entry = &kStartSlotTable[e];
+		if (entry->set != START_SLOT_SET_RACE)
+			continue;
+
+		const int rot16 = entry->authored[0].rot16;
+		double rear = 1e30;
+		for (int p = 0; p < AUTHORED; p++)
+			rear = fmin(rear, Depth(entry->authored[p].x, entry->authored[p].z, rot16));
+		const double p0Gap = Depth(entry->authored[0].x, entry->authored[0].z, rot16) - rear;
+
+		for (int humans = 1; humans <= 4; humans++)
+		{
+			StartSlotPose poses[TABLE_SLOTS];
+			bool isComputer[TABLE_SLOTS];
+			for (int p = 0; p < TABLE_SLOTS; p++)
+				isComputer[p] = p >= humans;
+
+			CHECK_ENTRY(Fill(entry, TABLE_SLOTS, poses) == entry, entry);
+			StartSlots_KeepHumansAtBack(poses, isComputer, TABLE_SLOTS, AUTHORED, rot16);
+
+					/* THE HUMANS TAKE NEW SLOTS; EVERY HUMAN IS BEHIND EVERY CPU ON THE AUTHORED GRID */
+
+			for (int h = 0; h < humans; h++)
+			{
+				bool newSlot = false;
+				for (int k = 0; k < START_SLOT_TABLE_EXTRA; k++)
+					newSlot |= SamePose(poses[h], entry->extra[k]);
+				CHECK_ENTRY(newSlot, entry);
+
+				const double depth = Depth(poses[h].x, poses[h].z, rot16);
+				for (int p = humans; p < TABLE_SLOTS; p++)
+				{
+					for (int a = 0; a < AUTHORED; a++)
+						if (SamePose(poses[p], entry->authored[a]))
+							CHECK_ENTRY(Depth(poses[p].x, poses[p].z, rot16) - depth >= (double) RACE_BEHIND - 1, entry);
+				}
+			}
+
+					/* A LONE HUMAN STARTS IN THE REAR ROW, AS ON THE AUTHORED GRID */
+
+			if (humans == 1)
+			{
+				double back = 1e30;
+				for (int p = 0; p < TABLE_SLOTS; p++)
+					back = fmin(back, Depth(poses[p].x, poses[p].z, rot16));
+				CHECK_ENTRY(Depth(poses[0].x, poses[0].z, rot16) - back <= p0Gap + (double) ROW_TOL + 1, entry);
+			}
+		}
+
+				/* ANY FIELD SIZE, 1-6 HUMANS: A PARTLY FILLED REAR WAVE TOO */
+
+		for (int numPlayers = AUTHORED + 1; numPlayers <= MAX_TEST_SLOTS; numPlayers++)
+		{
+			for (int humans = 1; humans <= AUTHORED; humans++)
+			{
+				StartSlotPose poses[MAX_TEST_SLOTS], before[MAX_TEST_SLOTS];
+				bool isComputer[MAX_TEST_SLOTS];
+				for (int p = 0; p < MAX_TEST_SLOTS; p++)
+					isComputer[p] = p >= humans;
+
+				Fill(entry, MAX_TEST_SLOTS, poses);
+				memcpy(before, poses, sizeof(poses));
+				StartSlots_KeepHumansAtBack(poses, isComputer, numPlayers, AUTHORED, rot16);
+
+				CheckSwapped(entry, before, poses, numPlayers);
+
+						/* NO CPU STARTS BEHIND A HUMAN (SO NONE IN ITS LANE, RIGHT BEHIND IT) */
+
+				for (int h = 0; h < humans; h++)
+					for (int c = humans; c < numPlayers; c++)
+						CHECK_ENTRY(Depth(poses[c].x, poses[c].z, rot16) >= Depth(poses[h].x, poses[h].z, rot16) - 1e-6, entry);
+			}
+		}
+	}
+}
+
+
+/*************** THE PROCEDURAL RULE (MAPS THE TABLE DOESN'T KNOW) ****************/
+
+// A 2 x 3 grid facing -z (rot16 0): lanes 10000 / 11200, rows 20000 (front) to 22500 (rear).
+static const StartSlot kGrid[AUTHORED] =
+{
+	{10000, 22500, 0}, {11200, 22500, 0}, {10000, 21250, 0}, {11200, 21250, 0}, {10000, 20000, 0}, {11200, 20000, 0},
+};
+
+static void TestRuleRaceGrid(void)
+{
+	StartSlot items[MAX_TEST_SLOTS] = {{0, 0, 0}};
+	bool authored[MAX_TEST_SLOTS] = {false};
+	StartSlotPose poses[MAX_TEST_SLOTS];
+
+	for (int p = 0; p < AUTHORED; p++)
+	{
+		items[p] = kGrid[p];
+		authored[p] = true;
+	}
+
+			/* ONE WAVE PER 6 PLAYERS, EACH GRID DEPTH + 1300 FURTHER BACK */
+
+	CHECK(StartSlots_Fill(START_SLOT_SET_RACE, 64000, 64000, items, authored, MAX_TEST_SLOTS, poses) == NULL);
+	for (int p = AUTHORED; p < MAX_TEST_SLOTS; p++)
+	{
+		const StartSlot src = kGrid[p % AUTHORED];
+		CHECK(poses[p].x == src.x && poses[p].z == src.z + 3800 * (p / AUTHORED));
+		CHECK(poses[p].rotY == StartSlot_RotY(0));
+	}
+
+			/* ANOTHER HEADING: FACING -x (rot16 4), SO THE WAVES GO +x */
+
+	for (int p = 0; p < AUTHORED; p++)
+		items[p] = (StartSlot) { kGrid[p].z, kGrid[p].x, 4 };
+	CHECK(StartSlots_Fill(START_SLOT_SET_RACE, 64000, 64000, items, authored, TABLE_SLOTS, poses) == NULL);
+	for (int p = AUTHORED; p < TABLE_SLOTS; p++)
+		CHECK(poses[p].x == kGrid[p - AUTHORED].z + 3800 && poses[p].z == kGrid[p - AUTHORED].x);
+
+			/* KEPT ON THE PLAYFIELD */
+
+	CHECK(StartSlots_Fill(START_SLOT_SET_RACE, 23000, 64000, items, authored, TABLE_SLOTS, poses) == NULL);
+	for (int p = AUTHORED; p < TABLE_SLOTS; p++)
+		CHECK(poses[p].x == 23000 - 1);
+
+			/* HUMANS TO THE BACK ON AN UNKNOWN MAP TOO */
+
+	for (int p = 0; p < AUTHORED; p++)
+		items[p] = kGrid[p];
+	bool isComputer[TABLE_SLOTS];
+	for (int p = 0; p < TABLE_SLOTS; p++)
+		isComputer[p] = p != 0;
+	StartSlots_Fill(START_SLOT_SET_RACE, 64000, 64000, items, authored, TABLE_SLOTS, poses);
+	StartSlots_KeepHumansAtBack(poses, isComputer, TABLE_SLOTS, StartSlots_CountAuthored(authored, TABLE_SLOTS), 0);
+	CHECK(poses[0].x == 10000 && poses[0].z == 22500 + 3800);
+	CHECK(poses[6].x == 10000 && poses[6].z == 22500);
+
+			/* WHERE THE MATCHING SLOTS ARE THE REARMOST, 1-4 HUMANS TAKE EXACTLY THOSE */
+
+	for (int humans = 1; humans <= 4; humans++)
+	{
+		for (int p = 0; p < TABLE_SLOTS; p++)
+			isComputer[p] = p >= humans;
+		StartSlotPose before[TABLE_SLOTS];
+		StartSlots_Fill(START_SLOT_SET_RACE, 64000, 64000, items, authored, TABLE_SLOTS, poses);
+		memcpy(before, poses, sizeof(before));
+		StartSlots_KeepHumansAtBack(poses, isComputer, TABLE_SLOTS, AUTHORED, 0);
+		for (int p = 0; p < TABLE_SLOTS; p++)
+		{
+			const int from = p < humans ? AUTHORED + p : (p >= AUTHORED && p < AUTHORED + humans) ? p - AUTHORED : p;
+			CHECK(PosesEqual(poses[p], before[from]));
+		}
+	}
+
+			/* EACH HUMAN KEEPS ITS LANE: PLAYER 0 TAKES SLOT 6 EVEN WITH SLOT 7 50 FURTHER BACK */
+
+	for (int p = 0; p < TABLE_SLOTS; p++)
+		isComputer[p] = p >= 2;
+	items[1].z += 50;
+	StartSlots_Fill(START_SLOT_SET_RACE, 64000, 64000, items, authored, TABLE_SLOTS, poses);
+	CHECK(poses[7].z == poses[6].z + 50);
+	StartSlots_KeepHumansAtBack(poses, isComputer, TABLE_SLOTS, AUTHORED, 0);
+	CHECK(poses[0].x == 10000 && poses[1].x == 11200 && poses[0].z == poses[1].z - 50);
+	items[1].z -= 50;
+
+			/* 8 CARS, 4 HUMANS: TWO TAKE THE NEW ROW, TWO THE AUTHORED REAR ROW BEHIND EVERY CPU */
+
+	for (int p = 0; p < TABLE_SLOTS; p++)
+		isComputer[p] = p >= 4;
+	StartSlots_Fill(START_SLOT_SET_RACE, 64000, 64000, items, authored, TABLE_SLOTS, poses);
+	StartSlots_KeepHumansAtBack(poses, isComputer, 8, AUTHORED, 0);
+	CHECK(poses[0].z == 26300 && poses[1].z == 26300);							// slots 6 and 7
+	CHECK(poses[2].z == 22500 && poses[3].z == 22500);							// authored 0 and 1
+	for (int p = 4; p < 8; p++)
+		CHECK(poses[p].z <= 21250);													// the CPUs: authored 2-5
+
+			/* A MAP WITH FEWER THAN 6 SLOTS NO LONGER STARTS PLAYERS IN THE CORNER */
+
+	authored[4] = authored[5] = false;
+	CHECK(StartSlots_Fill(START_SLOT_SET_RACE, 64000, 64000, items, authored, AUTHORED, poses) == NULL);
+	CHECK(poses[4].x == 10000 && poses[4].z == 22500 + 2550);		// grid depth 1250 + 1300 behind player 0
+	CHECK(poses[5].x == 11200 && poses[5].z == 22500 + 2550);
+
+			/* NO AUTHORED SLOTS AT ALL: NOTHING TO DERIVE FROM */
+
+	for (int p = 0; p < AUTHORED; p++)
+		authored[p] = false;
+	CHECK(StartSlots_Fill(START_SLOT_SET_RACE, 64000, 64000, items, authored, AUTHORED, poses) == NULL);
+	for (int p = 0; p < AUTHORED; p++)
+		CHECK(poses[p].x == 0 && poses[p].z == 0 && poses[p].rotY == 0);
+}
+
+static void TestRuleArena(void)
+{
+	StartSlot items[TABLE_SLOTS] = {{0, 0, 0}};
+	bool authored[TABLE_SLOTS] = {false};
+	StartSlotPose poses[TABLE_SLOTS];
+
+			/* BATTLE: A WIDER RING, HALF A SLOT ROUND */
+
+	for (int p = 0; p < AUTHORED; p++)
+	{
+		const double a = 2.0 * 3.14159265358979323846 * p / (double) AUTHORED;
+		items[p] = (StartSlot) { 30000 + (int) lround(1500 * cos(a)), 30000 + (int) lround(1500 * sin(a)), (p * 16 / AUTHORED) & 15 };
+		authored[p] = true;
+	}
+	CHECK(StartSlots_Fill(START_SLOT_SET_BATTLE, 64000, 64000, items, authored, TABLE_SLOTS, poses) == NULL);
+	for (int p = AUTHORED; p < TABLE_SLOTS; p++)
+	{
+		const double r = sqrt((double) Dist2(poses[p].x, poses[p].z, 30000, 30000));
+		CHECK(fabs(r - 2800) < 3);
+		CHECK(fabsf(poses[p].rotY - (StartSlot_RotY(items[p - AUTHORED].rot16) + PI2 / 12)) < 1e-5f);
+		for (int q = 0; q < p; q++)
+			CHECK(Dist2(poses[p].x, poses[p].z, poses[q].x, poses[q].z) >= (int64_t) MIN_SPACING * MIN_SPACING);
+	}
+
+			/* ANY RING SIZE: THE TURN (COMPUTED WITHOUT LIBM) MATCHES cos/sin */
+
+	for (int n = 2; n <= 8; n++)
+	{
+		StartSlot ring[MAX_TEST_SLOTS] = {{0, 0, 0}};
+		bool ringAuthored[MAX_TEST_SLOTS] = {false};
+		StartSlotPose ringPoses[MAX_TEST_SLOTS];
+
+		for (int p = 0; p < n; p++)
+		{
+			const double a = 2.0 * 3.14159265358979323846 * p / n;
+			ring[p] = (StartSlot) { 30000 + (int) lround(1500 * cos(a)), 30000 + (int) lround(1500 * sin(a)), (p * 16 / n) & 15 };
+			ringAuthored[p] = true;
+		}
+		CHECK(StartSlots_Fill(START_SLOT_SET_BATTLE, 64000, 64000, ring, ringAuthored, 2 * n, ringPoses) == NULL);
+
+		double cx = 0, cz = 0;
+		for (int p = 0; p < n; p++)
+		{
+			cx += ring[p].x / (double) n;
+			cz += ring[p].z / (double) n;
+		}
+		const float theta = PI2 / (float) (2 * n);
+		for (int p = n; p < 2 * n; p++)
+		{
+			const double dx = ring[p - n].x - cx, dz = ring[p - n].z - cz;
+			const double k = (sqrt(dx * dx + dz * dz) + 1300) / sqrt(dx * dx + dz * dz);
+			CHECK(fabs(ringPoses[p].x - (cx + k * (dx * cos(theta) + dz * sin(theta)))) <= 1.0);
+			CHECK(fabs(ringPoses[p].z - (cz + k * (dz * cos(theta) - dx * sin(theta)))) <= 1.0);
+			CHECK(ringPoses[p].rotY == StartSlot_RotY(ring[p - n].rot16) + theta);
+		}
+	}
+
+			/* CTF: A COLUMN BESIDE EACH TEAM'S LINE, TOWARDS THE OTHER TEAM */
+
+	for (int p = 0; p < AUTHORED; p++)
+		items[p] = (StartSlot) { (p & 1) ? 40000 : 20000, 29000 + 1000 * (p / 2), (p & 1) ? 4 : 12 };
+	CHECK(StartSlots_Fill(START_SLOT_SET_CTF, 64000, 64000, items, authored, TABLE_SLOTS, poses) == NULL);
+	for (int p = AUTHORED; p < TABLE_SLOTS; p++)
+	{
+		CHECK(poses[p].x == ((p & 1) ? 39000 : 21000));
+		CHECK(poses[p].z == items[p - AUTHORED].z);
+		CHECK(poses[p].rotY == StartSlot_RotY(items[p - AUTHORED].rot16));
+	}
+}
+
+
+/*************** CTF RULE: ANY NUMBER OF AUTHORED SLOTS ****************/
+//
+// Red (even players) on a line at x = 20000 facing +x, green (odd) at x = 40000 facing -x. With
+// an odd count the teams have different sizes, but every extra player still copies a teammate:
+// it starts on its own team's half, one column towards the other team, facing its team's way.
+//
+
+static void TestRuleCtfTeams(void)
+{
+	for (int n = 2; n <= 7; n++)
+	{
+		StartSlot items[MAX_TEST_SLOTS] = {{0, 0, 0}};
+		bool authored[MAX_TEST_SLOTS] = {false};
+		StartSlotPose poses[MAX_TEST_SLOTS];
+
+		for (int p = 0; p < n; p++)
+		{
+			items[p] = (StartSlot) { (p & 1) ? 40000 : 20000, 29000 + 1000 * (p / 2), (p & 1) ? 4 : 12 };
+			authored[p] = true;
+		}
+		CHECK(StartSlots_Fill(START_SLOT_SET_CTF, 64000, 64000, items, authored, MAX_TEST_SLOTS, poses) == NULL);
+
+		for (int p = n; p < MAX_TEST_SLOTS; p++)
+		{
+			const int team = p & 1;
+			const int members = (n + 1 - team) / 2;
+			const StartSlot* mate = &items[team + 2 * ((p / 2) % members)];		// copied in turn
+			const int wave = (p / 2) / members;
+			const int step = members == 1 ? 1300 : 1000;						// a lone slot: a row gap
+
+			CHECK(poses[p].rotY == StartSlot_RotY(team ? 4 : 12));
+			CHECK(poses[p].x == (team ? 40000 - step * wave : 20000 + step * wave));
+			CHECK(poses[p].z == mate->z);
+			CHECK(team ? poses[p].x > 30000 : poses[p].x < 30000);				// its own half
+			for (int q = 0; q < p; q++)
+				CHECK(poses[q].x != poses[p].x || poses[q].z != poses[p].z);
+		}
+	}
+}
+
+
+/*************** RULE SLOTS NEVER START INSIDE ANOTHER CAR ****************/
+
+static void TestRuleKeepsSlotsApart(void)
+{
+			/* EVERY SHIPPED LAYOUT ON A MODIFIED MAP */
+
+	for (int e = 0; e < kNumStartSlotTableEntries; e++)
+	{
+		const StartSlotTableEntry* entry = &kStartSlotTable[e];
+		StartSlot items[MAX_TEST_SLOTS];
+		bool authored[MAX_TEST_SLOTS];
+		StartSlotPose poses[MAX_TEST_SLOTS];
+
+		LoadAuthored(entry, items, authored, MAX_TEST_SLOTS);
+		items[0].x += 50;											// no longer the shipped map
+		CHECK_ENTRY(StartSlots_Fill(entry->set, entry->mapUnitWidth, entry->mapUnitDepth, items, authored,
+									MAX_TEST_SLOTS, poses) == NULL, entry);
+		CheckDistinctAndSpaced(entry, poses, MAX_TEST_SLOTS);
+	}
+
+			/* ONE BATTLE SLOT: THE RING HAS NO RADIUS, SO THE OTHERS LINE UP BEHIND IT */
+
+	{
+		StartSlot items[START_SLOTS_MAX] = {{30000, 30000, 0}};
+		bool authored[START_SLOTS_MAX] = {true};
+		StartSlotPose poses[START_SLOTS_MAX];
+
+		CHECK(StartSlots_Fill(START_SLOT_SET_BATTLE, 128000, 128000, items, authored, START_SLOTS_MAX, poses) == NULL);
+		for (int p = 1; p < START_SLOTS_MAX; p++)
+		{
+			CHECK(poses[p].x == 30000 && poses[p].z == 30000 + 900 * p);			// behind, facing away
+			for (int q = 0; q < p; q++)
+				CHECK(Dist2(poses[p].x, poses[p].z, poses[q].x, poses[q].z) >= (int64_t) MIN_SPACING * MIN_SPACING);
+		}
+	}
+
+			/* CTF TEAM LINES WITH SLOTS 600 APART: THE COLUMN STEPS OUT FURTHER */
+
+	{
+		StartSlot items[MAX_TEST_SLOTS] = {{0, 0, 0}};
+		bool authored[MAX_TEST_SLOTS] = {false};
+		StartSlotPose poses[MAX_TEST_SLOTS];
+
+		for (int p = 0; p < AUTHORED; p++)
+		{
+			items[p] = (StartSlot) { (p & 1) ? 40000 : 20000, 29000 + 600 * (p / 2), (p & 1) ? 4 : 12 };
+			authored[p] = true;
+		}
+		CHECK(StartSlots_Fill(START_SLOT_SET_CTF, 64000, 64000, items, authored, MAX_TEST_SLOTS, poses) == NULL);
+		CHECK(poses[6].x == 20900 && poses[6].z == 29000);			// 600 out, pushed to 900 from p0
+		CHECK(poses[7].x == 39100 && poses[7].z == 29000);
+		for (int p = AUTHORED; p < MAX_TEST_SLOTS; p++)
+		{
+			CHECK((p & 1) ? poses[p].x > 30000 : poses[p].x < 30000);
+			for (int q = 0; q < p; q++)
+				CHECK(Dist2(poses[p].x, poses[p].z, poses[q].x, poses[q].z) >= (int64_t) MIN_SPACING * MIN_SPACING);
+		}
+	}
+}
+
+
+/*************** THE TABLE NEEDS THE MAP EXACTLY AS SHIPPED ****************/
+
+static void TestTableNeedsExactMatch(void)
+{
+	const StartSlotTableEntry* entry = &kStartSlotTable[0];
+	StartSlot items[TABLE_SLOTS];
+	bool authored[TABLE_SLOTS];
+	StartSlotPose poses[TABLE_SLOTS], rule[TABLE_SLOTS];
+
+	LoadAuthored(entry, items, authored, TABLE_SLOTS);
+	CHECK(StartSlots_Fill(entry->set, entry->mapUnitWidth, entry->mapUnitDepth, items, authored, TABLE_SLOTS, poses) == entry);
+
+			/* A MOVED SLOT: THE PROCEDURAL RULE */
+
+	items[3].x += 50;
+	CHECK(StartSlots_Fill(entry->set, entry->mapUnitWidth, entry->mapUnitDepth, items, authored, TABLE_SLOTS, rule) == NULL);
+	CHECK(SamePose(rule[3], items[3]));
+	for (int p = AUTHORED; p < TABLE_SLOTS; p++)
+	{
+		CHECK(rule[p].rotY == StartSlot_RotY(items[p - AUTHORED].rot16));
+		CHECK(Depth(rule[p].x, rule[p].z, items[0].rot16) < Depth(items[p - AUTHORED].x, items[p - AUTHORED].z, items[0].rot16) - 1300);
+		for (int q = 0; q < p; q++)
+			CHECK(Dist2(rule[p].x, rule[p].z, rule[q].x, rule[q].z) > 0);
+	}
+	items[3].x -= 50;
+
+			/* A TURNED SLOT, ANOTHER MAP SIZE OR ANOTHER SET */
+
+	items[5].rot16 ^= 1;
+	CHECK(StartSlots_Fill(entry->set, entry->mapUnitWidth, entry->mapUnitDepth, items, authored, TABLE_SLOTS, poses) == NULL);
+	items[5].rot16 ^= 1;
+	CHECK(StartSlots_Fill(entry->set, entry->mapUnitWidth + 6400, entry->mapUnitDepth, items, authored, TABLE_SLOTS, poses) == NULL);
+	CHECK(StartSlots_Fill(START_SLOT_SET_BATTLE, entry->mapUnitWidth, entry->mapUnitDepth, items, authored, TABLE_SLOTS, poses) == NULL);
+
+			/* A MAP THAT AUTHORS A 7TH SLOT KEEPS IT, AND GETS THE RULE FOR THE REST */
+
+	items[6] = (StartSlot) { 1000, 2000, 3 };
+	authored[6] = true;
+	CHECK(StartSlots_Fill(entry->set, entry->mapUnitWidth, entry->mapUnitDepth, items, authored, TABLE_SLOTS, poses) == NULL);
+	CHECK(SamePose(poses[6], items[6]));
+	for (int p = 7; p < TABLE_SLOTS; p++)
+		CHECK(!SamePose(poses[p], entry->extra[p - AUTHORED]) && (poses[p].x != 0 || poses[p].z != 0));
+}
+
+
+/*************** PLACING PLAYERS FROM A PLAYFIELD'S ITEMS ****************/
+//
+// StartSlots_Place is FindPlayerStartCoordItems without the globals: which items each game mode
+// reads, the slot set it uses, and the humans-to-back swap only on race grids.
+//
+
+static int AddStart(TerrainItemEntryType items[], int n, int player, StartSlot slot, bool ctf)
+{
+	items[n] = (TerrainItemEntryType) { (uint32_t) slot.x, (uint32_t) slot.z, MAP_ITEM_MYSTARTCOORD,
+										{ (Byte) player, (Byte) slot.rot16, 0, ctf ? 1 : 0 }, 0 };
+	return n + 1;
+}
+
+static const StartSlotTableEntry* FindEntry(const char* map, StartSlotSet set)
+{
+	for (int e = 0; e < kNumStartSlotTableEntries; e++)
+		if (kStartSlotTable[e].set == set && strcmp(kStartSlotTable[e].map, map) == 0)
+			return &kStartSlotTable[e];
+	CHECK(false);
+	return NULL;
+}
+
+// poses == the entry's slots 0-11, unswapped.
+static void CheckPlaced(const StartSlotTableEntry* entry, const StartSlotPose poses[])
+{
+	for (int p = 0; p < TABLE_SLOTS; p++)
+		CHECK_ENTRY(SamePose(poses[p], p < AUTHORED ? entry->authored[p] : entry->extra[p - AUTHORED]), entry);
+}
+
+// poses == the entry's slots 0-11 with the humans among players 0 .. numPlayers-1 moved to the
+// back (StartSlots_KeepHumansAtBack), and player 0, a human, on a new slot.
+static void CheckPlacedAtBack(const StartSlotTableEntry* entry, const StartSlotPose poses[], const bool isComputer[], int numPlayers)
+{
+	StartSlotPose expect[TABLE_SLOTS];
+	Fill(entry, TABLE_SLOTS, expect);
+	StartSlots_KeepHumansAtBack(expect, isComputer, numPlayers, AUTHORED, entry->authored[0].rot16);
+	for (int p = 0; p < TABLE_SLOTS; p++)
+		CHECK_ENTRY(PosesEqual(poses[p], expect[p]), entry);
+
+	bool newSlot = false;
+	for (int k = 0; k < START_SLOT_TABLE_EXTRA; k++)
+		newSlot |= SamePose(poses[0], entry->extra[k]);
+	CHECK_ENTRY(!isComputer[0] && newSlot, entry);
+}
+
+static void TestPlace(void)
+{
+	bool twoHumans[MAX_TEST_SLOTS];
+	for (int p = 0; p < MAX_TEST_SLOTS; p++)
+		twoHumans[p] = p >= 2;
+
+			/* WHICH SET EACH GAME MODE USES */
+
+	for (int mode = 0; mode < NUM_GAME_MODES; mode++)
+	{
+		const StartSlotSet expect = mode == GAME_MODE_CAPTUREFLAG ? START_SLOT_SET_CTF
+								: (mode == GAME_MODE_TAG1 || mode == GAME_MODE_TAG2 || mode == GAME_MODE_SURVIVAL)
+								? START_SLOT_SET_BATTLE : START_SLOT_SET_RACE;
+		CHECK(StartSlots_SetForGameMode(mode) == expect);
+	}
+	CHECK(StartSlots_SetForGameMode(GAME_MODE_PRACTICE) == START_SLOT_SET_RACE);
+	CHECK(StartSlots_SetForGameMode(GAME_MODE_TOURNAMENT) == START_SLOT_SET_RACE);
+	CHECK(StartSlots_SetForGameMode(GAME_MODE_MULTIPLAYERRACE) == START_SLOT_SET_RACE);
+
+			/* A TRACK: THE GRID, HUMANS TO THE BACK, WHATEVER ELSE THE ITEM LIST HOLDS */
+
+	{
+		const StartSlotTableEntry* race = FindEntry("BronzeAge_Egypt", START_SLOT_SET_RACE);
+		TerrainItemEntryType items[16];
+		int n = 0;
+		items[n++] = (TerrainItemEntryType) { 1000, 1000, 5, { 2, 0, 0, 0 }, 0 };		// not a start coord
+		for (int p = AUTHORED - 1; p >= 0; p--)												// any order
+			n = AddStart(items, n, p, race->authored[p], false);
+		n = AddStart(items, n, 0, (StartSlot) { 5000, 5000, 3 }, true);					// a CTF slot: not for racing
+		n = AddStart(items, n, 40, (StartSlot) { 6000, 6000, 3 }, false);				// no such player
+
+		for (int mode = GAME_MODE_PRACTICE; mode <= GAME_MODE_MULTIPLAYERRACE; mode++)
+		{
+			StartSlotPose poses[MAX_TEST_SLOTS];
+			CHECK(StartSlots_Place(items, n, mode, race->mapUnitWidth, race->mapUnitDepth, twoHumans, TABLE_SLOTS, TABLE_SLOTS, poses) == -1);
+			CheckPlacedAtBack(race, poses, twoHumans, TABLE_SLOTS);
+		}
+
+				/* 7 CARS: ONLY SLOT 6 IS FILLED BEHIND THE GRID, SO PLAYER 0 MOVES THERE */
+
+		{
+			StartSlotPose poses[MAX_TEST_SLOTS];
+			CHECK(StartSlots_Place(items, n, GAME_MODE_MULTIPLAYERRACE, race->mapUnitWidth, race->mapUnitDepth, twoHumans, 7, TABLE_SLOTS, poses) == -1);
+			CheckPlacedAtBack(race, poses, twoHumans, 7);
+			CHECK_ENTRY(SamePose(poses[0], race->extra[0]) && SamePose(poses[7], race->extra[1]), race);
+		}
+
+				/* THE GAME'S MAX_PLAYERS: AT 6, THE AUTHORED GRID UNCHANGED */
+
+		StartSlotPose poses[MAX_TEST_SLOTS], expect[MAX_TEST_SLOTS];
+		CHECK(StartSlots_Place(items, n, GAME_MODE_PRACTICE, race->mapUnitWidth, race->mapUnitDepth, twoHumans, MAX_PLAYERS, MAX_PLAYERS, poses) == -1);
+		Fill(race, MAX_PLAYERS, expect);
+		StartSlots_KeepHumansAtBack(expect, twoHumans, MAX_PLAYERS, AUTHORED, race->authored[0].rot16);
+		for (int p = 0; p < MAX_PLAYERS; p++)
+		{
+			CHECK_ENTRY(PosesEqual(poses[p], expect[p]), race);
+			if (MAX_PLAYERS <= AUTHORED)
+				CHECK_ENTRY(SamePose(poses[p], race->authored[p]), race);
+		}
+
+				/* A DUPLICATE GRID SLOT IS REPORTED */
+
+		n = AddStart(items, n, 3, (StartSlot) { 7000, 7000, 0 }, false);
+		CHECK(StartSlots_Place(items, n, GAME_MODE_TOURNAMENT, race->mapUnitWidth, race->mapUnitDepth, twoHumans, TABLE_SLOTS, TABLE_SLOTS, poses) == 3);
+	}
+
+			/* AN ARENA: TAG AND SURVIVAL USE THE BATTLE RING, CTF ITS OWN SLOTS; NO SWAPS */
+
+	{
+		const StartSlotTableEntry* battle = FindEntry("Battle_Coliseum", START_SLOT_SET_BATTLE);
+		const StartSlotTableEntry* ctf = FindEntry("Battle_Coliseum", START_SLOT_SET_CTF);
+		TerrainItemEntryType items[16];
+		int n = 0;
+		for (int p = 0; p < AUTHORED; p++)
+		{
+			n = AddStart(items, n, p, ctf->authored[p], true);
+			n = AddStart(items, n, p, battle->authored[p], false);
+		}
+
+		for (int mode = 0; mode < NUM_GAME_MODES; mode++)
+		{
+			if (StartSlots_SetForGameMode(mode) == START_SLOT_SET_RACE)
+				continue;
+			const StartSlotTableEntry* entry = mode == GAME_MODE_CAPTUREFLAG ? ctf : battle;
+			StartSlotPose poses[MAX_TEST_SLOTS];
+			CHECK(StartSlots_Place(items, n, mode, entry->mapUnitWidth, entry->mapUnitDepth, twoHumans, TABLE_SLOTS, TABLE_SLOTS, poses) == -1);
+			CheckPlaced(entry, poses);
+		}
+
+				/* A DUPLICATE CTF SLOT MATTERS ONLY TO CTF */
+
+		n = AddStart(items, n, 4, (StartSlot) { 7000, 7000, 0 }, true);
+		StartSlotPose poses[MAX_TEST_SLOTS];
+		CHECK(StartSlots_Place(items, n, GAME_MODE_CAPTUREFLAG, ctf->mapUnitWidth, ctf->mapUnitDepth, twoHumans, TABLE_SLOTS, TABLE_SLOTS, poses) == 4);
+		CHECK(StartSlots_Place(items, n, GAME_MODE_SURVIVAL, battle->mapUnitWidth, battle->mapUnitDepth, twoHumans, TABLE_SLOTS, TABLE_SLOTS, poses) == -1);
+	}
+}
+
+
+int main(void)
+{
+	TestTableEntries();
+	TestPlayerCounts();
+	TestHumansAtTheBack();
+	TestRuleRaceGrid();
+	TestRuleArena();
+	TestRuleCtfTeams();
+	TestRuleKeepsSlotsApart();
+	TestTableNeedsExactMatch();
+	TestPlace();
+	printf("start slots: %d table entries OK\n", kNumStartSlotTableEntries);
+	return 0;
+}
