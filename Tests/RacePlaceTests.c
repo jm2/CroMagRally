@@ -69,6 +69,33 @@ static void TestWorstHumanPlace(void)
 	CHECK(gWorstHumanPlace == MAX_PLAYERS - 1);
 }
 
+static void TestFinishingOrderPlaces(void)
+{
+	// Player 0 is ranked 2nd on the final approach: same lap and checkpoint, but farther
+	// from the finish line's midpoint (it's out at the edge of the track).
+	StartRace(3, 1);
+	gPlayerInfo[1].checkpointNum = gPlayerInfo[0].checkpointNum;
+	gPlayerInfo[0].distToNextCheckpoint = 900;
+	gPlayerInfo[1].distToNextCheckpoint = 300;
+	CalcPlayerPlaces();
+	CHECK(gPlayerInfo[0].place == 1 && gPlayerInfo[1].place == 0 && gPlayerInfo[2].place == 2);
+
+	// It crosses the line first, so it's 1st, and the car it beat is 2nd, not tied with it.
+	numFinalPlaceCalls = 0;
+	PlayerCompletedRace(0);
+	CHECK(gPlayerInfo[0].place == 0 && numFinalPlaceCalls == 1);
+	CalcPlayerPlaces();
+	CHECK(gPlayerInfo[0].place == 0 && gPlayerInfo[1].place == 1 && gPlayerInfo[2].place == 2);
+
+	// Later finishers take the next places in the order they cross, and a repeat call
+	// changes nothing.
+	PlayerCompletedRace(2);
+	PlayerCompletedRace(1);
+	PlayerCompletedRace(0);
+	CalcPlayerPlaces();
+	CHECK(gPlayerInfo[0].place == 0 && gPlayerInfo[2].place == 1 && gPlayerInfo[1].place == 2);
+}
+
 static void StartMultiplayerRace(short numPlayers, short numHumans, Boolean cpuFill)
 {
 	StartRace(numPlayers, numHumans);
@@ -136,6 +163,7 @@ int main(void)
 {
 	TestDemoWorstHumanPlace();
 	TestWorstHumanPlace();
+	TestFinishingOrderPlaces();
 	TestHumansOnlyRaceCompletion();
 	TestFilledRaceCompletion();
 	puts("Race place tests passed");
