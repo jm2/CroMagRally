@@ -16,6 +16,17 @@ play-test verification under the redesign).
 > their FPS and padding fields. Older peers are rejected during the handshake,
 > before entering vehicle selection or level loading.
 >
+> **2026-09-22: six network players again.** `MAX_CLIENTS` is `MAX_PLAYERS` (6): the host
+> plus up to five clients, as in the original game. This plan was written while commit
+> `197f1f2` capped `MAX_CLIENTS` at `MAX_LOCAL_PLAYERS` (4), so its `MAX_CLIENTS=4` figures
+> describe that cap, not current builds. CMR8 has not shipped yet, so the raised cap keeps
+> the CMR8 cookie.
+>
+> **Twelve players.** `MAX_PLAYERS` (and so `MAX_CLIENTS`) is now 12. The host control
+> message is 628 B (40 B per player slot, 8 B per event slot, `NET_MAX_PENDING_EVENTS` 12),
+> so `kNSpMaxPayloadLength` is 1024 and each send ring holds 80 KB (about 2 s of host
+> messages at 60 fps). Still the unreleased CMR8 cookie.
+>
 > **The protocol-specification numbers below are NOT authoritative for the wire format.**
 > `Source/Headers/network.h` is the single source of truth, and it differs from this plan in
 > several places the design pre-sized differently, e.g. the drop timeout is
@@ -35,7 +46,7 @@ FINAL DESIGN: Design 1 (CMR7 Free-Running Lockstep) wins as the base — it is t
 TRANSPORT: unchanged — TCP star on port 49959, existing socket options kept (NODELAY/keepalive 5s+3x1s/QUICKACK/NOTSENT_LOWAT/64KB bufs, ApplyTCPSocketOptions NetLow.c:176-235), MSG_PEEK PollSocket framing (NetLow.c:671-776), RecvAll (604-653), UDP lobby discovery, round-robin host polling (NetLow.c:783-836). ONE protocol bump at Stage 2: 4CC 'CMR6'→'CMR7' (netsprocket.h:24) AND kNSpMaxPayloadLength 256→512 (netsprocket.h:21-22) in the same change (old peers cleanly rejected by the 4CC check at NetLow.c:718-723); raw little-endian structs retained with _Static_assert(sizeof) guards on every wire struct; ALL CMR7 fields land in this single bump so Stages 3-6 change no wire bytes. Host validates playerNum/from-ID bounds on every received message before any array index (closes the wire-driven OOB writes found in review).
 
 MESSAGES:
-[H→C broadcast, one per host frame] kNetHostControlInfoMessage (extends network.h:49-63): fps,fpsFrac f32 (host dt from CalcFramesPerSecond, NEW net-only max clamp dt ≤ 2/gTargetFPS ≈ 33ms); randomSeed u32 (MyRandomLong, kept fatal check); frameCounter u32; simTick u32; per MAX_PLAYERS(6): controlBits u32, controlBitsNew u32 (host-derived), analogSteering OGLVector2D, pauseState u8, inputFlags u8 (bit0 substituted, bit1 coalesced); syncPos OGLPoint3D[6] + syncRotY f32[6] (rubber-band feed, kept); NEW ackInputSeq[MAX_CLIENTS=4] u32 = last REAL (non-substituted) input seq applied per client — each client computes true end-to-end input delay = ownSeq − ack; NEW queueDepth[MAX_CLIENTS] u8 and targetDepth[MAX_CLIENTS] u8 (telemetry); NEW event block: eventCount u8 + up to 2 × {effectiveFrame u32, type u8 (kEvBecomeBot, kEvUnpauseForce, reserved), playerNum i8, pad u16} — frame-aligned events applied by every machine when simulating frame==effectiveFrame. Payload ≈ 218B (current) + ~46B ≈ 264B < 512 cap.
+[H→C broadcast, one per host frame] kNetHostControlInfoMessage (extends network.h:49-63): fps,fpsFrac f32 (host dt from CalcFramesPerSecond, NEW net-only max clamp dt ≤ 2/gTargetFPS ≈ 33ms); randomSeed u32 (MyRandomLong, kept fatal check); frameCounter u32; simTick u32; per MAX_PLAYERS(6): controlBits u32, controlBitsNew u32 (host-derived), analogSteering OGLVector2D, pauseState u8, inputFlags u8 (bit0 substituted, bit1 coalesced); syncPos OGLPoint3D[6] + syncRotY f32[6] (rubber-band feed, kept); NEW ackInputSeq[MAX_CLIENTS=4 at the time] u32 = last REAL (non-substituted) input seq applied per client — each client computes true end-to-end input delay = ownSeq − ack; NEW queueDepth[MAX_CLIENTS] u8 and targetDepth[MAX_CLIENTS] u8 (telemetry); NEW event block: eventCount u8 + up to 2 × {effectiveFrame u32, type u8 (kEvBecomeBot, kEvUnpauseForce, reserved), playerNum i8, pad u16} — frame-aligned events applied by every machine when simulating frame==effectiveFrame. Payload ≈ 218B (current) + ~46B ≈ 264B < 512 cap.
 [C→H, wall-clock cadence] kNetClientControlInfoMessage (replaces network.h:68-82): playerNum i16, inputSeq u32 (monotonic, client-owned), controlBits u32, analogSteering OGLVector2D, pauseState u8, lastHostFrameSeen u32 (RTT/diagnostics) ≈ 24B payload / 52B wire. DELETED from wire: controlBitsNew (host derives), prevControlBits[8]/prevAnalogSteering[8] (−96B; TCP is ordered — gaps were always counter-desync bugs, never loss).
 [any↔any] kNetKeepAliveMessage 'keep' (28B header only): sent when nothing else sent for 50ms in lobby, char-select, loading barriers (HostWaitForPlayersToPrepareLevel NetHigh.c:693-701, ClientTellHostLevelIsPrepared 771-779), and menus — keeps lastHeard fresh and WiFi radios out of power-save, and warms the jitter estimator pre-race. NOT needed in-game: both directions stream continuously by construction (G1).
 
@@ -143,7 +154,7 @@ current source. (Generated from the per-stage spec workflow.)
 - `Source/Network/NetHigh.c` (ClientSend_ControlInfoToHost statics, NetHigh.c:1036-1037) — PENDING N. Promote static historyControlBits[8]/historyAnalog[8] from function-scope to file-scope statics (sClientHistoryControlBits/sClientHistoryAnalog) so the reset can zero them; they currently survive across net games and corrupt the next session's redundancy stream.
 - `Source/Network/NetHigh.c` (HostReceive_ControlInfoFromClients, NetHigh.c:1182-1210) — PENDING N (sync-mask conflation). Loop marks/checks the mask by playerNum i (PlayerIsSynced(i) 1184, MarkPlayerSynced(i) 1200/1210) but AreAllPlayersSynced (115-120) compares vs NSpGame_GetActivePlayersIDMask = NSp slot IDs. After lobby churn (IDs {0,2}, playerNums {0,1}) masks never match -> 8s timeouts then fatal. Fix: drive the mask by NSp ID. Add PlayerNumToNSpID(i)=gPlayerInfo[i].net.nspPlayerID; skip bots (isComputer); use PlayerIsSynced/MarkPlayerSynced(PlayerNumToNSpID(i)). Queue/counter indexing stays playerNum-based; char-type handler at 396 already uses message->from (NSp ID) and stays correct.
 - `Source/Network/NetHigh.c` (Queue_Push 1107, ApplyClientMessage 1136, RecoverFromFuture 1148, HostReceive 1230, char-type handler 374-378) — PENDING W (wire-driven OOB). Every site indexing by wire-supplied playerNum is an attacker OOB write. Add IsValidNetPlayerNum(p){return p>=0 && p<MAX_PLAYERS;}. In HostReceive's kNetClientControlInfoMessage branch (1228-1238) reject+Release if !IsValidNetPlayerNum(cMsg->playerNum) OR gPlayerInfo[playerNum].net.nspPlayerID != inMess->from (anti-spoof) BEFORE Queue_Push. Guard ApplyClientMessage/RecoverFromFuture too. In the char-type handler replace 'TODO: Check player num' (376) with the bounds check before writing gPlayerInfo[mess->playerNum].
-- `Source/Network/NetLow.c` (NSpGame_AcceptNewClient, NetLow.c:472) — PENDING W (OOB scan). for(i=0;i<MAX_PLAYERS;i++) reads game->players[i].state but players[] is MAX_CLIENTS(4) sized, MAX_PLAYERS=6 -> reads players[4]/[5] OOB; garbage==kNSpPlayerState_Offline(0) accepts a 5th client written OOB (heap corruption). Change bound to MAX_CLIENTS.
+- `Source/Network/NetLow.c` (NSpGame_AcceptNewClient, NetLow.c:472) — PENDING W (OOB scan). for(i=0;i<MAX_PLAYERS;i++) reads game->players[i].state but players[] is MAX_CLIENTS(4 at the time) sized, MAX_PLAYERS=6 -> reads players[4]/[5] OOB; garbage==kNSpPlayerState_Offline(0) accepts a 5th client written OOB (heap corruption). Change bound to MAX_CLIENTS.
 - `Source/Network/NetLow.c` (JoinLobby, NetLow.c:406-419) — PENDING (f). connect() runs on a still-blocking socket -> joining blocks the main thread for the full OS connect timeout (frozen window). Reorder: MakeSocketNonBlocking BEFORE connect; accept EINPROGRESS/EWOULDBLOCK; poll()/select() for writability with a ~3s bounded timeout while calling DoSDLMaintenance() each iteration; on writable check SO_ERROR via getsockopt; real error or timeout => fail. Fix the misleading 'make it blocking AFTER connecting' comment.
 - `Source/Network/NetHigh.c` (ClientReceive_ControlInfoFromHost busy loop, NetHigh.c:923-974 (else branch 949)) — PENDING (g). Zero-sleep spin = 100% CPU + frozen window during packet lateness. In the no-message branch add DoSDLMaintenance() then SDL_Delay(1). Pure CPU/UX, zero protocol impact; Stage 3 replaces the loop.
 - `Source/Network/NetHigh.c` (HostReceive_ControlInfoFromClients busy loop, NetHigh.c:1179-1262) — PENDING (g). Same spin. After the poll-network step, when inMess==NULL and not all synced, call DoSDLMaintenance() + SDL_Delay(1) before next iteration. Zero protocol impact; Stage 2 replaces the loop.
@@ -336,8 +347,8 @@ typedef struct SendRing
 //     SendRing  clientSendRing;      // client-side outbound queue for clientToHostSocket
 //                                    // (zero-init by AllocPtrClear in NSpGame_Alloc)
 
-// Note: sizeof(NSpGame) grows by MAX_CLIENTS(4)*32KB (peer rings) + 32KB (client ring)
-// = ~160 KB, heap-allocated once per session via AllocPtrClear and freed in
+// Note: sizeof(NSpGame) grows by MAX_CLIENTS(4 at the time; 6 since 2026-09-22)*32KB (peer rings) + 32KB (client ring)
+// = ~160 KB (~224 KB at 6), heap-allocated once per session via AllocPtrClear and freed in
 // NSpGame_Dispose -> rings can never carry state across consecutive games
 // (unlike the static sHostInputQueues bug).
 
@@ -1056,7 +1067,7 @@ After MulticastLock acquire:
 **Edge cases:**
 - Tagged ('it') player leaves: ChooseTaggedPlayer() must run at effectiveFrame on every machine with identical gNumTotalPlayers and isEliminated state. ApplyBecomeBot sets the leaver isEliminated=true before the ChooseTaggedPlayer draw and all machines do it at the same frameCounter, so the RandomRange draw selects the same new 'it' everywhere — the exact desync G3 targets. Add a gWhoIsIt parity assertion test.
 - Leave while paused: gSimulationFrame is frozen but gHostSendCounter keeps advancing (pause menu burns net frames). effectiveFrame is in gHostSendCounter units, so the event still fires. After ApplyBecomeBot forces isComputer=true, IsNetGamePaused() (ignores isComputer) may flip false on all machines at the same frameCounter — deterministic unpause; kEvUnpauseForce is the belt-and-suspenders.
-- Double-leave / drop+leave race on the same player: ScheduleFrameEvent dedupes by (type,playerNum); ApplyBecomeBot is idempotent. Two DIFFERENT players leaving same frame: events[2] holds both; >2 simultaneous (up to 4 clients) dribble out 2/broadcast across frames — EV_BECOME_BOT_LEAD (~12 frames) gives slack.
+- Double-leave / drop+leave race on the same player: ScheduleFrameEvent dedupes by (type,playerNum); ApplyBecomeBot is idempotent. Two DIFFERENT players leaving same frame: events[2] holds both; >2 simultaneous (up to 5 clients since 2026-09-22) dribble out 2/broadcast across frames — EV_BECOME_BOT_LEAD (~12 frames) gives slack.
 - Leave during loading barrier or lobby (not GameLoop): no running lockstep sim and ChooseTaggedPlayer not yet frame-coupled, so convert immediately (existing path); the frame-aligned path engages only in kNetSequence_GameLoop.
 - Host keeps substituting the leaver between TCP-leave arrival and effectiveFrame: Stage 2 substitution fires because the queue is empty; host fills the broadcast slot from held gPlayerInfo[]. Verify the kicked/closed slot is not pruned from the broadcast loop before effectiveFrame.
 - Backlogged client still applies at the correct frameCounter (not wall-clock): the event rides every broadcast until effectiveFrame and TCP is ordered, so the client records it before consuming frameCounter==effectiveFrame.
@@ -1132,7 +1143,7 @@ typedef struct
     uint32_t spuriousFatalCount;                 /* any other NetGameFatalError                       */
     uint32_t simFramesTotal;                     /* gSimulationFrame span of the race                 */
     double   wallSecondsTotal;                   /* race wall-clock duration                          */
-    /* UDP-swap exit-criterion inputs, per client (MAX_CLIENTS=4) */
+    /* UDP-swap exit-criterion inputs, per client (MAX_CLIENTS=4 at the time; 6 since 2026-09-22) */
     uint32_t multiFrameSubstEvents[MAX_CLIENTS]; /* runs of >1 consecutive substituted host frames    */
     uint32_t rtoShapedGaps[MAX_CLIENTS];         /* uplink delivery gaps > 150 ms                     */
     uint32_t substFramesTotal[MAX_CLIENTS];

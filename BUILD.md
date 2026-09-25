@@ -141,12 +141,74 @@ Distributions must include both [LICENSE.md](LICENSE.md) and [THIRD-PARTY-LICENS
 On Linux, `python3 Tests/StartupSmokeTests.py <path-to-CroMagRally>` exercises
 every CLI-selectable race track with SDL's offscreen video and dummy audio
 backends. It checks practice gameplay, host lobby startup, invalid track IDs,
-and teardown with isolated preferences and a 45-second limit per invocation.
-Host gameplay and peer readiness require separate network tests.
+invalid developer options, and teardown with isolated preferences and a
+45-second limit per invocation.
 
-The developer option `--smoke-test-frames N` (1–600) requires `--track` and exits
-after that many gameplay frames, or lobby frames when combined with `--host`.
-It cannot be used with `--join`. CI builds the full game with ASan/UBSan before
-running these tests; unit tests alone do not exercise asset loading. Leak
-detection remains enabled in the unit suite, but is disabled for the rendering
-smoke because Mesa/EGL retains process-lifetime driver allocations after unload.
+The developer option `--smoke-test-frames N` (1–36000) requires `--track` or
+`--join-address` and exits after that many gameplay frames, or lobby frames when
+combined with `--host`. It cannot be used with `--join`. With
+`--smoke-local-players N` (2–4), the run is a split-screen multiplayer race with
+N local players instead; `--smoke-cpu-fill` adds CPU cars in its empty slots. A
+smoke run that ends
+before printing its `SMOKE:` completion line exits with status 1. CI builds the
+full game with ASan/UBSan before running these tests; unit tests alone do not
+exercise asset loading. Leak detection remains enabled in the unit suite, but is
+disabled for the rendering smoke because Mesa/EGL retains process-lifetime driver
+allocations after unload.
+
+### LAN smoke tests
+
+Several game instances on one machine can't all use LAN discovery, because it
+binds a fixed UDP port. These developer options let them meet directly:
+
+- `--join-address HOST[:PORT]` joins the host at an IPv4 address without
+  searching the LAN. It applies to the join started at launch only; joining from
+  the menu later searches as usual. It can't be combined with `--host`, `--join`
+  or `--track` (the host picks the track), nor with `--port` when the address
+  already names a port.
+- `--smoke-net-players N` (with `--host`, `--track` and `--smoke-test-frames`)
+  keeps the lobby open until N players, the host included, have joined, then
+  starts the race; `--smoke-cpu-fill` makes it fill the race's empty slots with CPU
+  cars, as the CPU CARS option does. `--smoke-net-refusals N` (only when `--smoke-net-players`
+  equals the most players a game seats) also waits until N further joins were
+  turned away because the game is full. Clients started with
+  `--join-address` and `--smoke-test-frames` accept the default character and
+  vehicle. Each instance races that many simulated frames and exits 0.
+- `--print-max-net-players` prints how many players one LAN game seats, then
+  exits.
+
+`python3 Tests/NetworkSmokeTests.py <path-to-CroMagRally> [PLAYERS] [--track N]
+[--frames K] [--cpu-fill]` uses these options to race a host and its clients on loopback,
+headless, and checks that one join too many is refused. With `--cpu-fill`, CPU cars
+fill the rest of the grid; any seed desync fails the run. PLAYERS defaults to the
+most the binary seats. Use a sanitizer build: it is how out-of-bounds HUD or
+network state for high player numbers shows up. CI runs it on the Linux
+sanitizer build with six players; a six-player run takes about 15–30 seconds.
+
+## Race-metrics soaks
+
+Six more developer options shape one unattended practice race for measurement.
+They require `--smoke-test-frames` and `--track`, cannot be combined with
+`--host`, `--join` or `--join-address`, and raise the `--smoke-test-frames`
+limit from 600 to 100000, so a whole race fits:
+
+| Option | Effect |
+|--------|--------|
+| `--smoke-autopilot` | The CPU AI drives player 1, who still counts as the human (catch-up, race end). |
+| `--smoke-cars N` | N cars in the race, 1 to `MAX_PLAYERS`. |
+| `--smoke-fixed-fps N` | Step the simulation at a fixed N Hz (9–1000) instead of the measured frame time. |
+| `--smoke-seed N` | Seed the synced RNG with N (0–2147483647) instead of the clock. |
+| `--smoke-until-finish` | End the run as soon as player 1 finishes. |
+| `--smoke-metrics` | At the end of the race, log a `METRICS race` line and one `METRICS car` line per car. |
+
+With a pinned seed and a fixed timestep a race repeats exactly; vary the timestep
+for independent samples. The metric fields are documented in
+`Source/Headers/race_metrics.h`. Metrics are collected only with
+`--smoke-metrics`; otherwise each gameplay hook costs one untaken branch.
+
+`tools/run_race_metrics.sh <build dir> <out dir> [tracks] [car counts] [fps list] [jobs]`
+runs such races in parallel, one per track, car count and timestep, and resumes an
+interrupted soak. `tools/analyze_race_metrics.py <out dir>` summarizes the CPU cars:
+per-race rows, per-track means for two car counts side by side (for example 6 and
+12, or `--compare A B`), or for an earlier soak with `--baseline DIR`, and the number
+of stranded CPU cars (stuck for more than half the race).

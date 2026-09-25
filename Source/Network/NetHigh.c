@@ -13,6 +13,7 @@
 #include "game.h"
 #include "network.h"
 #include "net_validation.h"
+#include "cpu_fill.h"
 #include "miscscreens.h"
 #include <stdlib.h>
 #include <stdio.h>
@@ -68,6 +69,8 @@ Boolean		gNetSprocketInitialized = false;
 Boolean		gIsNetworkHost = false;
 Boolean		gIsNetworkClient = false;
 Boolean		gNetGameInProgress = false;
+Boolean		gNetGameCPUFill = false;
+Byte		gNetGamePlayerLimit = PLAYER_LIMIT_ORIGINAL;
 
 NSpGameReference	gNetGame = nil;
 NSpSearchReference	gNetSearch = nil;
@@ -248,8 +251,10 @@ typedef struct { NetFrameEvent ev; Boolean active; } PendingEventSlot;
 static PendingEventSlot sHostPendingEvents[NET_MAX_PENDING_EVENTS];
 
 // Per-machine apply table (host + clients): dedupe by (effectiveFrame,type,playerNum) + apply once.
-typedef struct { uint32_t effectiveFrame; uint8_t type; int8_t playerNum; Boolean applied; Boolean valid; } FrameEventEntry;
+typedef struct { uint32_t effectiveFrame; uint8_t type; int8_t playerNum; uint16_t pad; Boolean applied; Boolean valid; } FrameEventEntry;
 static FrameEventEntry sFrameEventTable[NET_MAX_PENDING_EVENTS];
+
+static uint32_t sCPUPOWUses;				// kEvCpuThrow events applied this game (smoke runs compare peers)
 
 // Connection-liveness badge (host: per-player slot; client: gNetBadge[0] = host link).
 static Boolean		gNetBadge[MAX_PLAYERS];
@@ -320,6 +325,9 @@ void ResetNetGameTransientState(void)
 	gLastNetSendMs = 0;
 	gPlayerSyncMask = 0;
 	gReadinessStartedMs = 0;
+	gNetGameCPUFill = false;				// until the host's game config decides it
+	gNetGamePlayerLimit = PLAYER_LIMIT_ORIGINAL;	// until SetupNetworkHosting or the host's game config decides it
+	sCPUPOWUses = 0;
 	ResetClientHostRing();					// CMR7 Stage 3: empty the client host-packet ring + reset hold timers
 }
 
@@ -373,7 +381,7 @@ static void RejectProtocolMessage(const NSpMessageHeader* message)
 // Record an event into the per-machine apply table, deduped by (effectiveFrame,type,playerNum).
 // Called on the host (from Host_ScheduleFrameEvent) and on clients (from the host control handler,
 // once per re-broadcast). Idempotent: a re-broadcast event already in the table is ignored.
-static void RecordFrameEvent(uint32_t effectiveFrame, uint8_t type, int8_t playerNum)
+static void RecordFrameEvent(uint32_t effectiveFrame, uint8_t type, int8_t playerNum, uint16_t pad)
 {
 	for (int k = 0; k < NET_MAX_PENDING_EVENTS; k++)			// dedupe
 	{
@@ -390,41 +398,53 @@ static void RecordFrameEvent(uint32_t effectiveFrame, uint8_t type, int8_t playe
 			e->effectiveFrame	= effectiveFrame;
 			e->type				= type;
 			e->playerNum		= playerNum;
+			e->pad				= pad;
 			e->applied			= false;
 			e->valid			= true;
 			return;
 		}
 	}
-	// Table full of un-applied events (>8 concurrent leaves in one ~12-frame window): drop. Extremely
+	// Table full of un-applied events (>NET_MAX_PENDING_EVENTS concurrent leaves in one ~12-frame window): drop. Extremely
 	// rare; the TCP keepalive backstop still converts the peer eventually via a later leave/drop.
+}
+
+static Boolean IsFrameEventPending(uint8_t type, int playerNum)
+{
+	for (int k = 0; k < NET_MAX_PENDING_EVENTS; k++)
+	{
+		const FrameEventEntry* e = &sFrameEventTable[k];
+		if (e->valid && !e->applied && e->type == type && e->playerNum == playerNum)
+			return true;
+	}
+	return false;
 }
 
 // HOST: schedule a frame-aligned event. Deduped against any un-applied (type,playerNum) already in
 // flight so a leave + a silence-timeout drop for the same player don't double-convert. effectiveFrame is the
 // frame ABOUT to be sent (gHostSendCounter) + lead, so all clients receive it before applying.
-static void Host_ScheduleFrameEvent(uint8_t type, int playerNum)
+// Returns whether it was scheduled.
+static Boolean Host_ScheduleFrameEvent(uint8_t type, int playerNum, uint16_t pad)
 {
 	if (!IsValidPlayerNum(playerNum))
-		return;
+		return false;
 
-	for (int k = 0; k < NET_MAX_PENDING_EVENTS; k++)			// dedupe an in-flight (un-applied) (type,playerNum)
-	{
-		FrameEventEntry* e = &sFrameEventTable[k];
-		if (e->valid && !e->applied && e->type == type && e->playerNum == playerNum)
-			return;
-	}
+	if (IsFrameEventPending(type, playerNum))					// dedupe an in-flight (un-applied) (type,playerNum)
+		return false;
 
 	uint32_t effF = gHostSendCounter + NET_MAX_EVENT_LEAD;
 
 	bool queuedForBroadcast = false;
 	for (int s = 0; s < NET_MAX_PENDING_EVENTS; s++)			// push into the outgoing re-broadcast ring
 	{
-		if (!sHostPendingEvents[s].active)
+		// A slot whose frame is before the one about to be sent was applied and sent for the last
+		// time; Host_FillOutgoingEvents just hasn't expired it yet. Reusing it keeps the ring at one
+		// event per non-host player when a CPU decides its next POW use in its last one's frame.
+		if (!sHostPendingEvents[s].active || sHostPendingEvents[s].ev.effectiveFrame < gHostSendCounter)
 		{
 			sHostPendingEvents[s].ev.effectiveFrame	= effF;
 			sHostPendingEvents[s].ev.type			= type;
 			sHostPendingEvents[s].ev.playerNum		= (int8_t) playerNum;
-			sHostPendingEvents[s].ev.pad			= 0;
+			sHostPendingEvents[s].ev.pad			= pad;
 			sHostPendingEvents[s].active			= true;
 			queuedForBroadcast = true;
 			break;
@@ -437,7 +457,51 @@ static void Host_ScheduleFrameEvent(uint8_t type, int playerNum)
 	// matches RecordFrameEvent's own drop-on-full contract; the TCP-keepalive backstop still
 	// converts the peer via a later leave/drop.
 	if (queuedForBroadcast)
-		RecordFrameEvent(effF, type, (int8_t) playerNum);		// host applies via the same shared table as the clients
+		RecordFrameEvent(effF, type, (int8_t) playerNum, pad);	// host applies via the same shared table as the clients
+	return queuedForBroadcast;
+}
+
+// HOST: a CPU car (fill CPU or replacement bot) uses its POW at one later frame on every machine,
+// the host included; DoCPUPowerupLogic makes the decision. At most one use per car is in flight.
+// Returns false, and nobody uses it, if it can't be broadcast.
+Boolean Host_ScheduleCPUPOW(short playerNum, short powType, Boolean backward)
+{
+	if (!gNetGameInProgress || !gIsNetworkHost
+		|| playerNum < 1 || !IsValidPlayerNum(playerNum) || !gPlayerInfo[playerNum].isComputer
+		|| powType < 0 || powType >= MAX_POW_TYPES)
+	{
+		return false;
+	}
+	return Host_ScheduleFrameEvent(kEvCpuThrow, playerNum, NetEncodeCPUPOW(powType, backward));
+}
+
+Boolean Net_IsCPUPOWPending(short playerNum)
+{
+	return IsFrameEventPending(kEvCpuThrow, playerNum);
+}
+
+// BOTH ROLES: the CPU car uses this POW in the frame being simulated, if it still holds it
+// (DoCPUPowerupLogic, on the car's first control pass).
+static void ApplyCPUPOW(int playerNum, uint16_t pad, uint32_t frame)
+{
+	short powType;
+	Boolean backward;
+	if (!IsValidPlayerNum(playerNum) || !gPlayerInfo[playerNum].isComputer || !NetDecodeCPUPOW(pad, &powType, &backward))
+		return;
+	gPlayerInfo[playerNum].net.cpuPOWType = powType;
+	gPlayerInfo[playerNum].net.cpuPOWBackward = backward;
+	gPlayerInfo[playerNum].net.cpuPOWFrame = frame;
+	sCPUPOWUses++;
+}
+
+int Net_GetNumHumansInGame(void)
+{
+	return gNumGatheredPlayers;
+}
+
+uint32_t Net_GetCPUPOWUses(void)
+{
+	return sCPUPOWUses;
 }
 
 // HOST: map a leave message's NSpPlayerID to a dense player index and schedule its become-bot.
@@ -449,7 +513,7 @@ static void ScheduleBecomeBotFromLeave(NSpPlayerLeftMessage* mess)
 		printf("ScheduleBecomeBotFromLeave: no matching player id #%d; ignoring.\n", (int) mess->playerID);
 		return;
 	}
-	Host_ScheduleFrameEvent(kEvBecomeBot, i);
+	Host_ScheduleFrameEvent(kEvBecomeBot, i, 0);
 	gNetBadge[i] = false;
 }
 
@@ -478,7 +542,8 @@ static void ApplyBecomeBot(int i)
 	// Use gNumGatheredPlayers (the live human count) here, NOT gNumRealPlayers (kept stable for the
 	// split-screen layout). Both host and client decrement identically at this frame, so gGameOver fires
 	// in lockstep.
-	if (gNumGatheredPlayers <= 1)								// see if nobody to play with
+	if (gNumGatheredPlayers <= 1								// see if nobody to play with
+		&& !(gCPUFillThisRace && gIsInGame))					// a filled race goes on with the host, its CPUs and the bots
 	{
 		gGameOver = true;
 		if (gNetSequenceState < kNetSequence_Error)				// don't stomp a more specific post-match error
@@ -590,6 +655,7 @@ void ApplyPendingFrameEvents(void)
 		{
 			case kEvBecomeBot:		ApplyBecomeBot(e->playerNum); break;
 			case kEvUnpauseForce:	if (IsValidPlayerNum(e->playerNum)) gPlayerInfo[e->playerNum].net.pauseState = 0; break;
+			case kEvCpuThrow:		ApplyCPUPOW(e->playerNum, e->pad, frame); break;
 			default:				break;
 		}
 		e->applied = true;
@@ -634,7 +700,7 @@ void NetCheck_ConnectionTimeouts(void)
 				// Record the deterministic conversion before removing the low-level peer. Remaining
 				// clients ignore the immediate PlayerLeft during gameplay and apply this event from
 				// the ordered host-control stream at the same simulation frame as the host.
-				Host_ScheduleFrameEvent(kEvBecomeBot, pn);
+				Host_ScheduleFrameEvent(kEvBecomeBot, pn, 0);
 				gNetBadge[pn] = false;
 				NSpPlayer_Kick(gNetGame, pid);
 				break;								// active-player indexing changed; resume next frame
@@ -1098,6 +1164,25 @@ bool UpdateNetSequence(void)
 
 /****************** SETUP NETWORK HOSTING *********************/
 //
+/****************** HOST APPLY PLAYER LIMIT *********************/
+//
+// Once per hosted game: the 6/12 players setting caps the lobby (later joins are refused
+// as full), and HostSendGameConfigInfo sends it to every client. A smoke host picks the
+// smallest limit that seats its --smoke-net-players.
+//
+
+static void HostApplyPlayerLimit(NSpGameReference game)
+{
+	if (gCommandLine.smokeNetPlayers)
+		gNetGamePlayerLimit = SmallestPlayerLimitFor(gCommandLine.smokeNetPlayers);
+	else
+		gNetGamePlayerLimit = DecidePlayerLimitThisGame(false, 0, gGamePrefs.playerLimit);
+
+	int status = NSpGame_SetMaxPlayers(game, gNetGamePlayerLimit);
+	GAME_ASSERT(status == kNSpRC_OK);						// a supported limit always fits MAX_CLIENTS
+}
+
+
 // Called when this computer's user has selected to be a host for a net game.
 //
 // OUTPUT:  true == cancelled.
@@ -1128,7 +1213,8 @@ Boolean SetupNetworkHosting(void)
 	//status = NSpGame_Host(&gNetGame, theList, MAX_PLAYERS, gameName, password, gNetPlayerName, 0, kNSpClientServer, 0);
 	gNetGame = NSpGame_Host();
 
-
+	if (gNetGame)
+		HostApplyPlayerLimit(gNetGame);					// seat no more than the 6/12 players setting
 
 	if (!gNetGame)
 	{
@@ -1181,20 +1267,35 @@ Boolean SetupNetworkJoin(void)
 {
 	ResetNetGameTransientState();			// start from a clean slate
 	SDL_strlcpy(gNetJoinDeniedReason, "THE HOST DENIED THE JOIN REQUEST.", sizeof(gNetJoinDeniedReason));
-	SetNetworkDiscoveryMode(true);
+
+	// --join-address is a one-shot boot action: a later join from the menu searches the LAN.
+	const Boolean joinDirect = gCommandLine.netJoinDirect;
+	gCommandLine.netJoinDirect = false;
+
+	SetNetworkDiscoveryMode(!joinDirect);
 	SetNetworkPowerMode(true);
 
 	gNetSequenceState = kNetSequence_ClientOffline;
 
-	gNetSearch = NSpSearch_StartSearchingForGameHosts();
-
-	if (gNetSearch)
+	if (joinDirect)
 	{
-		gNetSequenceState = kNetSequence_ClientSearchingForGames;
+		// Dev/test (--join-address): connect straight to the host instead of searching the LAN,
+		// so several instances on one machine don't contend for the discovery port.
+		gNetGame = NSpGame_JoinAddress(gCommandLine.netJoinAddress);
+		gNetSequenceState = gNetGame ? kNetSequence_ClientJoiningGame : kNetSequence_ClientOfflineBecauseHostUnreachable;
 	}
 	else
 	{
-		gNetSequenceState = kNetSequence_Error;
+		gNetSearch = NSpSearch_StartSearchingForGameHosts();
+
+		if (gNetSearch)
+		{
+			gNetSequenceState = kNetSequence_ClientSearchingForGames;
+		}
+		else
+		{
+			gNetSequenceState = kNetSequence_Error;
+		}
 	}
 
 	Boolean cancelled = DoNetGatherScreen();
@@ -1240,6 +1341,9 @@ NetConfigMessage		message;
 
 	int p = 1;														// start assigning player nums at 1 since Host is always #0
 
+	gNetGameCPUFill = (gGamePrefs.cpuFill || gCommandLine.smokeCPUFill)		// the host decides for every peer
+		&& CPUFillAppliesToMode(gGameMode);
+
 	for (int i = 0; i < gNumRealPlayers; i++)
 	{
 		NSpPlayerID clientID = NSpGame_GetNthActivePlayerID(gNetGame, i);
@@ -1264,7 +1368,9 @@ NetConfigMessage		message;
 			message.difficulty		= gDifficulty;			// set difficulty
 			message.tagDuration		= gTagDuration;					// set tag duration
 			message.targetFPS		= gTargetFPS;					// Set the global target FPS
-			message.reserved		= 0;							// CMR7: was useRedundancy (retired)
+			message.cpuFill			= gNetGameCPUFill;				// CPU cars in the empty race slots
+			message.playerLimit		= gNetGamePlayerLimit;			// the host's 6/12 players setting
+			message.pad				= 0;
 
 			status = NSpMessage_Send(gNetGame, &message.h, kNSpSendFlag_Registered);	// send message
 			if (status)
@@ -1305,6 +1411,8 @@ static Boolean HandleGameConfigMessage(NetConfigMessage* inMessage)
 	gDifficulty			= inMessage->difficulty;
 	gTagDuration		= inMessage->tagDuration;
 	gTargetFPS			= inMessage->targetFPS;
+	gNetGameCPUFill		= inMessage->cpuFill;				// never this machine's own pref: every peer seats the same cars
+	gNetGamePlayerLimit	= inMessage->playerLimit;			// likewise the host's 6/12 players setting, for this game only
 
 	printf("Join Config Received. TargetFPS: %d\n", gTargetFPS);
 
@@ -1519,11 +1627,17 @@ short							i;
 // This data will contain the fps and control bitfield info for each player.
 //
 
+static void RecordHostFrameEvents(const NetHostControlInfoMessageType* mess)
+{
+	for (int k = 0; k < mess->eventCount; k++)
+		RecordFrameEvent(mess->events[k].effectiveFrame, mess->events[k].type, mess->events[k].playerNum, mess->events[k].pad);
+}
+
 static Boolean Client_InGame_HandleHostControlInfoMessage(NetHostControlInfoMessageType* mess)
 {
 	GAME_ASSERT(gIsNetworkClient);
 
-	if (!NetValidateHostControlPayload(mess, gNumRealPlayers))
+	if (!NetValidateHostControlPayload(mess, gNumRealPlayers, gNumTotalPlayers))
 	{
 		RejectProtocolMessage(&mess->h);
 		return false;
@@ -1585,11 +1699,7 @@ static Boolean Client_InGame_HandleHostControlInfoMessage(NetHostControlInfoMess
 	// CMR7 Stage 4: record any host-broadcast frame-aligned events (deduped). The client applies them
 	// from the shared table in StepGameSimulation at effectiveFrame, AFTER the seed check above and
 	// BEFORE MoveEverything — exactly where the host applies its own copy.
-	{
-		uint8_t ec = mess->eventCount;
-		for (int k = 0; k < ec; k++)
-			RecordFrameEvent(mess->events[k].effectiveFrame, mess->events[k].type, mess->events[k].playerNum);
-	}
+	RecordHostFrameEvents(mess);
 
 	return true;
 }

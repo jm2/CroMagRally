@@ -10,11 +10,18 @@
 /****************************/
 
 #include "game.h"
+#include "cpu_driver.h"
+#include "cpu_fill.h"
+#include "vehicle_picker.h"
+#include "driver_looks.h"
 
 /****************************/
 /*    PROTOTYPES            */
 /****************************/
 
+static uint16_t SyncedCPUVehicleRandom(void* context, int cpuIndex, uint16_t min, uint16_t max);
+static void GetPlayerDriverLooks(DriverLook looks[MAX_PLAYERS]);
+static void SetPlayerDriverLooks(const DriverLook looks[MAX_PLAYERS]);
 
 
 /****************************/
@@ -57,9 +64,11 @@ short	i;
 
 	for (i = 0; i < MAX_PLAYERS; i++)
 	{
+		const DriverLook defaultLook = GetDefaultDriverLook(i);
+
 		gPlayerInfo[i].objNode			= nil;
 
-		gPlayerInfo[i].sex 				= i&1;			// altername male/female
+		gPlayerInfo[i].sex 				= defaultLook.sex;	// alternate male/female, swapped in each further wave of 6
 
 		gPlayerInfo[i].startX 			= 0;
 		gPlayerInfo[i].startZ 			= 0;
@@ -88,7 +97,7 @@ short	i;
 		}
 		else
 		{
-			gPlayerInfo[i].skin = i % NUM_CAVEMAN_SKINS;
+			gPlayerInfo[i].skin = defaultLook.skin;
 		}
 
 
@@ -137,19 +146,14 @@ short	i;
 
 
 			/* SEE HOW MANY PLAYERS IN GAME */
+			//
+			// CPU cars (isComputer above) take every slot after the humans'. Multiplayer
+			// races only have them with CPU fill; battle modes never do.
+			//
 
-	switch(gGameMode)
-	{
-		case	GAME_MODE_PRACTICE:
-		case	GAME_MODE_TOURNAMENT:
-//		case	GAME_MODE_MULTIPLAYERRACE:
-				gNumTotalPlayers = MAX_PLAYERS;                 // use them all
-				break;
-
-		default:
-				gNumTotalPlayers = gNumRealPlayers;				// no CPU players in battle modes
-				break;
-	}
+	gNumTotalPlayers = CountPlayersInGame(gGameMode, gNumRealPlayers, gCPUFillThisRace, gPlayerLimitThisGame);
+	if (gCommandLine.smokeCars && (gGameMode == GAME_MODE_PRACTICE || gGameMode == GAME_MODE_TOURNAMENT))
+		gNumTotalPlayers = gCommandLine.smokeCars;			// smoke soak: --smoke-cars sets the field size
 
 
 	SafeDisposePtr((Ptr) backup);
@@ -164,8 +168,10 @@ short	i;
 
 void InitPlayersAtStartOfLevel(void)
 {
-int		i,j,type;
-Boolean	taken[NUM_LAND_CAR_TYPES];
+int		i,j;
+int		numCPUVehiclesPicked = 0;
+CPUVehiclePickRules	cpuVehicleRules = { .randomRange = SyncedCPUVehicleRandom };
+SharedCPUVehicleSeed	sharedCPUVehicleSeed;
 
 	gWorstHumanPlace = 0;
 	gNumPlayersEliminated = 0;
@@ -175,46 +181,70 @@ Boolean	taken[NUM_LAND_CAR_TYPES];
 
 		/* FIRST MARK WHICH CAR TYPES THE HUMANS HAVE */
 
-	for (i = 0; i < NUM_LAND_CAR_TYPES; i++)						// first mark all unused
-		taken[i] = false;
-
 	for (i = 0; i < gNumTotalPlayers; i++)
 	{
 		if (!gPlayerInfo[i].isComputer)								// check for human player
 		{
 			GAME_ASSERT(gPlayerInfo[i].vehicleType >= 0);
 			GAME_ASSERT(gPlayerInfo[i].vehicleType < NUM_LAND_CAR_TYPES);
-			taken[gPlayerInfo[i].vehicleType] = true;				// mark this used
+			cpuVehicleRules.humanCarMask |= 1u << gPlayerInfo[i].vehicleType;	// mark this used
 		}
 	}
 
+	cpuVehicleRules.agesCompleted = GetNumAgesCompleted();
+	cpuVehicleRules.difficulty = gDifficulty;
 
-	i = GetNumAgesCompleted();
-	if (i > 2)														// dont get extra cars after winning, so pin @ 2
-		i = 2;
-	type = 6 + (i * 2)-1;											// start @ end of usable cars so it will pick best cars
+
+		/* NETWORK CPU FILL CARS COME FROM SHARED STATE */
+		//
+		// Every peer must seat the same cars, so they depend only on what the peers
+		// share: the humans' choices (including players who left since), the track and
+		// the difficulty. Never on local unlocks or the synced RNG.
+		//
+
+	if (gNetGameInProgress)
+	{
+		short	humanCars[MAX_PLAYERS];
+
+		for (i = 0; i < gNumRealPlayers; i++)
+			humanCars[i] = gPlayerInfo[i].vehicleType;
+
+		InitSharedCPUVehiclePickRules(&cpuVehicleRules, &sharedCPUVehicleSeed,
+				humanCars, gNumRealPlayers, gDifficulty, gTrackNum);
+	}
+
+
+		/* DONT DRESS A CPU LIKE A HUMAN OR ANOTHER CPU */
+		//
+		// Humans (including network players who have since become bots) keep the look they
+		// chose. This reads only state every network peer shares, so they all dress the CPUs
+		// alike. Capture the Flag outfits are team colours, so they repeat on purpose.
+		//
+
+	if (gNetGameInProgress && gCPUFillThisRace)						// start every peer's fill CPUs from the same looks
+		DressNetworkFillCPUs(gPlayerInfo, gNumRealPlayers, gNumTotalPlayers);
+
+	if (gGameMode != GAME_MODE_CAPTUREFLAG)
+	{
+		DriverLook	looks[MAX_PLAYERS];
+
+		GetPlayerDriverLooks(looks);
+		ResolveCPUDriverLooks(looks, gNumTotalPlayers, gNumRealPlayers);
+		SetPlayerDriverLooks(looks);
+	}
 
 
 			/* SET SOME GLOBALS */
 
 	for (i = 0; i < gNumTotalPlayers; i++)
 	{
-		// Network replacements retain the shared selection (or its default).
-		// Local unlock progress must not change their vehicle or consume synced RNG.
-		if (gPlayerInfo[i].isComputer && !gNetGameInProgress)		// set local CPU vehicle type
-		{
-			if (gDifficulty == DIFFICULTY_HARD)					// in hard mode, the CPU can have duplicate cars
-				gPlayerInfo[i].vehicleType = RandomRange(0, type);
-			else														// in other difficulty modes, only choose unique cars
-			{
-				while(taken[type])										// skip over vehicles already used by Humans
-					type--;
+		// Network replacements (human slots) retain the shared selection (or its default);
+		// network CPU fill cars (every slot after the humans') get the shared picks above.
+		// Pick in player order: local Hard draws stay interleaved with SetPhysicsForVehicleType's.
+		if (gPlayerInfo[i].isComputer && (!gNetGameInProgress || i >= gNumRealPlayers))	// set CPU vehicle type
+			gPlayerInfo[i].vehicleType = PickCPUVehicle(&cpuVehicleRules, numCPUVehiclesPicked++);
 
-				gPlayerInfo[i].vehicleType = type--;
-			}
-		}
-
-		gPlayerInfo[i].coord.y = GetTerrainY(gPlayerInfo[i].startX,gPlayerInfo[i].startX);
+		gPlayerInfo[i].coord.y = GetTerrainY(gPlayerInfo[i].startX,gPlayerInfo[i].startZ);
 
 			/* CREATE THE CAR MODEL */
 
@@ -353,9 +383,17 @@ Boolean	taken[NUM_LAND_CAR_TYPES];
 		gPlayerInfo[i].oldPosition.y	= 0;
 		gPlayerInfo[i].oldPosition.z	= 0;
 		gPlayerInfo[i].reverseTimer		= 0;
+		gPlayerInfo[i].rescueTimer		= 0;
+		gPlayerInfo[i].rescueProgress	= -1;					// lap -1, checkpoint N-1 (CPURaceProgress)
+		gPlayerInfo[i].rescueBestDist	= CPU_RESCUE_NO_DIST;
+		gPlayerInfo[i].rescueX			= gPlayerInfo[i].startX;		// until it crosses a checkpoint: its grid slot
+		gPlayerInfo[i].rescueZ			= gPlayerInfo[i].startZ;
+		gPlayerInfo[i].rescueDirX		= -sinf(gPlayerInfo[i].startRotY);
+		gPlayerInfo[i].rescueDirZ		= -cosf(gPlayerInfo[i].startRotY);
 		gPlayerInfo[i].attackTimer		= 2;					// dont attack for the first few seconds
 		gPlayerInfo[i].targetedPlayer	= -1;					// no players targeted yet
 		gPlayerInfo[i].targetingTimer	= 0;
+		gPlayerInfo[i].net.cpuPOWType	= POW_TYPE_NONE;		// no host-scheduled POW use (network games)
 		gPlayerInfo[i].pathVec.x	= 0;
 		gPlayerInfo[i].pathVec.y	= 0;
 
@@ -379,6 +417,107 @@ Boolean	taken[NUM_LAND_CAR_TYPES];
 
 	SetDefaultCameraModeForAllPlayers();
 }
+
+
+/***************** SYNCED CPU VEHICLE RANDOM *********************/
+//
+// Local CPU vehicles on Hard come from the synced RNG.
+//
+
+static uint16_t SyncedCPUVehicleRandom(void* context, int cpuIndex, uint16_t min, uint16_t max)
+{
+	(void) context;
+	(void) cpuIndex;
+	return RandomRange(min, max);
+}
+
+
+/******************** GET/SET PLAYER DRIVER LOOKS ***********************/
+
+static void GetPlayerDriverLooks(DriverLook looks[MAX_PLAYERS])
+{
+	for (int i = 0; i < MAX_PLAYERS; i++)
+	{
+		looks[i].sex	= gPlayerInfo[i].sex;
+		looks[i].skin	= gPlayerInfo[i].skin;
+	}
+}
+
+static void SetPlayerDriverLooks(const DriverLook looks[MAX_PLAYERS])
+{
+	for (int i = 0; i < MAX_PLAYERS; i++)
+	{
+		gPlayerInfo[i].sex	= looks[i].sex;
+		gPlayerInfo[i].skin	= looks[i].skin;
+	}
+}
+
+
+/******************** GET PLAYER OUTFIT RANK ***********************/
+//
+// How many lower-numbered players wear playerNum's outfit (see GetDriverOutfitRank).
+//
+
+int GetPlayerOutfitRank(short playerNum)
+{
+DriverLook	looks[MAX_PLAYERS];
+
+	GAME_ASSERT(playerNum >= 0 && playerNum < MAX_PLAYERS);
+
+	GetPlayerDriverLooks(looks);
+	return GetDriverOutfitRank(looks, playerNum);
+}
+
+
+/******************** NUM PLAYERS TO DRESS ***********************/
+//
+// Character select swaps looks only among the cars in this game (InitPlayerInfo_Game has
+// counted them), so a slot the race won't use never holds on to an outfit.
+//
+
+static int NumPlayersToDress(short whichPlayer)
+{
+	return SDL_clamp((int) gNumTotalPlayers, whichPlayer + 1, MAX_PLAYERS);
+}
+
+
+/******************** CYCLE PLAYER OUTFIT ***********************/
+//
+// Character select: steps whichPlayer to the next outfit. Players in playersDone keep their
+// looks; with dressOthers, whoever wore the new look takes the old one so drivers who looked
+// different still do. Returns the new outfit.
+//
+
+short CyclePlayerOutfit(short whichPlayer, int delta, uint32_t playersDone, Boolean dressOthers)
+{
+DriverLook	looks[MAX_PLAYERS];
+
+	GAME_ASSERT(whichPlayer >= 0 && whichPlayer < MAX_PLAYERS);
+
+	GetPlayerDriverLooks(looks);
+	const short newSkin = CycleDriverOutfit(looks, NumPlayersToDress(whichPlayer), whichPlayer, delta, playersDone, dressOthers);
+	SetPlayerDriverLooks(looks);
+
+	return newSkin;
+}
+
+
+/******************** SET PLAYER BODY ***********************/
+//
+// Character select: the body whichPlayer chose, with the same rules as CyclePlayerOutfit.
+//
+
+void SetPlayerBody(short whichPlayer, short sex, uint32_t playersDone, Boolean dressOthers)
+{
+DriverLook	looks[MAX_PLAYERS];
+
+	GAME_ASSERT(whichPlayer >= 0 && whichPlayer < MAX_PLAYERS);
+
+	GetPlayerDriverLooks(looks);
+	ChangeDriverBody(looks, NumPlayersToDress(whichPlayer), whichPlayer, sex, playersDone, dressOthers);
+	SetPlayerDriverLooks(looks);
+}
+
 
 #pragma mark -
 

@@ -10,6 +10,11 @@
 /****************************/
 
 #include "game.h"
+#include "network.h"
+#include "cpu_driver.h"
+#include "finite_guard.h"
+#include "car_count_tuning.h"
+#include "race_metrics.h"
 
 /****************************/
 /*    PROTOTYPES            */
@@ -23,6 +28,7 @@ static void RotateCar(ObjNode *theNode);
 static void DoCarMotion(ObjNode *theNode);
 static Boolean DoVehicleCollisionDetect(ObjNode *vehicle);
 static void DoCPUControl_Car(ObjNode *theNode);
+static void RescueStrandedCPUCar(ObjNode *theNode, float dt);
 static void DoCPUWeaponLogic_Standard(ObjNode *carObj, short playerNum, short powType);
 static void DoCPUPOWLogic_Nitro(ObjNode *carObj, short playerNum);
 static void DoPlayerControl_Car(ObjNode *theNode);
@@ -412,6 +418,42 @@ static void ResetTractionFromCopy(short p)
 #pragma mark -
 
 
+/******************** KEEP CAR MOTION FINITE ***********************/
+//
+// Called at the end of the car's move. A NaN or infinite position, velocity or angle
+// would stick to the car (and to its camera) for good, so put back the last finite
+// state and stop the car instead.
+//
+
+static void KeepCarMotionFinite(ObjNode *theNode, const VehicleMotionState *lastFinite)
+{
+static uint32_t		reported = 0;
+short				p = theNode->PlayerNum;
+VehicleMotionState	bad,state;
+uint32_t			fields;
+
+	state = bad = GetVehicleMotionState(theNode, gPlayerInfo[p].currentRPM);
+	fields = RepairVehicleMotion(&state, lastFinite);
+	if (fields == 0)
+		return;
+
+	if (FirstNonFiniteReport(&reported, p))
+		LogNonFiniteVehicle("car", p, gSimulationFrame, fields, &bad, &state);
+
+	gCoord = state.coord;
+	gDelta = state.delta;
+	theNode->Rot = state.rot;
+	theNode->DeltaRot = state.deltaRot;
+	UpdateObject(theNode);
+
+	theNode->Speed2D = state.speed2D;
+	theNode->Speed3D = state.speed3D;
+	gPlayerInfo[p].coord = gCoord;
+	gPlayerInfo[p].currentRPM = state.rpm;
+	AlignWheelsAndHeadOnCar(theNode);
+}
+
+
 /******************** MOVE PLAYER: CAR ***********************/
 
 static void MovePlayer_Car(ObjNode *theNode)
@@ -419,6 +461,7 @@ static void MovePlayer_Car(ObjNode *theNode)
 int					numPasses;
 float				oldFPS,oldFPSFrac;
 long	oldLeft,oldRight,oldFront,oldBack,oldTop,oldBottom;
+const VehicleMotionState	startState = GetVehicleMotionState(theNode, gPlayerInfo[theNode->PlayerNum].currentRPM);
 
 
 		/* KEEP TRACK OF LAP TIMES */
@@ -500,7 +543,70 @@ long	oldLeft,oldRight,oldFront,oldBack,oldTop,oldBottom;
 	gFramesPerSecond = oldFPS;											// restore real FPS values
 	gFramesPerSecondFrac = oldFPSFrac;
 
+	KeepCarMotionFinite(theNode, &startState);
+	RescueStrandedCPUCar(theNode, oldFPSFrac);
+}
 
+
+/******************** RESCUE STRANDED CPU CAR ***********************/
+//
+// See CPU_RESCUE_TIME (cpu_driver.h). Once per frame, after the car's move, for cars
+// the AI drives, in races only. The car moves with its old position and collision
+// boxes, so the move itself never crosses a checkpoint or sweeps through anything.
+// It reads only simulation state, so every network peer rescues the same bots alike.
+//
+
+static void RescueStrandedCPUCar(ObjNode *theNode, float dt)
+{
+short			p = theNode->PlayerNum;
+PlayerInfoType	*pinfo = &gPlayerInfo[p];
+OGLPoint3D		others[MAX_PLAYERS];
+int				numOthers = 0;
+
+	if (!pinfo->isComputer && !gAutoPilot)								// humans drive themselves
+		return;
+
+	const Boolean raceMode = gGameMode == GAME_MODE_PRACTICE || gGameMode == GAME_MODE_TOURNAMENT
+		|| gGameMode == GAME_MODE_MULTIPLAYERRACE;
+	const Boolean racing = raceMode && gNumCheckpoints > 0 && !gNoCarControls && !pinfo->raceComplete;
+	const int progress = CPURaceProgress(pinfo->lapNum, pinfo->checkpointNum, gNumCheckpoints);
+
+	if (!UpdateCPURescueTimer(pinfo, progress, pinfo->distToNextCheckpoint, racing, dt))
+		return;
+
+	for (int i = 0; i < gNumTotalPlayers; i++)
+	{
+		if (i != p && gPlayerInfo[i].objNode)
+			others[numOthers++] = gPlayerInfo[i].objNode->Coord;
+	}
+
+	CPURescueSpot spot;
+	if (!FindCPURescueSpot(pinfo, others, numOthers, &spot))
+	{
+		pinfo->rescueTimer = CPU_RESCUE_TIME;							// every spot is taken: try again next frame
+		return;
+	}
+
+	SDL_Log("CPU rescue: player %d from (%.0f, %.0f, %.0f) back to checkpoint %d, lap %d",
+			p, theNode->Coord.x, theNode->Coord.y, theNode->Coord.z, pinfo->checkpointNum, pinfo->lapNum);
+
+	gCoord.x = spot.x;
+	gCoord.z = spot.z;
+	gCoord.y = GetTerrainY(spot.x, spot.z) + 100;						// as InitPlayer_Car places a new car
+	gDelta.x = gDelta.y = gDelta.z = 0;
+	theNode->Rot.x = theNode->Rot.z = 0;
+	theNode->Rot.y = spot.rotY;
+	theNode->DeltaRot.x = theNode->DeltaRot.y = theNode->DeltaRot.z = 0;
+	UpdateObject(theNode);
+	KeepOldCollisionBoxes(theNode);
+
+	theNode->Speed2D = theNode->Speed3D = 0;
+	pinfo->coord = gCoord;
+	pinfo->rescueBestDist = CPU_RESCUE_NO_DIST;									// measure progress from here
+	pinfo->reverseTimer = 0;											// start the stuck check afresh
+	pinfo->oldPosition = gCoord;
+	pinfo->oldPositionTimer = POSITION_TIMER;
+	AlignWheelsAndHeadOnCar(theNode);
 }
 
 
@@ -556,13 +662,14 @@ CarStatsType	*info;
 uint16_t		tileAttribs;
 float		thrust,dx,dz;
 PlayerInfoType	*pinfo;
-float		cpuTweakFactor;
+float		cpuTweakFactor, placeScale;
 Boolean		onWater;
 
 	playerNum = theNode->PlayerNum;
 	info = &gPlayerInfo[playerNum].carStats;
 	pinfo = &gPlayerInfo[playerNum];
 	onWater = pinfo->onWater;
+	placeScale = GetCatchUpPlaceScale(gNumTotalPlayers);					// per-place edges below were tuned for 6 cars
 
 			/* GET CPU TWEAK FACTOR */
 
@@ -573,7 +680,7 @@ Boolean		onWater;
 		if (pinfo->isComputer)												// give cars in back a slight edge
 		{
 			if (pinfo->place > gWorstHumanPlace)							// only give CPU an edge if its behind the worst human
-				cpuTweakFactor = 1.0f + (float)(pinfo->place - gWorstHumanPlace) * 0.3f;
+				cpuTweakFactor = 1.0f + (float)(pinfo->place - gWorstHumanPlace) * (0.3f * placeScale);
 		}
 	}
 
@@ -787,10 +894,10 @@ Boolean		onWater;
 		if (pinfo->isComputer)
 		{
 			if (pinfo->place > gWorstHumanPlace)							// only give CPU an edge if its behind the worst human
-				maxSpeed += (float)(pinfo->place - gWorstHumanPlace) * PLACE_SPEED_TWEAK_CPU;
+				maxSpeed += (float)(pinfo->place - gWorstHumanPlace) * (PLACE_SPEED_TWEAK_CPU * placeScale);
 		}
 		else
-			maxSpeed += (float)(pinfo->place) * PLACE_SPEED_TWEAK;				// give human cars in back a slight edge
+			maxSpeed += (float)(pinfo->place) * (PLACE_SPEED_TWEAK * placeScale);	// give human cars in back a slight edge
 	}
 
 	if (pinfo->flamingTimer > 0.0f)											// half speed if flaming
@@ -1951,6 +2058,8 @@ short		p2 = car2->PlayerNum;
 	relD1.y = gDelta.y - car2->Delta.y;
 	relD1.z = gDelta.z - car2->Delta.z;
 	VectorLength3D(relSpeed, relD1.x, relD1.y, relD1.z);					// relative speed of car 1 (same for both cars, so just calc it once)
+	if (gRaceMetricsEnabled)
+		RaceMetricsCarHit(p1, p2, relSpeed);
 
 	relD2.x = car2->Delta.x - gDelta.x;
 	relD2.y = car2->Delta.y - gDelta.y;
@@ -2142,35 +2251,7 @@ Boolean			onWater;
 		/*********************************/
 
 	if (!gNoCarControls)													// see if control is allowed
-	{
-		gPlayerInfo[player].oldPositionTimer -= fps;
-		if (gPlayerInfo[player].oldPositionTimer <= 0.0f)					// see if time to do the check
-		{
-			float	stuckDist;
-
-			gPlayerInfo[player].oldPositionTimer += POSITION_TIMER;			// reset timer
-
-			if (onWater)
-				stuckDist = 40.0f;
-			else
-				stuckDist = 80.0f;
-
-			if (CalcDistance3D(gPlayerInfo[player].oldPosition.x, gPlayerInfo[player].oldPosition.y, gPlayerInfo[player].oldPosition.z,
-								gCoord.x, gCoord.y, gCoord.z) < stuckDist)		// see if player isnt moving
-			{
-				if (gPlayerInfo[player].reverseTimer > 0.0f)					// if was reversing then go forward again
-					gPlayerInfo[player].reverseTimer = 0;
-				else
-					gPlayerInfo[player].reverseTimer = 4.0f;					// try moving backwards to get unstuck
-			}
-			else
-			{
-				gPlayerInfo[player].reverseTimer = 0;						// player is NOT stuck, so go forward
-			}
-
-			gPlayerInfo[player].oldPosition = gCoord;						// remember position
-		}
-	}
+		UpdateCPUStuckCheck(&gPlayerInfo[player], &gCoord, fps);
 
 
 	if ((theNode->StatusBits & STATUS_BIT_ONGROUND) || onWater)
@@ -2241,7 +2322,7 @@ Boolean			onWater;
 				/* SEE IF NEED TO ACCEL, COAST, OR BRAKE  */
 				/******************************************/
 
-			if (gPlayerInfo[player].isPlaning || gPlayerInfo[player].greasedTiresTimer || (fabs(theNode->DeltaRot.y) > PI))	// if sliding or spinning then brake!
+			if (CPUShouldBrakeForSkid(&gPlayerInfo[player], (theNode->StatusBits & STATUS_BIT_ONGROUND) != 0, theNode->DeltaRot.y))	// if sliding or spinning then brake!
 				brake = true;
 			else
 			if ((theNode->Speed2D > 2500.0f) && (gDifficulty > DIFFICULTY_EASY))			// if we're going fast then see if we need to slow
@@ -2281,22 +2362,7 @@ Boolean			onWater;
 			/* SET BRAKE, FORWARD/BACKWARD KEYS */
 			/************************************/
 
-		if (brake)
-		{
-			gPlayerInfo[player].controlBits |= (1L << kControlBit_Brakes);
-		}
-		else
-		if (giveGas)
-		{
-			if (gPlayerInfo[player].reverseTimer > 0.0f)						// see if going in reverse
-			{
-			    gPlayerInfo[player].controlBits |= (1L << kControlBit_Backward);
-				if ((gPlayerInfo[player].reverseTimer -= fps) < 0.0f)			// dec reverse timer
-					gPlayerInfo[player].reverseTimer = 0;
-			}
-			else
-			    gPlayerInfo[player].controlBits |= (1L << kControlBit_Forward);	// go forward
-		}
+		gPlayerInfo[player].controlBits |= CPUPedalControlBits(&gPlayerInfo[player], brake, giveGas, fps);
 	}
 
 
@@ -2377,10 +2443,56 @@ float			tx,tz, angle, cross;
 
 
 /****************** DO CPU POWERUP LOGIC ************************/
+//
+// In a network game only the host decides when a CPU car (a fill CPU, or the bot that
+// replaced a player who left) uses its POW: the decision reads positions that can differ
+// slightly between peers. The host schedules each use as a kEvCpuThrow frame event, and
+// every machine, the host included, makes that car use it at that frame. POW pickups
+// can still differ between peers, exactly as they can for humans; a car that no longer
+// holds the POW at that frame doesn't use anything.
+//
+
+// Returns true if the car uses a POW this frame.
+static Boolean UseScheduledCPUPOW(short playerNum)
+{
+PlayerInfoType	*player = &gPlayerInfo[playerNum];
+short			powType = player->net.cpuPOWType;
+
+	if (powType == POW_TYPE_NONE || gPlayerMultiPassCount > 0)	// CheckPOWControls only acts on the first pass
+		return false;
+	player->net.cpuPOWType = POW_TYPE_NONE;
+
+	if (player->net.cpuPOWFrame != gHostSendCounter - 1			// only in the frame it was scheduled for
+		|| player->powType != powType
+		|| player->powQuantity <= 0)
+	{
+		return false;
+	}
+
+	if (powType == POW_TYPE_NITRO)								// as DoCPUPOWLogic_Nitro does locally
+		ActivateNitroPOW(playerNum);
+	else
+	if (player->net.cpuPOWBackward)
+		player->controlBits_New |= (1L << kControlBit_ThrowBackward);
+	else
+		player->controlBits_New |= (1L << kControlBit_ThrowForward);
+	return true;
+}
 
 void DoCPUPowerupLogic(ObjNode *carObj, short playerNum)
 {
 short	powType;
+const Boolean	hostDecides = gNetGameInProgress && gPlayerInfo[playerNum].isComputer;
+
+	if (hostDecides)
+	{
+		if (UseScheduledCPUPOW(playerNum)								// the host decides again next frame
+			|| !gIsNetworkHost
+			|| Net_IsCPUPOWPending(playerNum))							// one use in flight per car
+		{
+			return;
+		}
+	}
 
 	if (gDifficulty <= DIFFICULTY_EASY)						// CPU doesn't shoot in easy mode
 		return;
@@ -2419,6 +2531,19 @@ short	powType;
 		default:
 				DoCPUWeaponLogic_Standard(carObj, playerNum, powType);
 	}
+
+			/* THE HOST SENDS ITS DECISION TO EVERY MACHINE */
+
+	if (hostDecides)
+	{
+		const uint32_t	throwBits = (1L << kControlBit_ThrowForward) | (1L << kControlBit_ThrowBackward);
+		const uint32_t	decided = gPlayerInfo[playerNum].controlBits_New & throwBits;
+
+		gPlayerInfo[playerNum].controlBits_New &= ~throwBits;
+		// A throw decided on a later pass is lost, as CheckPOWControls ignores it locally too.
+		if (decided && (powType == POW_TYPE_NITRO || gPlayerMultiPassCount == 0))
+			Host_ScheduleCPUPOW(playerNum, powType, !(decided & (1L << kControlBit_ThrowForward)));
+	}
 }
 
 
@@ -2443,7 +2568,10 @@ static void DoCPUPOWLogic_Nitro(ObjNode *carObj, short playerNum)
 	if (gPlayerInfo[playerNum].distToFloor > 10.0f)						// if off ground, then dont
 		return;
 
-	ActivateNitroPOW(playerNum);
+	if (gNetGameInProgress && gPlayerInfo[playerNum].isComputer)		// the host schedules it for every machine
+		gPlayerInfo[playerNum].controlBits_New |= (1L << kControlBit_ThrowForward);
+	else
+		ActivateNitroPOW(playerNum);
 }
 
 
@@ -3218,6 +3346,8 @@ ObjNode	*obj;
 		if (d <= radius)
 		{
 			d2 = radius - d;												// determine blast force
+			if (gRaceMetricsEnabled)
+				RaceMetricsBlast(i, whoThrew);
 
 			obj = gPlayerInfo[i].objNode;								// get the car object
 

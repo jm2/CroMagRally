@@ -10,6 +10,7 @@
 /****************************/
 
 #include "game.h"
+#include "race_metrics.h"
 
 /****************************/
 /*    PROTOTYPES            */
@@ -110,6 +111,9 @@ static void VehicleActivatePOW(ObjNode *theVehicle, Boolean forwardThrow)
 {
 short		playerNum = theVehicle->PlayerNum;
 short		powType;
+
+	if (gRaceMetricsEnabled)
+		RaceMetricsPOWUse(playerNum);							// counts every activation attempt
 
 			/* FIRST CHECK IF JUST DROP A FLAG */
 

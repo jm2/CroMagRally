@@ -31,6 +31,7 @@
 #include "metaobjects.h"
 #include "sprites.h"
 #include "triggers.h"
+#include "car_count_tuning.h"
 #include "infobar.h"
 #include "liquids.h"
 #include "splineitems.h"
@@ -47,6 +48,8 @@ extern Atlas*					gAtlases[MAX_SPRITE_GROUPS];
 extern BG3DFileContainer		*gBG3DContainerList[MAX_BG3D_GROUPS];
 extern Boolean					gAnnouncedPOW[MAX_POW_TYPES];
 extern Boolean					gAutoPilot;
+extern Boolean					gCPUFillThisRace;
+extern Byte						gPlayerLimitThisGame;
 extern Boolean					gDisableAnimSounds;
 extern Boolean					gDisableHiccupTimer;
 extern Boolean					gDrawLensFlare;
@@ -71,6 +74,7 @@ extern Byte						gDebugMode;
 extern CheckpointDefType		gCheckpointList[MAX_CHECKPOINTS];
 extern CollisionRec				gCollisionList[];
 extern CommandLineOptions		gCommandLine;
+extern Boolean					gSmokeTestPassed;
 extern const float				gWaterHeights[NUM_TRACKS][6];
 extern const InputBinding		kDefaultInputBindings[NUM_CONTROL_NEEDS];
 extern const OGLColorRGB		kCavemanSkinColors[NUM_CAVEMAN_SKINS];

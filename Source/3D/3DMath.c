@@ -873,10 +873,12 @@ float	mag,oneOverM;
 			/* CALC LENGTH AND NORMALIZE INPUT VECTOR */
 
 	mag = sqrt(x*x + y*y);							// calc magnitude of input vector;
-	if (mag != 0.0f)
-		oneOverM = 1.0f / mag;
-	else
-		oneOverM = 0;
+	if (mag == 0.0f)								// a zero vector reflects to zero (normalizing the 0,0 result below would give NaN)
+	{
+		theVector->x = theVector->y = 0;
+		return;
+	}
+	oneOverM = 1.0f / mag;
 	x *= oneOverM;									// normalize
 	y *= oneOverM;
 

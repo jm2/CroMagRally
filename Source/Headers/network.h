@@ -37,8 +37,10 @@ typedef struct
 	//	uint8_t				numTracksCompleted;					// pass saved game value to clients so we're all the same here
 	uint8_t				difficulty;							// pass host's difficulty setting so we're in sync
 	uint8_t				tagDuration;						// # minutes in tag game
-	uint8_t				reserved;							// CMR7: was useRedundancy (retired; per-client adaptive depth replaces it)
+	uint8_t				cpuFill;							// host's CPU slot fill choice: 1 only in race mode (CMR7: was useRedundancy)
 	uint16_t			targetFPS;							// The FPS cap for the game (min of all players)
+	uint8_t				playerLimit;						// host's 6/12 players setting: most cars in this game, >= numPlayers
+	uint8_t				pad;								// always 0
 }NetConfigMessage;
 _Static_assert(sizeof(NetConfigMessage) <= kNSpMaxMessageLength, "config msg fits");
 
@@ -57,9 +59,11 @@ _Static_assert(sizeof(NetSyncMessage) <= kNSpMaxMessageLength, "sync msg fits");
 		//
 		// Carried in the host control stream so every machine applies a leave/bot-conversion
 		// at the identical sim frame. Fields land in the CMR7 bump; populated in Stage 4.
+		// kEvCpuThrow: in a network game a CPU car (fill CPU or replacement bot) uses its POW
+		// only when the host says so, so every machine uses the same POW at the same frame.
 		//
 
-enum { kEvReserved = 0, kEvBecomeBot = 1, kEvUnpauseForce = 2 };
+enum { kEvReserved = 0, kEvBecomeBot = 1, kEvUnpauseForce = 2, kEvCpuThrow = 3 };
 enum { INPUT_FLAG_SUBSTITUTED = 0x01, INPUT_FLAG_COALESCED = 0x02 };
 
 typedef struct
@@ -67,15 +71,22 @@ typedef struct
 	uint32_t			effectiveFrame;					// host sim frame at which every machine applies it
 	uint8_t				type;							// kEv*
 	int8_t				playerNum;
-	uint16_t			pad;
+	uint16_t			pad;							// kEvCpuThrow: the POW use (NetEncodeCPUPOW); 0 for the other types
 }NetFrameEvent;
 _Static_assert(sizeof(NetFrameEvent) == 8, "NetFrameEvent ABI");
+
+// kEvCpuThrow's pad: the POW type, and whether it is thrown backward.
+#define NET_CPU_POW_TYPE_MASK	0x000F
+#define NET_CPU_POW_BACKWARD	0x0010
 
 // Max frame-aligned events buffered/applied concurrently (host pending ring + per-machine apply
 // table). The wire MUST carry the same count: NetCheck/leave can schedule one become-bot per
 // in-flight player in a SINGLE host frame, all sharing one effectiveFrame, so a smaller wire cap
 // would silently drop the surplus and desync the host vs clients (seed/state FATAL).
-#define NET_MAX_PENDING_EVENTS	8
+// Each non-host player has at most one event pending: a human's become-bot, or, once it
+// drives a CPU car, one POW use (the host decides the next only after the last applied).
+// At least 8, the wire size since CMR7.
+#define NET_MAX_PENDING_EVENTS	(MAX_PLAYERS > 8 ? MAX_PLAYERS : 8)	// 12 at twelve players, 8 at six
 
 // Host input buffering and frame-event scheduling limits are wire invariants too: the
 // payload validator must agree with the producer on every accepted telemetry/event value.
@@ -177,6 +188,10 @@ void Net_Pump(void);
 int Net_GetConnectionHint(void);				// CMR7: per-client D_init seed (1 = WiFi, 0 = wired)
 
 void ApplyPendingFrameEvents(void);				// CMR7 Stage 4: apply frame-aligned events (become-bot) for the frame just simulated
+Boolean Host_ScheduleCPUPOW(short playerNum, short powType, Boolean backward);	// every machine's CPU car uses this POW at one later frame
+Boolean Net_IsCPUPOWPending(short playerNum);	// a CPU car's scheduled POW use is not applied yet
+uint32_t Net_GetCPUPOWUses(void);				// CPU POW uses applied so far this game
+int Net_GetNumHumansInGame(void);				// network humans still in the game (host included)
 void NetCheck_ConnectionTimeouts(void);			// CMR7 Stage 4: per-frame lastHeard badge/drop policy (host + client)
 void Net_MaybeSendKeepAlive(void);				// CMR7 Stage 4: throttled header-only heartbeat (lobby/barriers keep radios awake)
 void Net_RefreshLastHeard(void);				// CMR7 Stage 4: reset all liveness clocks to now (game-loop entry)
@@ -188,6 +203,9 @@ Boolean GetVehicleSelectionFromNetPlayers(void);
 
 
 void EndNetworkGame(void);
+
+extern Boolean gNetGameCPUFill;					// this network game's CPU slot fill, as the host's config set it
+extern Byte gNetGamePlayerLimit;				// this network game's player limit: the host's own, or its config's on a client
 
 //===============================================================================
 

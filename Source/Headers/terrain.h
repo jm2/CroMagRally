@@ -51,6 +51,11 @@ enum
 								// until after we've allocated new supertiles, so we'll always
 								// need more supertiles than are actually ever used - worst case
 								// scenario is twice as many.
+								//
+								// "N players" is the local split-screen panes: only humans on this
+								// machine build supertile geometry (DoPlayerTerrainUpdate), so CPU
+								// and remote cars cost item streaming, not supertiles. Headless
+								// one-pane races use at most 98 of these with 6 or 12 cars.
 
 #define	MAX_SUPERTILES			((SUPERTILE_DIST_WIDE * SUPERTILE_DIST_DEEP) * MAX_SPLITSCREENS * 2)
 
@@ -147,7 +152,7 @@ typedef	struct
 {
 	uint16_t	supertileIndex;
 	uint8_t		statusFlags;
-	uint8_t		playerHereFlags;
+	uint16_t	playerHereFlags;			// bit (1 << playerNum) per player whose item ring covers this supertile
 }SuperTileStatus;
 
 enum									// statusFlags
@@ -166,6 +171,8 @@ void DisposeSuperTileMemoryList(void);
 extern 	void DisposeTerrain(void);
 void DrawTerrain(void);
 void KeepTerrainAliveForRender(void);
+void MarkSuperTilePlayerHere(SuperTileStatus *status, short playerNum);
+Boolean IsSuperTileUsedByPlayers(const SuperTileStatus *status, short playerToSkip);
 extern	void GetSuperTileInfo(long x, long z, long *superCol, long *superRow, long *tileCol, long *tileRow);
 extern	void InitTerrainManager(void);
 float	GetTerrainY(float x, float z);

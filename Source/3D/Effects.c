@@ -10,6 +10,7 @@
 /****************************/
 
 #include "game.h"
+#include "localplayers.h"
 
 /****************************/
 /*    PROTOTYPES            */
@@ -43,6 +44,12 @@ static void MoveBubbleGenerator(ObjNode *theNode);
 #define	SMOKE_TIMER	.07f
 
 #define	BubbleTimer		SpecialF[0]
+
+_Static_assert(MAX_PARTICLE_GROUPS - PARTICLE_GROUPS_KEPT_FROM_SNOW >= 50
+			&& MAX_PARTICLE_GROUPS - PARTICLE_GROUPS_KEPT_FROM_BUBBLES >= 55, "ambient snow and bubbles keep at least their original share");
+_Static_assert(PARTICLE_GROUPS_KEPT_FROM_BUBBLES >= 2 * MAX_PLAYERS, "cars' own effects keep a reserve that grows with the grid");
+_Static_assert(MAX_PLAYERS != 6 || (MAX_PARTICLE_GROUPS == 70 && PARTICLE_GROUPS_KEPT_FROM_SNOW == 20
+			&& PARTICLE_GROUPS_KEPT_FROM_BUBBLES == 15), "6-player builds keep the original particle budget");
 
 /*********************/
 /*    VARIABLES      */
@@ -330,6 +337,12 @@ MOTriangleIndecies		*t;
 			/* NOTHING FREE */
 
 //	DoFatalAlert("NewParticleGroup: no free groups!");
+	static Boolean warnedFull = false;
+	if (!warnedFull)
+	{
+		SDL_Log("WARNING: all %d particle groups in use; skipping new effects", MAX_PARTICLE_GROUPS);
+		warnedFull = true;
+	}
 	return(-1);
 }
 
@@ -1143,17 +1156,19 @@ short				p;
 	if (gFramesPerSecond < 12.0f)									// help us out if speed is really bad
 		return;
 
-	if (gNumActiveParticleGroups > (MAX_PARTICLE_GROUPS - 20))		// don't fill up all of the particle groups!
+	if (gNumActiveParticleGroups > (MAX_PARTICLE_GROUPS - PARTICLE_GROUPS_KEPT_FROM_SNOW))		// don't fill up all of the particle groups!
 		return;
 
 	for (p = 0; p < gNumTotalPlayers; p++)
 	{
+		if (GetLocalSlotForPlayer(p) < 0)							// flakes fall around a camera, so only for panes this machine draws
+			continue;
 
 			/* CHECK IF SNOW NOW */
 
 		gPlayerInfo[p].snowTimer -= gFramesPerSecondFrac;
-		if (gPlayerInfo[p].snowTimer > 0.0f)
-			return;
+		if (gPlayerInfo[p].snowTimer > 0.0f)							// not this pane's turn: the next pane may be due
+			continue;
 		gPlayerInfo[p].snowTimer += .05f;
 
 				/* GET GROUP */
@@ -1174,8 +1189,8 @@ short				p;
 
 			gPlayerInfo[p].snowParticleGroup = NewParticleGroup(&gNewParticleGroupDef);
 		}
-		if (gPlayerInfo[p].snowParticleGroup == -1)									// still no group, so bail
-			return;
+		if (gPlayerInfo[p].snowParticleGroup == -1)									// still no group: skip this pane
+			continue;
 
 
 				/******************/
@@ -1215,8 +1230,8 @@ short				p;
 			newParticleDef.alpha		= FULL_ALPHA;
 			if (AddParticleToGroup(&newParticleDef))
 			{
-				gPlayerInfo[p].snowParticleGroup = -1;								// this group is full
-				return;
+				gPlayerInfo[p].snowParticleGroup = -1;								// this group is full: done with this pane
+				break;
 			}
 		}
 	}
@@ -1732,7 +1747,7 @@ OGLPoint3D	pt;
 	if (gFramesPerSecond < 14.0f)										// no bubbles if going really slow
 		return;
 
-	if (gNumActiveParticleGroups > (MAX_PARTICLE_GROUPS - 15))			// don't fill up all of the particle groups!
+	if (gNumActiveParticleGroups > (MAX_PARTICLE_GROUPS - PARTICLE_GROUPS_KEPT_FROM_BUBBLES))	// don't fill up all of the particle groups!
 		return;
 
 

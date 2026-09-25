@@ -12,6 +12,7 @@ enum
 	SPRITE_GROUP_TRACKSELECTSCREEN,
 	SPRITE_GROUP_SCOREBOARDSCREEN,
 	SPRITE_GROUP_GAMEPAD,
+	SPRITE_GROUP_PLACEDIGITS,				// wall font, for place numbers past the place sprites
 	MAX_SPRITE_GROUPS
 };
 
@@ -131,6 +132,8 @@ enum
 
 	INFOBAR_SObjType_OverlayBackgroundH,
 };
+
+#define	NUM_PLACE_SPRITES	(INFOBAR_SObjType_Place6 - INFOBAR_SObjType_Place1 + 1)	// big place numbers exist for 1st-6th only
 
 
 enum

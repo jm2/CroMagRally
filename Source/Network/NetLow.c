@@ -61,10 +61,11 @@ int gNetPort = 49959;
 
 // Per-socket non-blocking send ring (Stage 1). Absorbs whatever the kernel send buffer
 // can't take in one shot so the main thread never blocks retrying a slow/stalled peer.
-// 32 KB ~= 2s of host control msgs (~290B @60pps) or ~10s of client msgs (~52B); a single
-// max message (kNSpMaxMessageLength) always fits an empty ring, so overflow only ever comes
-// from sustained backlog -> the existing kick (host) / terminate (client) path.
-#define SEND_RING_CAPACITY 32768
+// 80 KB ~= 2s of host control msgs (628B @60pps at MAX_PLAYERS 12; ~0.9s at 144pps) or
+// ~25s of client msgs (~52B); a single max message (kNSpMaxMessageLength) always fits an
+// empty ring, so overflow only ever comes from sustained backlog -> the existing kick (host)
+// / terminate (client) path. One ring per client slot plus the client's own: ~1 MB per host.
+#define SEND_RING_CAPACITY 81920
 #define MAX_APPLE_ADVERTISE_FAILURES 30
 
 typedef struct SendRing
@@ -119,6 +120,9 @@ typedef struct NSpGame
 	uint32_t					cookie;
 
 	int							nextPollIndex;
+
+	int							numRefusedClients;	// joins turned away because every slot was taken
+	int							maxPlayers;		// host: most players (itself included) it seats: its game's player limit, <= MAX_CLIENTS
 
 	SendRing					clientSendRing;	// client-side outbound queue for clientToHostSocket (zero-init by AllocPtrClear in NSpGame_Alloc)
 
@@ -511,6 +515,24 @@ fail:
 	return NULL;
 }
 
+// Dev/test direct join (--join-address): connect straight to the host's TCP listener at
+// this IPv4 address and gNetPort, skipping UDP lobby discovery. The join handshake is the
+// same as for a discovered lobby.
+NSpGameReference NSpGame_JoinAddress(uint32_t ipv4Address)
+{
+	LobbyInfo lobby =
+	{
+		.hostAddr =
+		{
+			.sin_family = AF_INET,
+			.sin_port = htons(gNetPort),
+			.sin_addr.s_addr = htonl(ipv4Address),
+		},
+	};
+
+	return JoinLobby(&lobby);
+}
+
 #pragma mark - Host lobby
 
 static void NSpGame_ExpireHandshakes(NSpGame* game)
@@ -556,8 +578,16 @@ NSpPlayerID NSpGame_AcceptNewClient(NSpGameReference gameRef)
 	// Apply all performance/robustness socket options
 	ApplyTCPSocketOptions(newSocket);
 
-	// Find vacant player slot
-	for (int i = 0; i < MAX_CLIENTS; i++)		// players[] is sized MAX_CLIENTS, not MAX_PLAYERS — iterating to MAX_PLAYERS read/wrote past the array
+	// Find vacant player slot, unless the game's player limit is reached (a host in
+	// 6-player mode turns the 7th player away like a full 12-player lobby)
+	int numSeated = 0;
+	for (int i = 0; i < MAX_CLIENTS; i++)
+	{
+		if (game->players[i].state != kNSpPlayerState_Offline)
+			numSeated++;
+	}
+
+	for (int i = 0; i < MAX_CLIENTS && numSeated < game->maxPlayers; i++)		// players[] is sized MAX_CLIENTS, not MAX_PLAYERS — iterating to MAX_PLAYERS read/wrote past the array
 	{
 		if (game->players[i].state == kNSpPlayerState_Offline)
 		{
@@ -585,6 +615,7 @@ NSpPlayerID NSpGame_AcceptNewClient(NSpGameReference gameRef)
 	{
 		// All slots used up
 		printf("%s: A new client wants to connect, but the game is full!\n", __func__);
+		game->numRefusedClients++;
 
 		NSpJoinDeniedMessage* deniedMessage = AllocMessage(NSpJoinDenied, kNSpHostID, kNSpUnspecifiedEndpoint);
 		snprintf(deniedMessage->reason, sizeof(deniedMessage->reason), "THE GAME IS FULL.");
@@ -1211,6 +1242,7 @@ NSpGameReference NSpGame_Host(void)
 	game = NSpGame_Unbox(gameRef);
 	game->isHosting				= true;
 	game->myID					= kNSpHostID;
+	game->maxPlayers			= MAX_CLIENTS;		// until NSpGame_SetMaxPlayers lowers it
 
 	game->hostListenSocket		= CreateTCPSocket(true);
 
@@ -1618,6 +1650,37 @@ int NSpGame_Dispose(NSpGameReference inGame, int disposeFlags)
 	SafeDisposePtr((Ptr) game);
 
 	return kNSpRC_OK;
+}
+
+int NSpGame_GetMaxPlayers(void)
+{
+	return MAX_CLIENTS;
+}
+
+int NSpGame_SetMaxPlayers(NSpGameReference gameRef, int maxPlayers)
+{
+	NSpGame* game = NSpGame_Unbox(gameRef);
+
+	if (!game)
+	{
+		return kNSpRC_NoGame;
+	}
+
+	GAME_ASSERT(game->isHosting);
+
+	if (maxPlayers < 2 || maxPlayers > MAX_CLIENTS)		// the host and at least one client
+	{
+		return kNSpRC_Failed;
+	}
+
+	game->maxPlayers = maxPlayers;		// players already seated stay
+	return kNSpRC_OK;
+}
+
+int NSpGame_GetNumRefusedClients(NSpGameReference gameRef)
+{
+	NSpGame* game = NSpGame_Unbox(gameRef);
+	return game ? game->numRefusedClients : 0;
 }
 
 int NSpGame_GetNumActivePlayers(NSpGameReference gameRef)

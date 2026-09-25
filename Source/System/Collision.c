@@ -20,8 +20,15 @@
 /*    CONSTANTS             */
 /****************************/
 
+// Budget for one HandleCollisions call. Its up-to-3 passes append to the same list,
+// so a car re-adds whatever it still touches on each pass. Headless full races peak
+// at 10 entries with 6 or 12 cars, so 60 stays: even a car pressed against every
+// other car on all three passes fits. A full list keeps the first hits and drops
+// the rest, logged once (AddCollision).
 #define	MAX_COLLISIONS				60
 #define	MAX_TEMP_COLL_TRIANGLES		300
+
+_Static_assert(MAX_COLLISIONS >= 3 * (MAX_PLAYERS - 1), "a car touching every other car on each of HandleCollisions' 3 passes must fit");
 
 enum
 {
@@ -37,6 +44,30 @@ enum
 CollisionRec	gCollisionList[MAX_COLLISIONS];
 short			gNumCollisions = 0;
 Byte			gTotalSides;
+
+
+/******************* ADD COLLISION *********************/
+//
+// Returns the next free gCollisionList entry, or nil if the list is full.
+// A full list keeps the first MAX_COLLISIONS hits and drops the rest; that
+// takes an unusual pile-up, so it's logged once per session.
+//
+
+static CollisionRec* AddCollision(void)
+{
+static Boolean	warnedFull = false;
+CollisionRec	*rec;
+
+	rec = AppendCollisionRec(gCollisionList, &gNumCollisions, MAX_COLLISIONS);
+
+	if (!rec && !warnedFull)
+	{
+		SDL_Log("WARNING: collision list full (%d entries); dropping further collisions", MAX_COLLISIONS);
+		warnedFull = true;
+	}
+
+	return(rec);
+}
 
 
 /******************* COLLISION DETECT *********************/
@@ -55,7 +86,9 @@ short		numBaseBoxes,targetNumBoxes,target;
 CollisionBoxType *baseBoxList;
 CollisionBoxType *targetBoxList;
 long		leftSide,rightSide,frontSide,backSide,bottomSide,topSide;
+CollisionRec *rec;
 
+	GAME_ASSERT(startNumCollisions >= 0 && startNumCollisions <= MAX_COLLISIONS);
 	gNumCollisions = startNumCollisions;								// clear list
 
 			/* GET BASE BOX INFO */
@@ -259,21 +292,21 @@ long		leftSide,rightSide,frontSide,backSide,bottomSide,topSide;
 
 						/* ADD TO COLLISION LIST */
 got_sides:
-				gCollisionList[gNumCollisions].baseBox = 0;
-				gCollisionList[gNumCollisions].targetBox = target;
-				gCollisionList[gNumCollisions].sides = sideBits;
-//				gCollisionList[gNumCollisions].type = COLLISION_TYPE_OBJ;
-				gCollisionList[gNumCollisions].objectPtr = thisNode;
-				gNumCollisions++;
+				rec = AddCollision();												// nil if the list is full
+				if (rec)
+				{
+					rec->baseBox = 0;
+					rec->targetBox = target;
+					rec->sides = sideBits;
+//					rec->type = COLLISION_TYPE_OBJ;
+					rec->objectPtr = thisNode;
+				}
 				gTotalSides |= sideBits;											// remember total of this
 			}
 		}
 next:
 		thisNode = thisNode->NextNode;												// next target node
 	}while(thisNode != nil);
-
-	if (gNumCollisions > MAX_COLLISIONS)											// see if overflowed (memory corruption ensued)
-		DoFatalAlert("CollisionDetect: gNumCollisions > MAX_COLLISIONS");
 }
 
 
@@ -872,6 +905,7 @@ short DoSimplePointCollision(OGLPoint3D *thePoint, uint32_t cType, ObjNode *exce
 ObjNode	*thisNode;
 short	targetNumBoxes,target;
 CollisionBoxType *targetBoxList;
+CollisionRec *rec;
 
 	gNumCollisions = 0;
 
@@ -932,10 +966,13 @@ CollisionBoxType *targetBoxList;
 
 					/* THERE HAS BEEN A COLLISION */
 
-			gCollisionList[gNumCollisions].targetBox = target;
-//			gCollisionList[gNumCollisions].type = COLLISION_TYPE_OBJ;
-			gCollisionList[gNumCollisions].objectPtr = thisNode;
-			gNumCollisions++;
+			rec = AddCollision();									// nil if the list is full
+			if (rec)
+			{
+				rec->targetBox = target;
+//				rec->type = COLLISION_TYPE_OBJ;
+				rec->objectPtr = thisNode;
+			}
 		}
 
 next:
@@ -957,6 +994,7 @@ short DoSimpleBoxCollision(float top, float bottom, float left, float right,
 ObjNode			*thisNode;
 short			targetNumBoxes,target;
 CollisionBoxType *targetBoxList;
+CollisionRec	*rec;
 
 	gNumCollisions = 0;
 
@@ -1014,10 +1052,13 @@ CollisionBoxType *targetBoxList;
 
 					/* THERE HAS BEEN A COLLISION */
 
-			gCollisionList[gNumCollisions].targetBox = target;
-//			gCollisionList[gNumCollisions].type = COLLISION_TYPE_OBJ;
-			gCollisionList[gNumCollisions].objectPtr = thisNode;
-			gNumCollisions++;
+			rec = AddCollision();									// nil if the list is full
+			if (rec)
+			{
+				rec->targetBox = target;
+//				rec->type = COLLISION_TYPE_OBJ;
+				rec->objectPtr = thisNode;
+			}
 		}
 
 next:
