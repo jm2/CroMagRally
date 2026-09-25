@@ -885,6 +885,11 @@ if(CMR_INSTALL)
 	if(NOT UNIX OR APPLE)
 		message(FATAL_ERROR "CMR_INSTALL is only supported for Linux (FHS) packaging")
 	endif()
+	# A shared SDL built from source is never installed on its own, so the package would
+	# ship without SDL and without a dependency on one.
+	if(BUILD_SDL_FROM_SOURCE AND NOT SDL_STATIC AND NOT CMR_BUNDLE_SDL)
+		message(FATAL_ERROR "CMR_INSTALL with BUILD_SDL_FROM_SOURCE and a shared SDL requires CMR_BUNDLE_SDL=ON")
+	endif()
 
 	# Deliberately the literal "lib/cromagrally", NOT GNUInstallDirs/CMAKE_INSTALL_LIBDIR:
 	# on Fedora/Arch the latter is "lib64", but the launcher wrapper hard-codes "lib" and
