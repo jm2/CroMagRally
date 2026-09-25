@@ -14,8 +14,11 @@ def verify(package, bundled):
     dependencies = field(package, "Depends")
     private_sdl = bool(re.search(r"\./usr/lib(?:exec)?/cromagrally/libSDL3\.so", contents))
     external_sdl = bool(re.search(r"(?:^|,)\s*libsdl3-0(?:\s|,|$)", dependencies))
+    # dpkg-shlibdeps takes the minimum version from the library's symbols file.
+    versioned_sdl = bool(re.search(r"(?:^|,)\s*libsdl3-0\s*\(>=\s*3\.\d+\.\d+[^)]*\)", dependencies))
     assert private_sdl == bundled, (package, contents)
     assert external_sdl != bundled, (package, dependencies)
+    assert versioned_sdl != bundled, (package, dependencies)
     assert "./usr/bin/cromagrally" in contents
     assert "./usr/share/cromagrally/Data/" in contents
     print(f"PASS: {package.name}: bundled={bundled}; Depends: {dependencies}")
