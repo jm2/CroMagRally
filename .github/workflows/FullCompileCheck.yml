@@ -43,7 +43,7 @@ jobs:
           - { name: Linux/Clang, os: ubuntu-latest, prefix: "CC=clang CXX=clang++"}
           - { name: Linux/ARM64, os: ubuntu-24.04-arm }
           - { name: Windows/VS2022, os: windows-2022, extraflags: "-G 'Visual Studio 17 2022'" }
-          - { name: Mac, os: macos-latest }
+          - { name: Mac, os: macos-26 }
 
     steps:
       # Linux jobs compile the pinned extern/SDL3 submodule. These are its optional
@@ -149,7 +149,7 @@ jobs:
   # Exercise both release device builds and the developer scripts' simulator defaults.
   apple-mobile-check:
     name: Apple mobile (${{ matrix.target.name }}, ${{ matrix.destination }})
-    runs-on: macos-latest
+    runs-on: macos-26
     timeout-minutes: 30
     strategy:
       fail-fast: false

@@ -182,7 +182,7 @@ jobs:
 
   build-macos:
     needs: release_metadata
-    runs-on: macos-latest
+    runs-on: macos-26
     timeout-minutes: 30
     outputs:
       signed: ${{ steps.signing.outputs.signed }}
@@ -393,7 +393,7 @@ jobs:
 
   build-ios:
     needs: release_metadata
-    runs-on: macos-latest          # macOS 14/15 image: Xcode 15/16 + iOS SDK + CMake preinstalled
+    runs-on: macos-26              # Xcode 26 + iOS SDK + CMake preinstalled
     timeout-minutes: 30            # SDL3-static-from-source + game via Xcode can take ~15-25 min
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -425,7 +425,7 @@ jobs:
   build-tvos:
     needs: release_metadata
     name: tvOS (Apple TV)
-    runs-on: macos-latest
+    runs-on: macos-26
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -434,7 +434,7 @@ jobs:
       - name: Extract game version
         run: echo "GAME_VERSION=${{ needs.release_metadata.outputs.game_version }}" >> "$GITHUB_ENV"
 
-      # macos-latest already includes a recent Xcode with the tvOS SDK + simulators.
+      # The macos-26 image already includes Xcode 26 with the tvOS SDK + simulators.
       # Pin only if you need reproducibility across runner image updates.
       - name: Select Xcode
         uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
