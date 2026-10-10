@@ -55,7 +55,7 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "tvOS")
 	set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING "Minimum tvOS deployment version")
 	set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "Target tvOS architectures")
 else()
-	set(CMAKE_OSX_DEPLOYMENT_TARGET "10.13" CACHE STRING "Minimum OS X deployment version")
+	set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum OS X deployment version")
 	set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Target macOS architectures")
 endif()
 
