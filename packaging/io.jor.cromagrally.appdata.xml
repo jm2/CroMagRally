@@ -69,6 +69,21 @@
   <url type="bugtracker">https://github.com/jm2/CroMagRally/issues</url>
 
   <releases>
+    <release version="3.2.0" date="2026-10-13">
+      <url>https://github.com/jm2/CroMagRally/releases/tag/v3.2.0</url>
+      <description>
+        <p>New in this release:</p>
+        <ul>
+          <li>Race with up to twelve cars, and play LAN and Wi-Fi games with up to twelve players</li>
+          <li>New "Players" setting (6 or 12) and a "CPU cars" option that fills empty multiplayer slots</li>
+          <li>Distinct looks and minimap colours for all twelve drivers, and correct places past 6th</li>
+          <li>Six-player LAN and Wi-Fi games restored, as in the original game</li>
+          <li>Finishing order, split-screen sound placement and LAN desync fixes</li>
+          <li>CPU cars no longer get stuck in deep water, and vehicles recover from invalid physics values</li>
+          <li>The macOS version now requires macOS 12 or later</li>
+        </ul>
+      </description>
+    </release>
     <release version="3.1.1" date="2026-07-15">
       <url>https://github.com/jm2/CroMagRally/releases/tag/v3.1.1</url>
       <description>

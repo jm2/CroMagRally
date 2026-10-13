@@ -5,7 +5,7 @@
 #
 # Built in CI for x86_64 only: the official archlinux Docker image has no arm64 variant.
 pkgname=cromagrally
-pkgver=3.1.1
+pkgver=3.2.0
 pkgrel=1
 pkgdesc="The wildest racing game since man invented the wheel!"
 arch=('x86_64')
