@@ -9,7 +9,7 @@
 	exit(EXIT_FAILURE); } } while (0)
 
 SuperTileStatus** gSuperTileStatusGrid;
-long gNumSuperTilesDeep, gNumSuperTilesWide;
+int gNumSuperTilesDeep, gNumSuperTilesWide;
 
 static void TestSuperTilePlayerFlags(void)
 {

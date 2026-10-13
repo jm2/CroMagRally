@@ -418,7 +418,7 @@ static Boolean DoSubCollisionDetect(ObjNode *vehicle)
 {
 short		i,playerNum;
 ObjNode		*hitObj;
-unsigned long	ctype;
+uint32_t		ctype;
 uint8_t		sides;
 
 

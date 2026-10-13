@@ -81,7 +81,7 @@ void InitObjectManager(void) {
 ObjNode *MakeNewObject(NewObjectDefinitionType *newObjDef) {
   ObjNode *newNodePtr;
   long slot;
-  unsigned long flags = newObjDef->flags;
+  uint32_t flags = newObjDef->flags;
 
   _Static_assert(0 == (offsetof(struct ObjNode, SpecialPadding) & 7),
                  "SpecialPadding should be aligned to 8");

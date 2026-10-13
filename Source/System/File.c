@@ -402,10 +402,10 @@ SkeletonFile_AnimHeader_Type	*animHeaderPtr;
 	HLock(hand);
 	pointPtr = (OGLPoint3D *)*hand;
 
-	i = GetHandleSize(hand) / sizeof(OGLPoint3D);
+	const Size numRefPoints = GetHandleSize(hand) / (Size) sizeof(OGLPoint3D);
 	UNPACK_STRUCTS_HANDLE(">fff", OGLPoint3D, skeleton->numDecomposedPoints, hand);
 
-	if (i != skeleton->numDecomposedPoints)
+	if (numRefPoints != skeleton->numDecomposedPoints)
 		DoFatalAlert("# of points in Reference Model has changed!");
 	else
 	{
@@ -997,7 +997,7 @@ Ptr						tempBuffer16 = nil;
 	gNumCheckpoints			= (**header).numCheckpoints;
 	ReleaseResource(hand);
 	if (gNumCheckpoints < 0 || gNumCheckpoints > MAX_CHECKPOINTS)
-		DoFatalAlert("ReadDataFromPlayfieldFile: invalid checkpoint count %ld", gNumCheckpoints);
+		DoFatalAlert("ReadDataFromPlayfieldFile: invalid checkpoint count %d", gNumCheckpoints);
 	if (gNumUniqueSuperTiles < 0 || gNumUniqueSuperTiles > MAX_SUPERTILE_TEXTURES)		// bounds the fixed gSuperTileTextureNames[] the loader writes into (LoadTerrainSuperTileTextures)
 		DoFatalAlert("ReadDataFromPlayfieldFile: invalid unique supertile count %ld", gNumUniqueSuperTiles);
 
@@ -1013,8 +1013,8 @@ Ptr						tempBuffer16 = nil;
 	gTerrainTileDepth = (gTerrainTileDepth/SUPERTILE_SIZE)*SUPERTILE_SIZE;
 	gTerrainUnitWidth = gTerrainTileWidth*TERRAIN_POLYGON_SIZE;					// calc world unit dimensions of terrain
 	gTerrainUnitDepth = gTerrainTileDepth*TERRAIN_POLYGON_SIZE;
-	gNumSuperTilesDeep = gTerrainTileDepth/SUPERTILE_SIZE;						// calc size in supertiles
-	gNumSuperTilesWide = gTerrainTileWidth/SUPERTILE_SIZE;
+	gNumSuperTilesDeep = (int) (gTerrainTileDepth/SUPERTILE_SIZE);				// calc size in supertiles (bounded by ValidatePlayfieldHeader)
+	gNumSuperTilesWide = (int) (gTerrainTileWidth/SUPERTILE_SIZE);
 
 
 			/**************************/
@@ -1588,7 +1588,7 @@ static void LoadTerrainSuperTileTextures(short fRefNum)
 #if !(__BIG_ENDIAN__)
 				/* BYTESWAP 16-BIT TEXTURE */
 
-		ByteswapInts(2, decompressedSize/2, image);
+		ByteswapInts(2, tileBytes/2, image);				// decompressedSize == tileBytes (asserted above)
 #endif
 	}
 

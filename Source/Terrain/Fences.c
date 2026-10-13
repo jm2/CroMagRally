@@ -99,7 +99,7 @@ const char* kFenceNames[NUM_FENCE_TYPES] =
 /*     VARIABLES      */
 /**********************/
 
-long			gNumFences = 0;
+int			gNumFences = 0;
 short			gNumFencesDrawn;
 FenceDefType	*gFenceList = nil;
 Boolean			gDrawInvisiFences = true;
@@ -348,7 +348,7 @@ static void MakeFenceGeometry(void)
 {
 uint16_t				type;
 float					u,height,aspectRatio,textureUOff;
-long					i,numNubs,j;
+int						i,numNubs,j;
 FenceDefType			*fence;
 OGLPoint3D				*nubs;
 MOMaterialObject		*material;
@@ -491,7 +491,7 @@ float					minX,minY,minZ,maxX,maxY,maxZ;
 
 static void DrawFences(ObjNode *theNode)
 {
-long			f,type;
+int				f,type;
 float			cameraX, cameraZ;
 
 	(void) theNode;

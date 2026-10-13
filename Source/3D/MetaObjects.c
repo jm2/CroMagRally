@@ -27,8 +27,6 @@ static void SetMetaObjectToMatrix(MOMatrixObject *matObj, OGLMatrix4x4 *inData);
 static void MO_DetachFromLinkedList(MetaObjectPtr obj);
 static void MO_DisposeObject_Group(MOGroupObject *group);
 static void MO_DisposeObject_Material(MOMaterialObject *obj);
-static void MO_GetNewGroupReference(MOGroupObject *obj);
-static void MO_GetNewVertexArrayReference(MOVertexArrayObject *obj);
 static void MO_CalcBoundingBox_Recurse(MetaObjectPtr object, OGLBoundingBox *bBox);
 static void SetMetaObjectToPicture(MOPictureObject *pictObj, const char *inData, int destPixelFormat);
 static void MO_DisposeObject_Picture(MOPictureObject *obj);
@@ -81,39 +79,6 @@ MetaObjectHeader *h = mo;
 	return(mo);
 }
 
-
-/**************** MO: GET NEW GROUP REFERENCE ******************/
-//
-// Recursively increment ref counts of everything inside the group
-//
-
-static void MO_GetNewGroupReference(MOGroupObject *obj)
-{
-MOGroupData	*data = &obj->objectData;
-int			i;
-
-	for (i = 0; i < data->numObjectsInGroup; i++)
-	{
-		MO_GetNewReference(data->groupContents[i]);
-	}
-}
-
-
-/***************** MO: GET NEW VERTEX ARRAY REFERENCE *************/
-//
-// Recursively increment ref counts of all texture objects in geometry
-//
-
-static void MO_GetNewVertexArrayReference(MOVertexArrayObject *obj)
-{
-MOVertexArrayData	*data = &obj->objectData;
-int					i;
-
-	for (i = 0; i < data->numMaterials; i++)
-	{
-		MO_GetNewReference(data->materials[i]);
-	}
-}
 
 #pragma mark -
 
@@ -1335,8 +1300,9 @@ uint32_t		pictRowBytes;
 		long imageLength = 0;
 		Ptr imageData = LoadDataFile(path, &imageLength);
 		GAME_ASSERT(imageData);
+		GAME_ASSERT(imageLength <= INT32_MAX);			// stb_image takes an int length
 
-		pictMapAddr = (Ptr) stbi_load_from_memory((const stbi_uc*) imageData, imageLength, &width, &height, NULL, 4);
+		pictMapAddr = (Ptr) stbi_load_from_memory((const stbi_uc*) imageData, (int) imageLength, &width, &height, NULL, 4);
 		GAME_ASSERT(pictMapAddr);
 
 		SafeDisposePtr(imageData);

@@ -61,11 +61,11 @@ GLuint gSuperTileTextureNames[MAX_SUPERTILE_TEXTURES];
 
 uint16_t **gTileGrid = nil;
 
-long gNumSuperTilesDeep,
+int gNumSuperTilesDeep,
     gNumSuperTilesWide; // dimensions of terrain in terms of supertiles
-static long gCurrentSuperTileRow[MAX_PLAYERS],
+static int gCurrentSuperTileRow[MAX_PLAYERS],
     gCurrentSuperTileCol[MAX_PLAYERS];
-static long gPreviousSuperTileCol[MAX_PLAYERS],
+static int gPreviousSuperTileCol[MAX_PLAYERS],
     gPreviousSuperTileRow[MAX_PLAYERS];
 
 short gNumFreeSupertiles = MAX_SUPERTILES;
@@ -133,7 +133,7 @@ void InitTerrainManager(void) {
 
 void InitCurrentScrollSettings(void) {
   long x, y;
-  long dummy1, dummy2;
+  int dummy1, dummy2;
   long i;
 
   for (i = 0; i < gNumTotalPlayers;
@@ -1104,9 +1104,9 @@ float GetMinTerrainY(float x, float z, short group, short type, float scale) {
 // OUTPUT: row/col in tile coords and supertile coords
 //
 
-void GetSuperTileInfo(long x, long z, long *superCol, long *superRow,
-                      long *tileCol, long *tileRow) {
-  long row, col;
+void GetSuperTileInfo(long x, long z, int *superCol, int *superRow,
+                      int *tileCol, int *tileRow) {
+  int row, col;
 
   if ((x < 0) || (z < 0)) // see if out of bounds
     return;

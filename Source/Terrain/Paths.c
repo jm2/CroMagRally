@@ -27,7 +27,7 @@
 /*     VARIABLES      */
 /**********************/
 
-long			gNumPaths = 0;
+int			gNumPaths = 0;
 PathDefType	    **gPathList = nil;
 
 SuperTilePathGridType	**gSuperTilePathGrid = nil;

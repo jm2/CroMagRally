@@ -1683,8 +1683,8 @@ OGLPoint3D			p;
 		{
 			theNode->SmokeTimer += 0.06;										// reset timer
 
-			particleGroup 	= theNode->SmokeParticleGroup;
-			magicNum 		= theNode->SmokeParticleMagic;
+			particleGroup 	= (int) theNode->SmokeParticleGroup;				// stored in ObjNode's long Special[] slots
+			magicNum 		= (int) theNode->SmokeParticleMagic;
 
 			if ((particleGroup == -1) || (!VerifyParticleGroupMagicNum(particleGroup, magicNum)))
 			{

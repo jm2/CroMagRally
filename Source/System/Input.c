@@ -1503,7 +1503,7 @@ void DrawVirtualGamepad(void) {
 
   gGlobalTransparency = 0.5f;
 
-  unsigned long flags = kTextMeshKeepCurrentProjection;
+  uint32_t flags = kTextMeshKeepCurrentProjection;
 
   // Use gVirtualInput for visual feedback (synced with sticky joystick logic)
   // Use VISUAL stick state to prevent bounces

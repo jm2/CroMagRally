@@ -1017,9 +1017,10 @@ GLuint OGL_TextureMap_LoadImageFile(const char *path, int *outWidth,
 
   imageFileData = LoadDataFile(path, &imageFileLength);
   GAME_ASSERT(imageFileData);
+  GAME_ASSERT(imageFileLength <= INT32_MAX); // stb_image takes an int length
 
   pixelData = (uint8_t *)stbi_load_from_memory((const stbi_uc *)imageFileData,
-                                               imageFileLength, &width, &height,
+                                               (int)imageFileLength, &width, &height,
                                                NULL, 4);
   GAME_ASSERT(pixelData);
 

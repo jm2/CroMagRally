@@ -15,7 +15,7 @@ static Boolean TestGatherScreen(void);
 Boolean gSimulationPaused;
 CommandLineOptions gCommandLine;
 float gFramesPerSecondFrac, gStartingLightTimer;
-long gNumCheckpoints = 1;
+int gNumCheckpoints = 1;
 short gWorstHumanPlace;
 static ObjNode playerModels[MAX_PLAYERS];
 static int unlockedAges;

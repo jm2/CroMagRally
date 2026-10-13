@@ -212,9 +212,11 @@ OSErr LoadScoreboardFile(void);
 
 void ValidateResourceSize(Handle handle, int64_t count, size_t elementSize, const char* context);
 
+// ValidateResourceSize rejects counts whose total size exceeds INT32_MAX, so
+// narrowing the validated count to UnpackStructs' int parameter is safe.
 #define UNPACK_STRUCTS_HANDLE(format, type, n, handle)                         \
 do                                                                             \
 {                                                                              \
 	ValidateResourceSize((Handle) (handle), (n), sizeof(type), #type);          \
-	UnpackStructs((format), sizeof(type), (n), *(handle));                     \
+	UnpackStructs((format), sizeof(type), (int) (n), *(handle));               \
 } while(0)

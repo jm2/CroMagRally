@@ -173,7 +173,7 @@ void DrawTerrain(void);
 void KeepTerrainAliveForRender(void);
 void MarkSuperTilePlayerHere(SuperTileStatus *status, short playerNum);
 Boolean IsSuperTileUsedByPlayers(const SuperTileStatus *status, short playerToSkip);
-extern	void GetSuperTileInfo(long x, long z, long *superCol, long *superRow, long *tileCol, long *tileRow);
+extern	void GetSuperTileInfo(long x, long z, int *superCol, int *superRow, int *tileCol, int *tileRow);
 extern	void InitTerrainManager(void);
 float	GetTerrainY(float x, float z);
 float	GetMinTerrainY(float x, float z, short group, short type, float scale);

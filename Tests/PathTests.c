@@ -7,7 +7,7 @@
 	fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, #condition); \
 	exit(EXIT_FAILURE); } } while (0)
 
-long gNumSuperTilesDeep = 1, gNumSuperTilesWide = 1;
+int gNumSuperTilesDeep = 1, gNumSuperTilesWide = 1;
 extern SuperTilePathGridType** gSuperTilePathGrid;
 void* AllocPtr(long size) { void* p = calloc(1, size); CHECK(p); return p; }
 void SafeDisposePtr(void* p) { free(p); }

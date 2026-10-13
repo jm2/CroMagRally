@@ -29,7 +29,7 @@
 /*     VARIABLES      */
 /**********************/
 
-long				gNumCheckpoints;
+int				gNumCheckpoints;
 CheckpointDefType	gCheckpointList[MAX_CHECKPOINTS];
 
 short				gNumLapsThisRace = LAPS_PER_RACE;

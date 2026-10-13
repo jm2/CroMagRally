@@ -21,7 +21,7 @@ typedef struct
 
 //	short			numNubs;			// # nubs in path -- unused in-game
 //	PathPointType	**nubList;			// handle to nub list -- unused in-game
-	long			numPoints;			// # points in path
+	int32_t			numPoints;			// # points in path
 	PathPointType	**pointList;		// handle to calculated path points
 
 //	Rect			bBox;				// bounding box of path area -- unused in-game

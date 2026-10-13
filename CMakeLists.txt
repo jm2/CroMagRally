@@ -164,6 +164,12 @@ else()
 
 	message("Building SDL3 from source: " ${CMR_SDL_SOURCE_DIR})
 	add_subdirectory("${CMR_SDL_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/extern/SDL3" EXCLUDE_FROM_ALL)
+
+	# SDL compiles every platform's backends; on Apple most of them preprocess to
+	# empty objects, and libtool warns about each one.
+	if(CMAKE_GENERATOR STREQUAL "Xcode" AND TARGET SDL3-static)
+		set_property(TARGET SDL3-static PROPERTY XCODE_ATTRIBUTE_OTHER_LIBTOOLFLAGS "-no_warning_for_no_symbols")
+	endif()
 endif()
 
 #------------------------------------------------------------------------------

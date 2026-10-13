@@ -67,7 +67,7 @@ typedef struct
 {
 //	short			numNubs;			// # nubs in spline -- unused in-game
 //	SplinePointType	**nubList;			// handle to nub list -- unused in-game
-	long			numPoints;			// # points in spline
+	int32_t			numPoints;			// # points in spline
 	SplinePointType	**pointList;		// handle to calculated spline points
 	short			numItems;			// # items on the spline
 	SplineItemType	**itemList;			// handle to spline items
@@ -115,7 +115,7 @@ typedef struct
 
 typedef struct
 {
-	long 				parentBone;			 			// index to previous bone
+	int32_t				parentBone;			 			// index to previous bone
 	void				*ignored1;
 	OGLMatrix4x4		ignored2;
 	void				*ignored3;

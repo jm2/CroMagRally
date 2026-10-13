@@ -589,7 +589,7 @@ OGLVector3D	*delta;
 static void DrawParticleGroup(ObjNode *theNode)
 {
 float				scale,baseScale;
-long				g,p,n,i;
+int					g,p,n,i;
 OGLColorRGBA_Byte	*vertexColors;
 MOVertexArrayData	*geoData;
 OGLPoint3D		v[4],*camCoords,*coord;
@@ -1419,8 +1419,8 @@ OGLPoint3D			p;
 		{
 			theNode->SmokeTimer += SMOKE_TIMER;										// reset timer
 
-			particleGroup 	= theNode->SmokeParticleGroup;
-			magicNum 		= theNode->SmokeParticleMagic;
+			particleGroup 	= (int) theNode->SmokeParticleGroup;				// stored in ObjNode's long Special[] slots
+			magicNum 		= (int) theNode->SmokeParticleMagic;
 
 			if ((particleGroup == -1) || (!VerifyParticleGroupMagicNum(particleGroup, magicNum)))
 			{

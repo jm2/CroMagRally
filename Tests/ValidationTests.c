@@ -15,8 +15,8 @@
 } } while (0)
 
 SuperTileStatus **gSuperTileStatusGrid;
-long gNumSuperTilesDeep;
-long gNumSuperTilesWide;
+int gNumSuperTilesDeep;
+int gNumSuperTilesWide;
 Boolean gNetGameInProgress;
 short gMyNetworkPlayerNum;
 short gNumLocalPlayers;
