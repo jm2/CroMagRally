@@ -138,7 +138,7 @@ jobs:
 
   build-windows:
     needs: release_metadata
-    runs-on: windows-2022
+    runs-on: windows-2025
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -147,7 +147,7 @@ jobs:
           $ARTIFACT_NAME = python3 build.py --print-artifact-name
           echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $env:GITHUB_ENV
       - run: python3 build.py --dependencies
-      - run: python3 build.py --configure -G 'Visual Studio 17 2022'
+      - run: python3 build.py --configure -G 'Visual Studio 18 2026'
       - run: python3 build.py --build
       - run: python3 build.py --package
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -159,7 +159,7 @@ jobs:
 
   build-windows-arm64:
     needs: release_metadata
-    # Near-exact clone of build-windows; only runs-on changes (windows-2022 -> windows-11-arm)
+    # Near-exact clone of build-windows; only runs-on changes (windows-2025 -> windows-11-arm)
     # and `-A ARM64` is passed explicitly so the artifact name + VS platform are deterministic.
     runs-on: windows-11-arm
     timeout-minutes: 15
@@ -170,7 +170,7 @@ jobs:
           $ARTIFACT_NAME = python3 build.py --print-artifact-name -A ARM64
           echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $env:GITHUB_ENV
       - run: python3 build.py --dependencies
-      - run: python3 build.py --configure -G 'Visual Studio 17 2022' -A ARM64
+      - run: python3 build.py --configure -G 'Visual Studio 18 2026' -A ARM64
       - run: python3 build.py --build
       - run: python3 build.py --package
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

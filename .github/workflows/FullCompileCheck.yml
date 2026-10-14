@@ -1,7 +1,7 @@
 name: Full Compile Check
 
 # Run automatically on pull requests and pushes to master so compile breakage is caught
-# in CI (Linux x86_64/ARM64, Windows VS2022, macOS, Apple mobile and Android), plus
+# in CI (Linux x86_64/ARM64, Windows VS2026, macOS, Apple mobile and Android), plus
 # manual dispatch for ad-hoc checks.
 on:
   workflow_dispatch:
@@ -42,7 +42,7 @@ jobs:
           - { name: Linux/GCC, os: ubuntu-latest, packageflags: "--deb" }
           - { name: Linux/Clang, os: ubuntu-latest, prefix: "CC=clang CXX=clang++"}
           - { name: Linux/ARM64, os: ubuntu-24.04-arm }
-          - { name: Windows/VS2022, os: windows-2022, extraflags: "-G 'Visual Studio 17 2022'" }
+          - { name: Windows/VS2026, os: windows-2025, extraflags: "-G 'Visual Studio 18 2026'" }
           - { name: Mac, os: macos-latest }
 
     steps:

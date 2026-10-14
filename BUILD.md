@@ -49,8 +49,8 @@ If you want to build the game **manually** instead, the rest of this document de
 ## How to build the game manually on Windows
 
 1. Install the prerequisites:
-    - Visual Studio 2022 with the C++ toolchain
-    - [CMake](https://cmake.org/download/) 3.21+
+    - Visual Studio 2026 with the C++ toolchain (Visual Studio 2022 also works: pass `-G "Visual Studio 17 2022"` instead)
+    - [CMake](https://cmake.org/download/) 4.2+ (needed for the Visual Studio 2026 generator)
 1. Clone the repo **recursively**:
     ```
     git clone --recurse-submodules https://github.com/jm2/CroMagRally.git
@@ -58,7 +58,7 @@ If you want to build the game **manually** instead, the rest of this document de
     ```
 1. Prep the Visual Studio solution:
     ```
-    cmake -G "Visual Studio 17 2022" -A x64 -S . -B build
+    cmake -G "Visual Studio 18 2026" -A x64 -S . -B build
     ```
 1. Now you can open `build/CroMagRally.sln` in Visual Studio, or you can just go ahead and build the game:
     ```

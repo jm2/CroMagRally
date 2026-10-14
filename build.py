@@ -77,7 +77,7 @@ if SYSTEM == "Darwin":
     help_build = "build app from Xcode project"
     help_package = "package up the game into a DMG"
 elif SYSTEM == "Windows":
-    default_generator = "Visual Studio 17 2022"
+    default_generator = "Visual Studio 18 2026"
     if MACHINE == "ARM64":
         default_architecture = "ARM64"
     else:
